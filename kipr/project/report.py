@@ -21,8 +21,10 @@ import datetime as _dt
 import html
 import io
 import json
+import os
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from kipr.project.site import confined_file, load_json, SLUG_RE
@@ -107,6 +109,35 @@ def _fetch_kw() -> dict:
 _FETCH_KW = _fetch_kw() if cairosvg is not None else {}
 
 
+DATA_B64_RE = re.compile(rb'(href\s*=\s*["\'])data:([\w/+.-]+);base64,([^"\']*)')
+
+
+def pad_data_uris(data: bytes) -> bytes:
+    """KiCad writes embedded bitmaps (schematic images) as base64 without the trailing `=` padding and
+    with line breaks. Browsers accept that; cairosvg's decoder does not, so normalise them."""
+    def fix(m):
+        b64 = re.sub(rb"\s+", b"", m.group(3)).rstrip(b"=")
+        return m.group(1) + b"data:" + m.group(2) + b";base64," + b64 + b"=" * (-len(b64) % 4)
+    return DATA_B64_RE.sub(fix, data) if b"base64," in data else data
+
+
+def render_png(path: str, width: int, crop) -> bytes:
+    """PNG bytes of the SVG file at `width` px across (only the crop box, in viewBox units, if given).
+    Module-level so the report can run it in worker processes."""
+    data = pad_data_uris(Path(path).read_bytes())
+    if crop and view_box(data):
+        data = with_view_box(data, crop)  # render only the board area, not the whole page
+    return cairosvg.svg2png(bytestring=data, output_width=width, unsafe=False, **_FETCH_KW)
+
+
+def raster_jobs() -> int:
+    """Worker processes for rasterising: $KIPR_REPORT_JOBS, else the CPUs (at most 8)."""
+    try:
+        return max(1, int(os.environ.get("KIPR_REPORT_JOBS") or min(8, os.cpu_count() or 1)))
+    except ValueError:
+        return 1
+
+
 class Images:
     """Rasterise SVG exports inside OUT to PNG and diff them. Cached per (file, width, crop)."""
 
@@ -114,7 +145,30 @@ class Images:
         self.out = out
         self.can_raster = Image is not None and cairosvg is not None
         self._cache: dict = {}
+        self._png: dict = {}  # PNG bytes rendered ahead of time by prefetch()
         self.failed: list[str] = []
+
+    def prefetch(self, wanted, jobs: int | None = None) -> None:
+        """Render [(rel, slug, width, crop)] in parallel worker processes; raster() then only decodes.
+        Anything that fails here is simply rendered (and reported) again by raster()."""
+        jobs = raster_jobs() if jobs is None else jobs
+        todo = {}
+        for rel, slug, width, crop in wanted:
+            p = self.svg_path(rel, slug) if rel and width > 0 else None
+            if p and (rel, width, crop) not in self._cache:
+                todo[(rel, width, crop)] = str(p)
+        if not self.can_raster or jobs < 2 or len(todo) < 2:
+            return
+        try:
+            with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as pool:
+                futs = {k: pool.submit(render_png, path, k[1], k[2]) for k, path in todo.items()}
+                for k, f in futs.items():
+                    try:
+                        self._png[k] = f.result()
+                    except Exception:  # noqa: BLE001 - raster() retries and records the failure
+                        pass
+        except (OSError, RuntimeError):  # no process pool here (sandbox, frozen app): render serially
+            pass
 
     def svg_path(self, rel, slug: str) -> Path | None:
         p = confined_file(self.out, rel, slug)
@@ -131,10 +185,7 @@ class Images:
         p = self.svg_path(rel, slug)
         if p and self.can_raster and width > 0:
             try:
-                data = p.read_bytes()
-                if crop and view_box(data):
-                    data = with_view_box(data, crop)  # render only the board area, not the whole page
-                png = cairosvg.svg2png(bytestring=data, output_width=width, unsafe=False, **_FETCH_KW)
+                png = self._png.pop(key, None) or render_png(str(p), width, crop)
                 img = Image.open(io.BytesIO(png)).convert("RGBA")
             except Exception as e:  # noqa: BLE001 - a broken export must not break the report
                 self.failed.append(f"{rel}: {type(e).__name__}")
@@ -288,19 +339,47 @@ def schematic_section(imgs, slug, sch, width) -> str:
     return "\n".join(out)
 
 
+def board_crop(pcb):
+    """The board's box plus a margin in KiCad mm (x, y, w, h), or None."""
+    b = d(d(pcb).get("board"))
+    o, s = b.get("origin_mm"), b.get("size_mm")
+    if isinstance(o, list) and isinstance(s, list) and len(o) == 2 and len(s) == 2 and all(num(x) is not None for x in o + s):
+        m = max(2.0, max(s) * 0.03)
+        return (o[0] - m, o[1] - m, s[0] + 2 * m, s[1] + 2 * m)
+    return None
+
+
+def changed_layers(pcb) -> list:
+    layers = [d(l) for l in lst(d(pcb).get("layers"))]
+    return [l for l in layers if l.get("status") not in (None, "unchanged") and l.get("kind") != "drill"]
+
+
+def changed_sheets(sch) -> list:
+    return [s for s in (d(x) for x in lst(d(sch).get("sheets"))) if s.get("status") != "unchanged"]
+
+
+def wanted_images(projects, width_sheet: int, width_layer: int) -> list:
+    """Every (rel, slug, width, crop) raster the sections below will ask for."""
+    out = []
+    for p in projects:
+        slug = p["slug"]
+        if width_sheet > 0:
+            for s in changed_sheets(p.get("schematic")):
+                out += [(s.get("base"), slug, width_sheet, None), (s.get("head"), slug, width_sheet, None)]
+        if width_layer > 0:
+            crop = board_crop(p.get("pcb"))
+            for l in changed_layers(p.get("pcb")):
+                out += [(d(l.get(side)).get("svg"), slug, width_layer, crop) for side in ("base", "head")]
+    return out
+
+
 def pcb_section(imgs, slug, pcb, width) -> str:
     pcb = d(pcb)
     if not pcb:
         return ""
     out = ['<h3>Layout</h3>', table(CHANGE_HEAD, change_rows(pcb.get("changes")))]
-    b = d(pcb.get("board"))
-    crop = None
-    o, s = b.get("origin_mm"), b.get("size_mm")
-    if isinstance(o, list) and isinstance(s, list) and len(o) == 2 and len(s) == 2 and all(num(x) is not None for x in o + s):
-        m = max(2.0, max(s) * 0.03)
-        crop = (o[0] - m, o[1] - m, s[0] + 2 * m, s[1] + 2 * m)
-    layers = [d(l) for l in lst(pcb.get("layers"))]
-    changed = [l for l in layers if l.get("status") not in (None, "unchanged") and l.get("kind") != "drill"]
+    crop = board_crop(pcb)
+    changed = changed_layers(pcb)
     if changed and width > 0:
         for l in changed:
             out.append(f'<h4>{esc(l.get("id"))} {status_badge(l.get("status"))}</h4>')
@@ -398,6 +477,7 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
         link = f'<a href="{esc(repo)}/commit/{esc(sha)}"><code>{label}</code></a>' if repo and sha else f"<code>{label}</code>"
         return f"{esc(s.get('ref') or '')} {link}"
 
+    imgs.prefetch(wanted_images(projects, width_sheet, width_layer))
     tool = d(review.get("tool"))
     parts = [f"<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width, initial-scale=1'>"
              f"<meta http-equiv=Content-Security-Policy content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">"

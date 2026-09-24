@@ -3,6 +3,7 @@
     python3 -m unittest discover -s tests/web-project -p 'test_*.py'
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -187,6 +188,42 @@ class ReportTest(unittest.TestCase):
         small = report.make_report(self.out, self.tmp / "small.html", max_mb=0.01).read_text()  # smaller than the page without images: last level
         self.assertNotIn("data:image", small)
         self.assertIn("all images left out", small)
+
+    def test_parallel_raster_same_page(self):
+        """The worker-process prefetch changes nothing but speed."""
+        strip = lambda t: re.sub(r"generated [^<]*UTC", "", t)  # noqa: E731
+        serial = self.tmp / "serial.html"
+        old = os.environ.get("KIPR_REPORT_JOBS")
+        os.environ["KIPR_REPORT_JOBS"] = "1"
+        try:
+            report.make_report(self.out, serial)
+        finally:
+            os.environ.pop("KIPR_REPORT_JOBS") if old is None else os.environ.__setitem__("KIPR_REPORT_JOBS", old)
+        imgs = report.Images(self.out)
+        review = json.loads((self.out / "project-review.json").read_text())
+        wanted = report.wanted_images(review["projects"], 1600, 1000)
+        self.assertTrue(len(wanted) > 4)
+        imgs.prefetch(wanted, jobs=2)
+        self.assertTrue(imgs._png)
+        self.assertEqual(strip(serial.read_text()), strip(self.path.read_text()))
+
+    def test_unpadded_embedded_bitmap(self):
+        """KiCad 10 schematic images: base64 with line breaks and no `=` padding."""
+        import base64, io
+        from PIL import Image
+        for w in range(3, 12):  # a PNG whose base64 needs padding
+            buf = io.BytesIO()
+            Image.new("RGB", (w, 2), (200, 30, 30)).save(buf, "PNG")
+            if len(buf.getvalue()) % 3:
+                break
+        b64 = base64.b64encode(buf.getvalue()).decode().rstrip("=")
+        self.assertNotEqual(len(b64) % 4, 0)
+        b64 = b64[:20] + "\n" + b64[20:]
+        svg = self.tmp / "img.svg"
+        svg.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 30 20">'
+                       f'<image x="0" y="0" width="30" height="20" xlink:href="data:image/png;base64,{b64}"/></svg>')
+        png = report.render_png(str(svg), 60, None)
+        self.assertEqual(Image.open(io.BytesIO(png)).convert("RGB").getpixel((30, 20)), (200, 30, 30))
 
     def test_ink_diff_classes(self):
         if report.Image is None:
