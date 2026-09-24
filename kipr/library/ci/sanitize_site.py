@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """Copy an UNTRUSTED review artifact into a clean site directory.
 
 The `component-review` artifact is produced by code from the pull request (which may be a
 fork), so before it is published on the repo's GitHub Pages origin we:
 
   * keep only data files with allow-listed extensions (no HTML/JS/CSS: the viewer is copied
-    in afterwards from the trusted default-branch checkout by viewer/build_site.py);
+    in afterwards from trusted kipr code by `kipr library site`);
   * drop symlinks, odd names, oversized files and anything outside the tree;
   * drop SVGs containing active content (scripts, event handlers, foreignObject, external refs);
   * cap file sizes (STEP models 25 MB, PDFs 30 MB, others 10 MB) and the whole site
@@ -14,7 +13,7 @@ fork), so before it is published on the repo's GitHub Pages origin we:
   * drop review.json / review.md (the publish job regenerates them with trusted code);
   * require manifest.json to be valid JSON.
 
-Usage: sanitize_site.py --src UNTRUSTED_DIR --dst CLEAN_DIR
+Usage: kipr library ci sanitize-site --src UNTRUSTED_DIR --dst CLEAN_DIR
 """
 from __future__ import annotations
 
@@ -26,8 +25,7 @@ import shutil
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import SLUG_RE, log  # noqa: E402
+from .common import SLUG_RE, log
 
 ALLOWED_EXT = {
     ".json", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".glb", ".patch", ".diff",
@@ -177,7 +175,8 @@ def sanitize(src: Path, dst: Path, max_total: int = MAX_TOTAL) -> dict:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci sanitize-site", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--src", required=True, type=Path)
     ap.add_argument("--dst", required=True, type=Path)
     ap.add_argument("--max-site-mb", type=int, default=MAX_TOTAL // MB)

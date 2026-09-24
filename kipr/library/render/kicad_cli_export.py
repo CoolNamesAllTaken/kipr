@@ -9,13 +9,14 @@ from __future__ import annotations
 import glob
 import os
 import shutil
-import subprocess
 import tempfile
+
+from kipr.common import kicad_cli
 
 
 def _run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    return r.returncode == 0, (r.stderr or r.stdout).strip()
+    r = kicad_cli.run(cmd[0], *cmd[1:])
+    return r.ok, r.message
 
 
 def export(kc, git, head_sha, base_sha, items, entries, out):

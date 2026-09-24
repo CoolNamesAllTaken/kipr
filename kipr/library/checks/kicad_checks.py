@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import re
 
-from sexpr import Node
+from kipr.common.sexpr import Node
 
 MM_PER_MIL = 0.0254
 GRID_100MIL = 2.54
@@ -266,8 +266,11 @@ def _natkey(s: str):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s)]
 
 
-def check_footprint(fp: Node, lm: LineMap, model3d_manifest: list | None, repo_path_exists=None):
-    """Returns (findings, checks). `repo_path_exists(relpath)->bool|None` optional."""
+def check_footprint(fp: Node, lm: LineMap, model3d_manifest: list | None, repo_path_exists=None,
+                    models_dir: str = "lib_3d"):
+    """Returns (findings, checks). `repo_path_exists(relpath)->bool|None` optional.
+    `models_dir`: the repo's 3D model directory (only used in messages)."""
+    md = models_dir.rstrip("/") + "/" if models_dir else ""
     F, C = [], []
     props = _props(fp)
     pads = parse_pads(fp)
@@ -386,13 +389,14 @@ def check_footprint(fp: Node, lm: LineMap, model3d_manifest: list | None, repo_p
     C.append(check("3D model present", "pass" if models else ("unknown" if virtual else "fail")))
     if not models and not virtual:
         F.append(finding("warning", "Footprint has no 3D model.", lm(fp.line),
-                         "Add a STEP model under lib_3d/<library>/ referenced via ${KICAD_LIBS_DIR}."))
+                         f"Add a STEP model under {md}<library>/ referenced via ${{KICAD_LIBS_DIR}}."))
     man = {m.get("path_raw"): m for m in (model3d_manifest or [])}
     for m in models:
         path = m.atom(0, "") or ""
         if not path.startswith(KICAD_LIBS_PREFIX):
-            F.append(finding("warning", f"3D model path `{path}` does not use `${{KICAD_LIBS_DIR}}/lib_3d/...`.",
-                             lm(m.line), "Vendor the model into lib_3d/ and reference it via ${KICAD_LIBS_DIR} so it resolves for everyone."))
+            F.append(finding("warning", f"3D model path `{path}` does not use `${{KICAD_LIBS_DIR}}/{md}...`.",
+                             lm(m.line), f"Vendor the model into {md or 'the repository'} and reference it via "
+                             "${KICAD_LIBS_DIR} so it resolves for everyone."))
         # Only models inside this repo can be verified; stock ${KICADn_3DMODEL_DIR} paths
         # are covered by the path warning above.
         exists = None

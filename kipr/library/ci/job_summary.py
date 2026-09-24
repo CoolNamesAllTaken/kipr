@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Job summary and inline annotations for the component-review run (no token needed).
 
-    job_summary.py --out cr-out [--annotate] [--summary FILE] [--link NAME=URL ...]
+    kipr library ci job-summary --out cr-out [--annotate] [--summary FILE] [--link NAME=URL ...]
 
 --annotate prints `::error file=…,line=…::` / `::warning …::` workflow commands for the
 findings that have a file (GitHub shows them in the PR's "Files changed" view and on the
@@ -17,9 +16,8 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import (SEVERITY_RANK, finding_line_no, findings_of, item_review, load_site,  # noqa: E402
-                    md_inline, overall_verdict, safe_http_url, safe_repo_path, verdict_of)
+from .common import (SEVERITY_RANK, finding_line_no, findings_of, item_review, load_site,
+                     md_inline, overall_verdict, safe_http_url, safe_repo_path, verdict_of)
 
 MAX_ANNOTATIONS = 50        # GitHub's per-job cap
 MAX_SUMMARY = 900_000       # the step summary limit is 1 MiB
@@ -100,7 +98,8 @@ def summary(site: Path, manifest, review, links: list[tuple[str, str]]) -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci job-summary", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--annotate", action="store_true")
     ap.add_argument("--summary", type=Path)

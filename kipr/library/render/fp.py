@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import re
 
-from geom import BBox, arc_mid_from_center, arc_path, arc_points, f, rot, text_el, text_extent
-from sexpr import Atom, Node
+from kipr.common.sexpr import Atom, Node
+
+from .geom import BBox, arc_mid_from_center, arc_path, arc_points, f, rot, text_el, text_extent
 
 # KiCad 10 default ("KiCad Default") PCB colour theme, approximately.
 LAYER_COLORS = {

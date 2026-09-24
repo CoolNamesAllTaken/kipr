@@ -2,7 +2,7 @@
 
 Resolves ``${KICAD<N>_3DMODEL_DIR}/<lib>.3dshapes/<file>`` against the official kicad-packages3D
 repository at a pinned tag, over https only, with per-file and total size caps and a local cache
-(``--stock-models-dir`` / ``$CR_STOCK_MODELS_DIR``, default ``~/.cache/cr-render/kicad-packages3D``;
+(``--stock-models-dir`` / ``$CR_STOCK_MODELS_DIR``, default ``~/.cache/kipr/kicad-packages3D``;
 layout ``<dir>/<tag>/<lib>.3dshapes/<file>``; files already present are reused, never re-downloaded).
 Pinned tags live in ``stock_models_tag.txt`` next to this file.
 """
@@ -49,7 +49,7 @@ class StockFetcher:
         self.downloaded = 0
         self.timeout = timeout
         base = cache_dir or os.environ.get("CR_STOCK_MODELS_DIR") or os.path.join(
-            os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "cr-render", "kicad-packages3D")
+            os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "kipr", "kicad-packages3D")
         self.cache = base
 
     def parse(self, path_raw: str):
@@ -102,7 +102,7 @@ class StockFetcher:
             raise ValueError("refusing non-https / unexpected host")
         if self.downloaded >= self.max_total:
             raise RuntimeError("total download cap reached")
-        req = urllib.request.Request(url, headers={"User-Agent": "kicad-libs-component-review/1"})
+        req = urllib.request.Request(url, headers={"User-Agent": "kipr-library-review/1"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:  # noqa: S310 (https + host checked)
             final = urllib.parse.urlparse(r.geturl())
             if final.scheme != "https":

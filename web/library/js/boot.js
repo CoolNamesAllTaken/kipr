@@ -3,7 +3,7 @@
 //   http(s)  (GitHub Pages, serve.py): tighten the CSP back to what the ES-module app needs (no eval,
 //            workers only from 'self') and load js/app.js as a module, exactly as before.
 //   file://  browsers block module scripts, fetch() and file workers there, so load data.js
-//            (manifest + review + diffs, written by build_site.py) and js/bundle.js, the same modules
+//            (manifest + review + diffs, written by kipr library site) and js/bundle.js, the same modules
 //            concatenated into one classic script. The 3D view then starts its STEP worker from a blob:
 //            URL, and occt-import-js needs 'unsafe-eval' in such a worker (index.html allows it for that).
 (function () {

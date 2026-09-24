@@ -5,6 +5,10 @@ callers can cut an item's exact text out of a library file.
 
 Atoms: quoted strings become ``str``; bare tokens become ``Atom`` (a str
 subclass), so ``hide`` (flag) and ``"hide"`` (text) can be told apart.
+
+Shared by every kipr reviewer. Besides the list-style API (``node[0]`` is the head token,
+``arg``/``value``/``nums``/``flag``) it offers ``line``, ``items``, ``atom``, ``floats``,
+``has_flag`` and ``walk``, the API of the library checks' former stand-alone parser.
 """
 
 from __future__ import annotations
@@ -72,6 +76,39 @@ class Node(list):
             except ValueError:
                 pass
         return out
+
+    # --- line/item view (the library checks' API) --------------------------------
+    @property
+    def line(self) -> int:
+        """1-based line of the opening parenthesis."""
+        return self.line_start
+
+    @property
+    def items(self) -> list:
+        """Everything after the head token: atoms and child nodes, in order."""
+        return list(self[1:])
+
+    def atom(self, i: int = 0, default=None):
+        """Same as ``arg``."""
+        return self.arg(i, default)
+
+    def floats(self) -> list[float]:
+        """The numeric atoms of this node."""
+        return self.nums()
+
+    def has_flag(self, flag: str) -> bool:
+        """True for a bare or quoted atom ``flag``, ``(flag)`` or ``(flag yes)``."""
+        if flag in self.atoms():
+            return True
+        c = self.child(flag)
+        return c is not None and c.arg(0) in (None, "yes")
+
+    def walk(self):
+        """This node and all descendant nodes, depth first."""
+        yield self
+        for c in self[1:]:
+            if isinstance(c, Node):
+                yield from c.walk()
 
     def flag(self, name: str) -> bool:
         """True for ``(name yes)``, ``(name)`` or a bare ``name`` atom (old formats)."""

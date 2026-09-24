@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Publish (or remove) one PR's preview under pr/<N>/ on the gh-pages branch.
 
 Other PRs' directories are left alone. Pushes are retried: on a rejected push (another PR's
@@ -9,8 +8,8 @@ The token (GITHUB_TOKEN) is passed to git through GIT_CONFIG_* environment varia
 is never written to disk or to a remote URL.
 
 Usage:
-  deploy_pages.py --repo owner/repo --pr N --site DIR [--push] [--remote URL] [--branch gh-pages]
-  deploy_pages.py --repo owner/repo --pr N --delete [--push] ...
+  kipr library ci deploy-pages --repo owner/repo --pr N --site DIR [--push] [--remote URL] [--branch gh-pages]
+  kipr library ci deploy-pages --repo owner/repo --pr N --delete [--push] ...
 Without --push the commit is made in a temp clone and the resulting tree is summarized.
 Writes step output `sha` (the gh-pages commit that contains the preview).
 """
@@ -26,8 +25,7 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import check_repo, log, parse_pr_number, write_outputs  # noqa: E402
+from .common import check_repo, log, parse_pr_number, write_outputs
 
 ROOT_INDEX = """<!doctype html>
 <meta charset="utf-8">
@@ -121,7 +119,8 @@ def deploy(repo: str, pr: int, site: Path | None, *, remote: str, branch: str, p
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci deploy-pages", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", required=True)
     ap.add_argument("--pr", required=True)
     g = ap.add_mutually_exclusive_group(required=True)

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Publish component-review results to a pull request.
 
   1. inline review (event COMMENT) on .kicad_mod/.kicad_sym lines for error/warning findings
@@ -12,11 +11,11 @@ if a token / `gh auth` login is available; use --files-json to work fully offlin
 the comment markdown and the review/check payloads.
 
 Usage:
-  post_review.py --site SITE --repo owner/repo --pr N --head-sha SHA [--pages-sha SHA]
+  kipr library ci post-review --site SITE --repo owner/repo --pr N --head-sha SHA [--pages-sha SHA]
                  [--pages-url URL] [--artifact-url URL] [--run-url URL] [--note TEXT]
                  [--fail-conclusion neutral|failure|success] [--no-check] [--dry-run]
                  [--files-json FILE] [--comment-out FILE]
-  post_review.py --mark-closed --repo owner/repo --pr N      # after the preview was deleted
+  kipr library ci post-review --mark-closed --repo owner/repo --pr N      # after the preview was deleted
 """
 from __future__ import annotations
 
@@ -27,11 +26,10 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import (FINDING_MARKER_RE, MARKER, GitHub, check_repo, check_sha, findings_of,  # noqa: E402
-                    item_review, load_site, log, md_block, md_inline, overall_verdict,
-                    parse_pr_number, safe_repo_path)
-from make_comment import Ctx, build_comment, default_pages_url, finding_key, pr_findings_of  # noqa: E402
+from .common import (FINDING_MARKER_RE, MARKER, GitHub, check_repo, check_sha, findings_of,
+                     item_review, load_site, log, md_block, md_inline, overall_verdict,
+                     parse_pr_number, safe_repo_path)
+from .make_comment import Ctx, build_comment, default_pages_url, finding_key, pr_findings_of
 
 BOT_LOGIN = os.environ.get("CR_BOT_LOGIN", "github-actions[bot]")
 INLINE_EXT = (".kicad_mod", ".kicad_sym")
@@ -180,7 +178,8 @@ def mark_closed(gh: GitHub, repo: str, pr: int) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci post-review", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--site", type=Path)
     ap.add_argument("--repo", required=True)
     ap.add_argument("--pr", required=True)

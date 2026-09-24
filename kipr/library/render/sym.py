@@ -8,8 +8,9 @@ from __future__ import annotations
 import math
 import re
 
-from geom import BBox, arc_mid_from_center, arc_path, arc_points, f, text_el, text_extent
-from sexpr import Node
+from kipr.common.sexpr import Node
+
+from .geom import BBox, arc_mid_from_center, arc_path, arc_points, f, text_el, text_extent
 
 # KiCad default schematic colours
 C_BODY = "#840000"

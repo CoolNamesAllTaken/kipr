@@ -80,7 +80,7 @@ export function githubUrl(repo, ...parts) {
 export const shortSha = (s) => (typeof s === 'string' ? s.slice(0, 8) : '?');
 
 // --- offline (file://) mode ----------------------------------------------------------------------------
-// Opened from a downloaded artifact, browsers refuse fetch() of file:// URLs. build_site.py then provides
+// Opened from a downloaded artifact, browsers refuse fetch() of file:// URLs. kipr library site then provides
 // data.js (window.CR_DATA = {manifest, review, texts}) and one offline/<slug>.js per item with the files the
 // 3D view needs (window.CR_PACKS[slug] = {files: {<asset url>: {text} | {b64}}}), loaded on demand with <script>.
 

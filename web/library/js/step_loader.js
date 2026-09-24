@@ -1,7 +1,7 @@
 // Main-thread side of step_worker.js: one shared worker, requests queued by id, results cached per URL.
 //
 // Served over http(s) the worker fetches the STEP file itself. Opened from file:// (a downloaded artifact)
-// the page can neither start a worker from a file nor fetch files, so the bundle (build_site.py) provides
+// the page can neither start a worker from a file nor fetch files, so the bundle (kipr library site) provides
 // the worker's source (window.CR_STEP_WORKER_SRC) to start it from a blob: URL, and the model bytes come from
 // the item's offline pack. If no worker can be started at all, occt-import-js runs on the main thread.
 import { OCCT_JS, OCCT_WASM } from './config.js';

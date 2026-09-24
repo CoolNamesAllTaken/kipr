@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate the untrusted `pr-meta` artifact and confirm it against the GitHub API.
 
 The unprivileged run writes pr.json = {"pr": N, "head_sha": ..., ...}. For fork PRs
@@ -9,7 +8,7 @@ sets, not the PR).
 
 Writes step outputs: skip=true|false, reason, pr, head_sha, base_sha, merge_base.
 
-Usage: resolve_pr.py --meta pr.json --repo owner/repo --run-head-sha SHA [--allow-closed]
+Usage: kipr library ci resolve-pr --meta pr.json --repo owner/repo --run-head-sha SHA [--allow-closed]
 """
 from __future__ import annotations
 
@@ -17,8 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import GitHub, check_repo, check_sha, load_json, log, parse_pr_number, write_outputs  # noqa: E402
+from .common import GitHub, check_repo, check_sha, load_json, log, parse_pr_number, write_outputs
 
 
 def resolve(meta: dict, repo: str, run_head_sha: str, gh: GitHub, allow_closed: bool = False) -> dict:
@@ -45,7 +43,8 @@ def resolve(meta: dict, repo: str, run_head_sha: str, gh: GitHub, allow_closed: 
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci resolve-pr", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--meta", required=True, type=Path)
     ap.add_argument("--repo", required=True)
     ap.add_argument("--run-head-sha", required=True)

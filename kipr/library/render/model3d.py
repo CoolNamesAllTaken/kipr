@@ -27,7 +27,7 @@ from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-from geom import arc_points
+from .geom import arc_points
 
 BOARD_T = 1.6
 CU_T = 0.035
@@ -262,7 +262,7 @@ def _build_scene(fp, model_files, lin, ang, include_models):
     # board outline: courtyard bbox (fallback: everything) + margin
     crt = fp.courtyard_bbox("F") or fp.courtyard_bbox("B")
     if crt is None:
-        from fp import footprint_bbox
+        from .fp import footprint_bbox
         bb = footprint_bbox(fp)
         crt = bb.as_list() or [-5, -5, 5, 5]
         warnings.append("no courtyard; PCB sized from footprint extents")

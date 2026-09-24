@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """Component review renderer for a KiCad library repo.
 
 Finds the footprints/symbols added, modified or deleted between two git refs and writes
 OUT/manifest.json plus per-item assets (SVG/PNG renders, diff overlay, GLB, sources) as
-described in cr-shared/CONTRACT.md.
+described in docs/library.md.
 
-    python3 tools/component-review/render/cr_render.py --repo . --base <ref> --head <ref> --out <dir> [--pr N]
+    kipr library render --repo . --base <ref> --head <ref> --out <dir> [--pr N]
 """
 
 from __future__ import annotations
@@ -17,28 +16,25 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
 import traceback
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kipr.common import git as gitmod
+from kipr.common.sexpr import dumps, parse
 
-import fp as fpmod  # noqa: E402
-import sym as symmod  # noqa: E402
-from sexpr import dumps, parse  # noqa: E402
+from .. import layout as layoutmod
+from . import fp as fpmod
+from . import sym as symmod
 
-REPO_NAME_DEFAULT = "PantsForBirds/kicad-libs"
-FP_RE = re.compile(r"^lib_fp/(?P<lib>[^/]+)\.pretty/(?:.*/)?(?P<name>[^/]+)\.kicad_mod$")
-SYM_RE = re.compile(r"^lib_sch/(?P<lib>[^/]+)\.kicad_sym$")
 MODEL_EXTS = (".step", ".stp", ".wrl", ".STEP", ".STP", ".WRL")
 URL_RE = re.compile(r"https?://[^\s\"'<>)]+")
 NOT_LOCAL_VARS = re.compile(r"^\$\{(KICAD\d*_3DMODEL_DIR|KISYS3DMOD|KICAD\d*_3RD_PARTY)\}")
 
 
 def log(*a):
-    print("[cr_render]", *a, file=sys.stderr, flush=True)
+    print("[kipr render]", *a, file=sys.stderr, flush=True)
 
 
 def slugify(kind: str, library: str, name: str) -> str:
@@ -49,47 +45,15 @@ def slugify(kind: str, library: str, name: str) -> str:
 # git access
 # ---------------------------------------------------------------------------
 
-class Git:
-    def __init__(self, repo: str):
-        self.repo = repo
-        self._cache: dict[tuple[str, str], bytes | None] = {}
+class Git(gitmod.Git):
+    """kipr.common.git.Git that knows the library layout (which paths count as parts)."""
 
-    def run(self, *args, check=True) -> str:
-        r = subprocess.run(["git", "-C", self.repo, *args], capture_output=True, text=True)
-        if check and r.returncode != 0:
-            raise RuntimeError(f"git {' '.join(args)} failed: {r.stderr.strip()}")
-        return r.stdout
+    def __init__(self, repo: str, layout: layoutmod.Layout | None = None):
+        super().__init__(repo)
+        self.layout = layout or layoutmod.Layout()
 
-    def rev(self, ref: str) -> str:
-        return self.run("rev-parse", "--verify", f"{ref}^{{commit}}").strip()
-
-    def show(self, sha: str, path: str) -> bytes | None:
-        key = (sha, path)
-        if key not in self._cache:
-            r = subprocess.run(["git", "-C", self.repo, "show", f"{sha}:{path}"], capture_output=True)
-            self._cache[key] = r.stdout if r.returncode == 0 else None
-        return self._cache[key]
-
-    def text(self, sha: str, path: str) -> str | None:
-        b = self.show(sha, path)
-        return b.decode("utf-8", errors="replace") if b is not None else None
-
-    def exists(self, sha: str, path: str) -> bool:
-        r = subprocess.run(["git", "-C", self.repo, "cat-file", "-e", f"{sha}:{path}"], capture_output=True)
-        return r.returncode == 0
-
-    def ls(self, sha: str, prefix: str) -> list[str]:
-        out = self.run("ls-tree", "-r", "--name-only", sha, "--", prefix, check=False)
-        return [l for l in out.splitlines() if l]
-
-    def changed(self, base: str, head: str) -> list[tuple[str, str]]:
-        out = self.run("diff", "--name-status", "--no-renames", base, head, "--", "lib_fp", "lib_sch", "lib_3d")
-        res = []
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 2:
-                res.append((parts[0][0], parts[-1]))
-        return res
+    def changed(self, base: str, head: str, paths=None) -> list[tuple[str, str]]:
+        return super().changed(base, head, self.layout.diff_paths() if paths is None else paths)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +94,7 @@ def _norm(s: str) -> str:
 
 
 def match_datasheet(candidates: list[str], names: list[str], url: str | None) -> str | None:
-    """Pick a datasheets/*.pdf whose stem matches the part name / value / url basename."""
+    """Pick a <datasheets dir>/*.pdf whose stem matches the part name / value / url basename."""
     keys = [_norm(n) for n in names if n and len(_norm(n)) >= 4]
     if url:
         base = os.path.splitext(os.path.basename(url.split("?")[0]))[0]
@@ -207,11 +171,13 @@ class Item:
 
 
 def discover(git: Git, base: str, head: str) -> tuple[list[Item], set[str]]:
+    lay = git.layout
+    fp_re, sym_re = lay.fp_re, lay.sym_re
     changes = git.changed(base, head)
     items: dict[str, Item] = {}
-    changed_models = {p for st, p in changes if p.startswith("lib_3d/")}
+    changed_models = {p for st, p in changes if lay.is_model(p)}
     for st, path in changes:
-        m = FP_RE.match(path)
+        m = fp_re.match(path)
         if m:
             status = {"A": "added", "D": "deleted"}.get(st, "modified")
             it = Item("footprint", m.group("lib"), m.group("name"), path, status)
@@ -230,7 +196,7 @@ def discover(git: Git, base: str, head: str) -> tuple[list[Item], set[str]]:
                 it.name = str(it.head_node.arg(0, it.name)) or it.name
             items[it.id] = it
             continue
-        m = SYM_RE.match(path)
+        m = sym_re.match(path)
         if m:
             lib = m.group("lib")
             bt = git.text(base, path) if st != "A" else None
@@ -270,8 +236,8 @@ def discover(git: Git, base: str, head: str) -> tuple[list[Item], set[str]]:
                 items[it.id] = it
     # footprints whose 3D model file changed (even if the .kicad_mod did not)
     if changed_models:
-        for path in git.ls(head, "lib_fp"):
-            m = FP_RE.match(path)
+        for path in git.ls(head, lay.pathspec(lay.fp)):
+            m = fp_re.match(path)
             if not m:
                 continue
             txt = git.text(head, path) or ""
@@ -308,7 +274,7 @@ def discover(git: Git, base: str, head: str) -> tuple[list[Item], set[str]]:
 
 def referenced_models(git: Git, head: str) -> set[str]:
     refs = set()
-    for path in git.ls(head, "lib_fp"):
+    for path in git.ls(head, git.layout.pathspec(git.layout.fp)):
         if not path.endswith(".kicad_mod"):
             continue
         for raw in re.findall(r'\(model\s+"([^"]+)"', git.text(head, path) or ""):
@@ -341,23 +307,24 @@ def symbol_source(root, lib: dict, node, text: str) -> str:
 class Renderer:
     def __init__(self, args, git: Git, base_sha: str, head_sha: str, out: str):
         self.args, self.git, self.base_sha, self.head_sha, self.out = args, git, base_sha, head_sha, out
-        self.datasheets = git.ls(head_sha, "datasheets")
+        self.layout = git.layout
+        self.datasheets = git.ls(head_sha, self.layout.pathspec(self.layout.datasheets))
         self.png_ok = True
         self._model_files: dict[str, dict] = {}
         self.stock = None
         if args.fetch_stock_models:
-            import stock
+            from . import stock
             self.stock = stock.StockFetcher(tag=args.stock_models_tag, max_file_mb=args.stock_max_file_mb,
                                             max_total_mb=args.stock_max_total_mb,
                                             cache_dir=args.stock_models_dir)
         self._model_n = 0
-        self.tmpdir = tempfile.mkdtemp(prefix="cr_render_")
+        self.tmpdir = tempfile.mkdtemp(prefix="kipr_render_")
         try:
             import cairosvg  # noqa: F401
         except Exception:
             self.png_ok = False
         try:
-            import model3d  # noqa: F401
+            from . import model3d
             self.model3d = model3d
         except Exception as e:
             self.model3d = None
@@ -447,7 +414,7 @@ class Renderer:
                 if entry["properties"][side]:
                     entry["properties"][side].pop("__descr", None)
         local = match_datasheet(self.datasheets, [it.name, props.get("Value", "")], url)
-        if ds and not URL_RE.match(ds) and ds not in ("~", "") and ds.startswith("datasheets/"):
+        if ds and not URL_RE.match(ds) and ds not in ("~", "") and ds.startswith(self.layout.datasheets + "/" if self.layout.datasheets else ""):
             local = ds if ds in self.datasheets else local
         entry["datasheet"]["url"] = url
         if local:
@@ -478,7 +445,7 @@ class Renderer:
             entry["properties"][side] = props
             entry["stats"][side] = m.stats()
         # shared view box
-        from geom import BBox
+        from .geom import BBox
         bb = BBox()
         for m in fps.values():
             bb.add_box(fpmod.footprint_bbox(m))
@@ -528,11 +495,12 @@ class Renderer:
         self._models(it, entry, fps, d, rel)
 
     def _sym_index(self):
-        """{footprint 'Lib:Name': [(lib, symbol name, root, libdict, node, text)]} over head lib_sch."""
+        """{footprint 'Lib:Name': [(lib, symbol name, root, libdict, node, text)]} over the head symbol libs."""
         if getattr(self, "_symidx", None) is None:
             self._symidx = {}
-            for path in self.git.ls(self.head_sha, "lib_sch"):
-                m = SYM_RE.match(path)
+            sym_re = self.layout.sym_re
+            for path in self.git.ls(self.head_sha, self.layout.pathspec(self.layout.sym)):
+                m = sym_re.match(path)
                 if not m:
                     continue
                 text = self.git.text(self.head_sha, path) or ""
@@ -782,22 +750,23 @@ def kicad_version(items: list[Item]) -> str:
     return "10.0"
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--repo", default=".", help="path to the kicad-libs git repo")
+def add_arguments(ap):
+    ap.add_argument("--repo", default=".", help="path to the library's git repo")
     ap.add_argument("--base", required=True, help="base ref (diff is base...head, i.e. from the merge base)")
     ap.add_argument("--head", required=True, help="head ref")
     ap.add_argument("--out", required=True, help="output directory (static site root)")
     ap.add_argument("--pr", type=int, default=None, help="PR number for the manifest")
-    ap.add_argument("--repo-name", default=os.environ.get("GITHUB_REPOSITORY", REPO_NAME_DEFAULT))
+    ap.add_argument("--repo-name", default=os.environ.get("GITHUB_REPOSITORY"),
+                    help="owner/repo for GitHub links (default: $GITHUB_REPOSITORY, else the github.com "
+                         "'origin' remote of --repo)")
     ap.add_argument("--no-3d", action="store_true", help="skip GLB generation")
     ap.add_argument("--fetch-stock-models", action="store_true",
                     help="download ${KICAD*_3DMODEL_DIR} models from gitlab.com/kicad/libraries/kicad-packages3D "
-                         "at a pinned tag (https only, cached in ~/.cache/cr-render)")
+                         "at a pinned tag (https only, cached in ~/.cache/kipr)")
     ap.add_argument("--stock-models-tag", default=None, help="override the pinned kicad-packages3D tag "
                     "(default: per KiCad major from render/stock_models_tag.txt)")
     ap.add_argument("--stock-models-dir", default=os.environ.get("CR_STOCK_MODELS_DIR"),
-                    help="download/cache dir (env CR_STOCK_MODELS_DIR; default ~/.cache/cr-render/kicad-packages3D)")
+                    help="download/cache dir (env CR_STOCK_MODELS_DIR; default ~/.cache/kipr/kicad-packages3D)")
     ap.add_argument("--stock-max-file-mb", type=float, default=25.0)
     ap.add_argument("--stock-max-total-mb", type=float, default=300.0)
     ap.add_argument("--no-preview", action="store_true", help="skip the software-rendered 3D preview PNGs")
@@ -806,11 +775,27 @@ def main(argv=None):
     ap.add_argument("--use-kicad-cli", action="store_true",
                     help="(optional) also export reference SVGs with kicad-cli if it is on PATH")
     ap.add_argument("--clean", action="store_true", help="delete OUT/items before writing")
-    args = ap.parse_args(argv)
+    ap.add_argument("--kicad-cli", default=None, help="kicad-cli for --use-kicad-cli (default: $KIPR_KICAD_CLI, "
+                    "$KICAD_CLI or PATH)")
+    layoutmod.add_arguments(ap)
 
+
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(prog="kipr library render", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_arguments(ap)
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    return run(parse_args(argv))
+
+
+def run(args):
     t0 = time.time()
-    git = Git(os.path.abspath(args.repo))
+    git = Git(os.path.abspath(args.repo), layoutmod.from_args(args))
     base_sha, head_sha = git.rev(args.base), git.rev(args.head)
+    repo_name = args.repo_name or git.github_repo()
     merge_base = git.run("merge-base", base_sha, head_sha, check=False).strip() or base_sha
     out = os.path.abspath(args.out)
     if args.clean and os.path.isdir(os.path.join(out, "items")):
@@ -833,23 +818,24 @@ def main(argv=None):
         log(f"  {it.status:8s} {it.id}  ({time.time() - t:.1f}s)")
 
     if args.use_kicad_cli:
-        kc = shutil.which("kicad-cli")
+        from kipr.common import kicad_cli as kicad_cli_mod
+        kc = kicad_cli_mod.find(getattr(args, "kicad_cli", None))
         if not kc:
             log("--use-kicad-cli: kicad-cli not found; built-in renderer only")
         else:
-            import kicad_cli  # noqa: E402
-            kicad_cli.export(kc, git, head_sha, merge_base, items, entries, out)
+            from . import kicad_cli_export
+            kicad_cli_export.export(kc, git, head_sha, merge_base, items, entries, out)
 
     manifest = {
         "schema": 1,
-        "repo": args.repo_name,
+        "repo": repo_name,
         "pr": args.pr,
         "base_sha": merge_base,
         "base_ref_sha": base_sha,
         "head_sha": head_sha,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
         "kicad_version": kicad_version(items),
-        "generator": "cr_render.py (built-in SVG renderer)",
+        "generator": "kipr library render (built-in SVG renderer)",
         "changed_3d_files": sorted(changed_models),
         "unreferenced_changed_3d_files": sorted(changed_models - referenced_models(git, head_sha)),
         "items": entries,

@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
-"""Deterministic checks of KiCad footprints/symbols changed in a kicad-libs PR.
+"""Deterministic checks of KiCad footprints/symbols changed in a library PR.
 
 Reads OUT/manifest.json (written by the render step) plus per-item assets and
-writes OUT/review.json and OUT/review.md (see cr-shared/CONTRACT.md).
+writes OUT/review.json and OUT/review.md (see docs/library.md).
 
-  python3 tools/component-review/checks/cr_checks.py --out cr-out [--repo .]
-        [--klc-utils DIR] [--site-url URL]
+  kipr library checks --out cr-out [--repo .] [--klc-utils DIR] [--site-url URL]
 
 Runs the KLC-style rules in kicad_checks.py and, with --klc-utils, KiCad's
 official KLC checkers. No network access and no secrets are needed.
@@ -25,11 +23,11 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kipr.common import sexpr
 
-import kicad_checks as kc  # noqa: E402
-import klc_utils  # noqa: E402
-import sexpr  # noqa: E402
+from .. import layout as layoutmod
+from . import kicad_checks as kc
+from . import klc_utils
 
 SEV_ORDER = {"error": 0, "warning": 1, "info": 2}
 VERDICT_ORDER = {"fail": 0, "warn": 1, "pass": 2}
@@ -132,7 +130,7 @@ class Item:
         self.findings.extend(fs)
         self.checks.extend(cs)
 
-    def analyse(self, repo: str | None, klu_dir: str | None = None):
+    def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D):
         if self.status == "deleted":
             return
         if self.node is None:
@@ -147,7 +145,7 @@ class Item:
             self.pads = kc.parse_pads(self.node)
             self.stats = kc.footprint_stats(self.node)
             models = ((self.raw.get("model3d_by_side") or {}).get("head")) or self.raw.get("model3d")
-            fs, cs = kc.check_footprint(self.node, self.linemap, models, repo_exists)
+            fs, cs = kc.check_footprint(self.node, self.linemap, models, repo_exists, models_dir=models_dir)
         else:
             self.pins = kc.parse_pins(self.node)
             self.stats = kc.symbol_stats(self.node)
@@ -281,8 +279,7 @@ def render_markdown(review: dict, items: list[Item], site_url: str | None) -> st
 # main
 # ---------------------------------------------------------------------------
 
-def parse_args(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+def add_arguments(ap):
     ap.add_argument("--out", required=True, help="render output dir containing manifest.json")
     ap.add_argument("--repo", default=None, help="optional repo checkout (3D model existence fallback; never required)")
     ap.add_argument("--site-url", default=os.environ.get("CR_SITE_URL"), help="viewer URL to link from review.md")
@@ -291,6 +288,12 @@ def parse_args(argv=None):
     ap.add_argument("--only", action="append", help="only check item ids matching this substring (repeatable)")
     # accepted and ignored so older callers keep working
     ap.add_argument("--no-llm", "--no-download", action="store_true", help=argparse.SUPPRESS)
+    layoutmod.add_arguments(ap, models_only=True)
+
+
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(prog="kipr library checks", description=__doc__.split("\n\n")[0])
+    add_arguments(ap)
     return ap.parse_args(argv)
 
 
@@ -301,10 +304,10 @@ def run(args) -> int:
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        print(f"cr-checks: cannot read {manifest_path}: {e}", file=sys.stderr)
+        print(f"checks: cannot read {manifest_path}: {e}", file=sys.stderr)
         return 2
     if manifest.get("schema") != 1:
-        print(f"cr-checks: warning: manifest schema {manifest.get('schema')!r}, expected 1", file=sys.stderr)
+        print(f"checks: warning: manifest schema {manifest.get('schema')!r}, expected 1", file=sys.stderr)
     repo = os.path.abspath(args.repo) if args.repo else None
 
     items = [Item(r, out_dir, repo) for r in manifest.get("items") or [] if isinstance(r, dict)]
@@ -312,10 +315,11 @@ def run(args) -> int:
         items = [i for i in items if any(s in i.id for s in args.only)]
     klu_dir = args.klc_utils if klc_utils.available(args.klc_utils) else None
     if args.klc_utils and not klu_dir:
-        print(f"cr-checks: warning: --klc-utils {args.klc_utils} is not a kicad-library-utils checkout; skipping KLC checker",
+        print(f"checks: warning: --klc-utils {args.klc_utils} is not a kicad-library-utils checkout; skipping KLC checker",
               file=sys.stderr)
+    models_dir = layoutmod.Layout(models=getattr(args, "lib_3d", layoutmod.DEFAULT_3D)).models
     for it in items:
-        it.analyse(repo, klu_dir)
+        it.analyse(repo, klu_dir, models_dir)
     pr_findings = [
         {"severity": "warning", "category": "3d-model", "path": p, "line": None,
          "message": f"3D model file `{p}` is added/changed in this PR but no footprint references it.",
@@ -341,7 +345,7 @@ def run(args) -> int:
         json.dump(review, f, indent=1, ensure_ascii=False)
     with open(os.path.join(out_dir, "review.md"), "w", encoding="utf-8") as f:
         f.write(render_markdown(review, items, args.site_url))
-    print(f"cr-checks: wrote {os.path.join(out_dir, 'review.json')} ({len(items)} items; {review['summary_markdown']})")
+    print(f"checks: wrote {os.path.join(out_dir, 'review.json')} ({len(items)} items; {review['summary_markdown']})")
     return 0
 
 

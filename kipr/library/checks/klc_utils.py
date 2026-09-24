@@ -22,7 +22,7 @@ TIMEOUT_S = 120
 
 # Rules that conflict with this repo's conventions or cannot be evaluated here.
 _IGNORE = (
-    # repo stores models in lib_3d/<Library>/ via ${KICAD_LIBS_DIR}, not <lib>.3dshapes
+    # the repo stores models in <models dir>/<Library>/ via ${KICAD_LIBS_DIR}, not <lib>.3dshapes
     re.compile(r"3D model directory is different from footprint directory"),
     re.compile(r"3D model path|\$\{KICAD\d*_3DMODEL_DIR\}", re.I),
     # needs the whole footprint library; pairing is checked by our own code

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Render the sticky PR comment (markdown) from a component-review site dir.
 
 Inputs are OUT/manifest.json and (optional) OUT/review.json, see CONTRACT.md. All text from
@@ -6,7 +5,7 @@ them is escaped (no raw HTML, @-mentions or remote images); image URLs are only 
 files that actually exist in the (sanitized) site dir.
 
 Usage:
-  make_comment.py --site cr-out --repo owner/repo --pr 8 --head-sha SHA \
+  kipr library ci make-comment --site cr-out --repo owner/repo --pr 8 --head-sha SHA \
       [--pages-url https://owner.github.io/repo/] [--pages-sha SHA_OF_GH_PAGES_COMMIT] \
       [--artifact-url URL] [--run-url URL] [--note TEXT] > comment.md
 """
@@ -18,10 +17,9 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import (MARKER, SEVERITY_RANK, check_repo, check_sha, finding_line_no, findings_of, generator_of, item_review, load_site,  # noqa: E402
-                    md_block, md_code, md_inline, overall_verdict, parse_pr_number, safe_http_url,
-                    safe_repo_path, safe_site_file, safe_slug, verdict_of)
+from .common import (MARKER, SEVERITY_RANK, check_repo, check_sha, finding_line_no, findings_of, generator_of, item_review, load_site,
+                     md_block, md_code, md_inline, overall_verdict, parse_pr_number, safe_http_url,
+                     safe_repo_path, safe_site_file, safe_slug, verdict_of)
 
 MAX_COMMENT = 60000          # GitHub's hard limit is 65536 characters
 IMG_WIDTH = 240
@@ -270,7 +268,8 @@ def build_comment(ctx: Ctx, manifest: dict, review, *, artifact_url: str | None 
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="kipr library ci make-comment", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--site", required=True, type=Path)
     ap.add_argument("--repo", required=True)
     ap.add_argument("--pr", required=True)
