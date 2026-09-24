@@ -1,0 +1,14 @@
+{
+  "name": "kipr-web-project-tests",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only test tooling for web/project (the viewer itself has no dependencies).",
+  "scripts": {
+    "unit": "node --test unit.test.mjs",
+    "screens": "node screens.mjs",
+    "xss": "node xss_check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
