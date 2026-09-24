@@ -1,0 +1,280 @@
+# kipr project review (unprivileged, artifacts only). Reusable: call it from a repo with KiCad projects.
+#
+# Runs on pull requests (including PRs from forks) that touch KiCad files. The job checks out the
+# PR head, so treat it as untrusted: callers give it `contents: read` and no secrets. It diffs
+# every changed KiCad project between the merge base and the PR head (kicad-cli exports +
+# semantic schematic/layout/BOM/netlist/ERC/DRC diffs, see docs/project.md) and uploads:
+#   project-review.html    one self-contained HTML report, NOT zipped: click it on the run page
+#                          and it opens in the browser (no JavaScript inside)
+#   project-review-site    the interactive viewer + all exports (zip; unzip and run serve.py)
+#   project-review-data    project-review.json
+#   pr-meta                pr.json, read by project-review-publish.yml
+# New ERC/DRC errors and warnings also show up as annotations on the changed files.
+#
+# Caller (see docs/project.md):
+#   on: pull_request: paths: ["**/*.kicad_pcb", "**/*.kicad_sch", "**/*.kicad_pro"]
+#   permissions: { contents: read }
+#   jobs:
+#     review:
+#       uses: CoolNamesAllTaken/kipr/.github/workflows/project-review.yml@<ref>
+#       with: { kipr-ref: <same ref> }
+name: kipr project review
+
+on:
+  workflow_call:
+    inputs:
+      kipr-ref:
+        description: kipr git ref (tag/sha/branch) to install; use the ref of the `uses:` line
+        type: string
+        default: main
+      kipr-repository:
+        description: where kipr is installed from (owner/repo on github.com)
+        type: string
+        default: CoolNamesAllTaken/kipr
+      projects:
+        description: only review projects whose directory (or its name) matches one of these globs (space/comma/newline separated; empty = all)
+        type: string
+        default: ""
+      fast-checks:
+        description: run ERC/DRC without the global KiCad libraries (much faster; library mismatch checks are skipped)
+        type: boolean
+        default: false
+      step:
+        description: also export STEP models of the boards
+        type: boolean
+        default: false
+      kicad-image:
+        description: container with kicad-cli (pin the KiCad version; the -full images include the stock 3D models)
+        type: string
+        default: kicad/kicad:10.0.6-amd64-full
+      jobs:
+        description: parallel kicad-cli processes
+        type: number
+        default: 4
+      max-artifact-mb:
+        description: size budget of the project-review-site artifact and the HTML report; optional exports are dropped to fit
+        type: number
+        default: 250
+      retention-days:
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # The image's default user is `kicad`; root is needed for apt and the runner's workspace.
+    container:
+      image: ${{ inputs.kicad-image }}
+      options: --user root
+    defaults:
+      run:
+        shell: bash
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}   # empty on push
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      KIPR_SPEC: kipr @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+      MAX_MB: ${{ inputs.max-artifact-mb }}
+    steps:
+      - name: Prepare tools
+        run: |
+          # The KiCad image may lack git (needed for the checkout and pip's git install) and venv/pip.
+          need=""
+          command -v git >/dev/null || need="$need git"
+          python3 -c 'import venv, ensurepip' 2>/dev/null || need="$need python3-venv python3-pip"
+          if [ -n "$need" ]; then
+            sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+            $sudo apt-get update -qq
+            # shellcheck disable=SC2086  # $need is a word list
+            $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates $need
+          fi
+          # root's KiCad config gets the stock global library tables, like the image's own user
+          # (ERC/DRC library checks and the 3D/footprint lookups need them)
+          mkdir -p "$HOME/.config/kicad/10.0"
+          for t in sym-lib-table fp-lib-table; do
+            [ -e "$HOME/.config/kicad/10.0/$t" ] || cp "/usr/share/kicad/template/$t" "$HOME/.config/kicad/10.0/$t" || true
+          done
+          git --version; python3 --version; kicad-cli version
+          { echo "OUT=$RUNNER_TEMP/kipr-out"; echo "CACHE=$RUNNER_TEMP/kipr-cache"; } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find merge base
+        id: base
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -z "$BASE_SHA" ]; then   # no PR base (e.g. a push): compare with the default branch
+            BASE_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
+          fi
+          mb=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          { echo "merge_base=$mb"; echo "base_sha=$BASE_SHA"; } >> "$GITHUB_OUTPUT"
+          echo "base $BASE_SHA, head $HEAD_SHA, merge-base $mb"
+
+      - name: Install kipr
+        id: kipr
+        env:
+          KICAD_IMAGE: ${{ inputs.kicad-image }}
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"
+          "$RUNNER_TEMP/venv/bin/kipr" project --help > /dev/null
+          # export cache key: kicad-cli version + image (exports are keyed by file blobs inside)
+          key=$( { kicad-cli version; echo "$KICAD_IMAGE"; } | sha256sum | cut -c1-16)
+          echo "cache_key=$key" >> "$GITHUB_OUTPUT"
+
+      # kicad-cli exports keyed by the git blobs they read: unchanged files (usually the whole base
+      # side on a PR's 2nd run) are not exported again. PR caches are only visible to that PR.
+      - name: Restore export cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kipr-cache
+          key: kipr-project-exports-${{ steps.kipr.outputs.cache_key }}-${{ github.run_id }}
+          restore-keys: |
+            kipr-project-exports-${{ steps.kipr.outputs.cache_key }}-
+
+      - name: Review changed projects
+        env:
+          MERGE_BASE: ${{ steps.base.outputs.merge_base }}
+          PROJECTS: ${{ inputs.projects }}
+          FAST: ${{ inputs.fast-checks }}
+          STEP: ${{ inputs.step }}
+          JOBS: ${{ inputs.jobs }}
+        run: |
+          touch "$RUNNER_TEMP/run-stamp"
+          args=(--repo . --base "$MERGE_BASE" --head "$HEAD_SHA" --out "$OUT" --cache-dir "$CACHE" --jobs "$JOBS")
+          set -f   # split the globs on whitespace/commas but pass them to kipr unexpanded
+          # shellcheck disable=SC2086
+          for g in ${PROJECTS//,/ }; do args+=(--projects "$g"); done
+          set +f
+          if [ "$FAST" = "true" ]; then args+=(--fast-checks); fi
+          if [ "$STEP" = "true" ]; then args+=(--step); fi
+          # site + report run after the size budget below
+          kipr project "${args[@]}" --skip site --skip report
+
+      - name: Prune export cache
+        if: always()
+        run: |
+          # keep only the entries this run created or used (it touches their .kipr-job.json)
+          for d in "$CACHE"/*/; do
+            [ -d "$d" ] || continue
+            [ "$d/.kipr-job.json" -nt "$RUNNER_TEMP/run-stamp" ] || rm -rf "$d"
+          done
+          du -sh "$CACHE" 2>/dev/null || true
+
+      - name: Fit the size budget
+        id: size
+        run: |
+          # the viewer adds an offline copy of every SVG (up to ~2x), so the data gets half the budget
+          budget=$(awk -v m="$MAX_MB" 'BEGIN { printf "%.1f", m * 0.5 }')
+          kipr project ci limit-size --out "$OUT" --max-mb "$budget"
+
+      - name: Annotate new ERC/DRC violations
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$OUT/project-review.json" ]; then
+            kipr project ci job-summary --out "$OUT" --annotate --repo-dir .
+          fi
+
+      - name: Collect review data
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/data"
+          if [ -f "$OUT/project-review.json" ]; then cp "$OUT/project-review.json" "$RUNNER_TEMP/data/"; fi
+
+      - name: Bundle viewer
+        continue-on-error: true
+        run: kipr project site --out "$OUT"
+
+      - name: Build HTML report
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          kipr project report --out "$OUT" --output "$RUNNER_TEMP/report/project-review.html" --max-mb "$MAX_MB"
+
+      - name: Check artifact size
+        id: fits
+        if: always()
+        run: |
+          mb=$(du -sm "$OUT" 2>/dev/null | cut -f1)
+          echo "site is ${mb:-0} MB (budget $MAX_MB MB)"
+          if awk -v s="${mb:-0}" -v m="$MAX_MB" 'BEGIN { exit !(s > m) }'; then
+            echo "::warning::project-review-site is ${mb} MB, over max-artifact-mb=${MAX_MB}; not uploaded (the report and data still are)"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Opens directly in the browser from the run page (non-zipped artifact).
+      - name: Upload HTML report
+        id: report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ runner.temp }}/report/project-review.html
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn
+
+      - name: Upload interactive viewer
+        id: site
+        if: always() && steps.fits.outputs.upload == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: project-review-site
+          path: ${{ runner.temp }}/kipr-out
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn
+
+      - name: Upload review data
+        id: data
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: project-review-data
+          path: ${{ runner.temp }}/data
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn
+
+      - name: Write PR metadata
+        if: always() && github.event_name == 'pull_request'
+        env:
+          MERGE_BASE: ${{ steps.base.outputs.merge_base }}
+        run: |
+          kipr project ci pr-meta --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" \
+            --merge-base "$MERGE_BASE" --out "$RUNNER_TEMP/pr-meta"
+
+      # Read by project-review-publish.yml (sticky comment).
+      - name: Upload PR metadata
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-meta
+          path: ${{ runner.temp }}/pr-meta/pr.json
+          retention-days: ${{ inputs.retention-days }}
+
+      - name: Job summary
+        if: always()
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+          SITE_URL: ${{ steps.site.outputs.artifact-url }}
+          DATA_URL: ${{ steps.data.outputs.artifact-url }}
+        run: |
+          if [ -f "$OUT/project-review.json" ] && command -v kipr >/dev/null; then
+            kipr project ci job-summary --out "$OUT" --summary "$GITHUB_STEP_SUMMARY" \
+              --link "run=$RUN_URL" --link "report=$REPORT_URL" --link "site=$SITE_URL" --link "data=$DATA_URL"
+          else
+            echo "### KiCad project review failed, see the log." >> "$GITHUB_STEP_SUMMARY"
+          fi

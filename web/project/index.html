@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Review data comes from a pull request: no inline script, scripts only from this site (everything is
+       vendored), WebAssembly for the gerber renderer, no plugins, no <base>, no forms. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Project review · kipr</title>
+  <link rel="stylesheet" href="viewer.css">
+  <link rel="icon" href="data:,">
+  <script src="js/boot.js" defer></script>
+</head>
+<body>
+  <header id="header"><span class="title">Project review</span></header>
+  <div id="layout">
+    <aside id="sidebar"></aside>
+    <main id="main"><p class="muted pad">Loading…</p></main>
+  </div>
+  <noscript>This viewer needs JavaScript. The self-contained project-review.html report next to it does not.</noscript>
+</body>
+</html>

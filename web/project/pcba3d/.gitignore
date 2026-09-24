@@ -1,0 +1,3 @@
+*.bundle.js
+# committed: the file:// build of the module (see build_offline.mjs --check)
+!pcba3d.bundle.js
