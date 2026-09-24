@@ -259,7 +259,8 @@ changed name are not reported.
           "category": "violation"}],    // violation | unconnected | parity (DRC schematic parity)
  "fixed": [ … ],
  "report": {"base": "p/<slug>/checks/drc.base.json", "head": "…"},
- "pos_scale_fixed": 100}                // present when ERC positions were corrected (see below)
+ "pos_scale_fixed": 100,                // present when ERC positions were corrected (see below)
+ "libraries": "project"}                // present with --fast-checks (see below)
 ```
 
 Matching base to head, in passes: type + items + description within 2 mm; then type + items
@@ -267,4 +268,7 @@ anywhere; then type within 0.5 mm. Numbers in item descriptions (track lengths, 
 KiCad 10.0.x writes ERC positions in its JSON 100x too small; when every position fits in 1/50
 of the page but x100 still lands on it, they are scaled and `pos_scale_fixed` is set. ERC/DRC run
 with the global KiCad libraries (library mismatch checks included), which is most of the run time
-on real boards (~30-50 s per check and side).
+on real boards (~30-50 s per check and side). `--fast-checks` runs them with empty global library
+tables instead (~2-6 s) and drops the library violation types (`lib_footprint_issues`,
+`lib_footprint_mismatch`, `footprint_link_issues`, `lib_symbol_issues`, `lib_symbol_mismatch`);
+the delta then says `"libraries": "project"`.

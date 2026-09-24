@@ -104,3 +104,24 @@ def test_same_content_ignores_dates_and_revision(tmp_path):
     assert export.same_content(str(a), str(b)) is True
     assert export.same_content(str(a), str(c)) is False
     assert export.same_content(str(a), None) is None
+
+
+def test_fast_checks_isolate_only_erc_drc_and_change_the_cache_key(tmp_path):
+    normal = {j.name: j for j in export.side_jobs("b.kicad_pcb", "b.kicad_sch", ["F.Cu"])}
+    fast = {j.name: j for j in export.side_jobs("b.kicad_pcb", "b.kicad_sch", ["F.Cu"], fast_checks=True)}
+    assert {n for n, j in fast.items() if j.isolated_libs} == {"erc", "drc"}
+    assert not any(j.isolated_libs for j in normal.values())
+
+    class Cli:
+        version = "10.0.6"
+
+    ex = export.Exporter(Cli(), str(tmp_path), 1)
+    blobs = {"b.kicad_pcb": "1", "b.kicad_sch": "2"}
+    assert ex.key(normal["drc"], "p", blobs) != ex.key(fast["drc"], "p", blobs)
+    assert ex.key(normal["gerbers"], "p", blobs) == ex.key(fast["gerbers"], "p", blobs)
+    # schematic-only inputs don't invalidate board exports
+    assert ex.key(normal["gerbers"], "p", {**blobs, "b.kicad_sch": "3"}) == ex.key(normal["gerbers"], "p", blobs)
+    ex.close()
+    home = export.isolated_home(str(tmp_path))
+    with open(f"{home}/.config/kicad/10.0/fp-lib-table") as fh:
+        assert "(lib " not in fh.read()
