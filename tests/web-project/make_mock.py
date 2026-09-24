@@ -351,6 +351,8 @@ def demo_board(out: Path) -> dict:
         ]),
     ])
     pcb = write_pcb(out, slug, ["base", "head"], {"F.Cu", "B.Cu", "F.Mask", "F.Paste", "F.SilkS", "PTH"})
+    for side in ("base", "head"):
+        write_glb(out / "p" / slug / "3d" / f"{side}.glb", board(side))
     pcb["changes"] = [
         {"kind": "footprint", "ref": "U1", "what": "moved", "layer": "F.Cu", "bbox_mm": [115.3, 82.2, 8.4, 5.6], "detail": "+3.00 mm x"},
         {"kind": "footprint", "ref": "C2", "what": "added", "layer": "F.Cu", "bbox_mm": [134.6, 91.3, 2.9, 1.4]},
@@ -401,8 +403,57 @@ def demo_board(out: Path) -> dict:
                     "fixed": [{"severity": "warning", "type": "track_dangling", "description": "Track has unconnected end", "items": ["Track /OLD"], "pos_mm": [126.0, 86.0]}],
                     "report": {"base": None, "head": None}},
         },
-        "errors": ["kicad-cli: head GLB export skipped (mock)"],
+        "errors": ["kicad-cli: STEP export skipped (mock)"],
     }
+
+
+def write_glb(path: Path, b: dict) -> None:
+    """A tiny GLB laid out like `kicad-cli pcb export glb` (docs/CONTRACT-project.md): metres, +Y up,
+    x = kicad_x / 1000, z = kicad_y / 1000; a root node with one node per component named by its
+    ref (the model mesh is a child node) and the board body (mesh name `<board>_PCB`)."""
+    import struct
+    bx, by, bw, bh = BOARD
+    t = 1.6
+
+    def box(x0, y0, z0, x1, y1, z1):
+        v = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0), (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+        f = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7]
+        return [c / 1000 for p in v for c in p], f
+
+    meshes = [("mock_PCB", box(bx, 0, by, bx + bw, t, by + bh), 0)]
+    for c in b["comps"]:
+        x, y, w, h = c["body"]
+        y0, y1 = (t, t + 1.0) if c["side"] == "top" else (-1.0, 0)
+        cx, cz = c["x"], c["y"]  # model boxes relative to the component node
+        meshes.append((c["ref"], box(x - cx, y0, y - cz, x + w - cx, y1, y + h - cz), 1))
+    buf, views, accessors, gl_meshes = b"", [], [], []
+    for name, (pos, idx), mat in meshes:
+        for data, fmt, typ, comp, target in ((pos, "f", "VEC3", 5126, 34962), (idx, "I", "SCALAR", 5125, 34963)):
+            raw = struct.pack(f"<{len(data)}{fmt}", *data)
+            views.append({"buffer": 0, "byteOffset": len(buf), "byteLength": len(raw), "target": target})
+            acc = {"bufferView": len(views) - 1, "componentType": comp, "count": len(data) // (3 if typ == "VEC3" else 1), "type": typ}
+            if typ == "VEC3":
+                acc["min"] = [min(data[i::3]) for i in range(3)]
+                acc["max"] = [max(data[i::3]) for i in range(3)]
+            accessors.append(acc)
+            buf += raw + b"\0" * (-len(raw) % 4)
+        gl_meshes.append({"name": name, "primitives": [{"attributes": {"POSITION": len(accessors) - 2}, "indices": len(accessors) - 1, "material": mat}]})
+    nodes = [{"name": "mock", "children": []}, {"name": "=>[0:1:1:900]", "mesh": 0}]
+    nodes[0]["children"].append(1)
+    for i, c in enumerate(b["comps"], start=1):
+        nodes.append({"name": c["ref"], "translation": [c["x"] / 1000, 0, c["y"] / 1000], "children": [len(nodes) + 1]})
+        nodes[0]["children"].append(len(nodes) - 1)
+        nodes.append({"name": f"=>[0:1:1:{i}]", "mesh": i})
+    doc = {"asset": {"version": "2.0", "generator": "kipr tests/web-project mock"}, "scene": 0, "scenes": [{"nodes": [0]}],
+           "nodes": nodes, "meshes": gl_meshes, "accessors": accessors, "bufferViews": views,
+           "buffers": [{"byteLength": len(buf)}],
+           "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [0.1, 0.35, 0.2, 1]}},
+                         {"pbrMetallicRoughness": {"baseColorFactor": [0.15, 0.15, 0.17, 1]}}]}
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<I4s", len(js), b"JSON") + js + struct.pack("<I4s", len(buf), b"BIN\0") + buf
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body)
 
 
 def sensor_breakout(out: Path) -> dict:

@@ -99,8 +99,8 @@ for (const theme of THEMES) {
       await page.goto('about:blank');
       await page.goto(base + hash);
       await settle(page);
-      if (!isMock && name.endsWith('-pcba3d')) {
-        // the real 3D viewer: wait until it has loaded both boards, and fail on a placeholder or viewer errors
+      if (hasPcba3d && (name === 'pcba3d' || name.endsWith('-pcba3d'))) {
+        // the 3D viewer: wait until it has loaded both boards, and fail on a placeholder or viewer errors
         const state = await page.waitForFunction(() => {
           const host = document.querySelector('.pcba3d-host');
           if (!host) return null;
