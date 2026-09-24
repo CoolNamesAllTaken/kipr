@@ -11,8 +11,8 @@ HTML and CSS with no build step. `kipr/project/site.py` copies it next to the da
     OUT/project-review.html                          kipr/project/report.py: one self-contained page, no JS
 
 ```sh
-python3 -m kipr.project.site --out OUT        # --no-offline: skip the file:// support
-python3 -m kipr.project.report --out OUT      # optional single-file report (--max-mb 25)
+kipr project site --out OUT                   # --no-offline: skip the file:// support
+kipr project report --out OUT                 # optional single-file report (--max-mb 25)
 python3 OUT/serve.py                          # 127.0.0.1, random port, opens the browser
 ```
 
@@ -35,8 +35,9 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   compare modes as the schematic, change list with zoom, a measure tool (Δx, Δy, distance in mm), cursor
   readout in board mm. Renders are re-done at a higher resolution after zooming in. DRC rows link here with
   `at=x,y`. Without WebGL2, or from file://, it shows the per-layer SVG exports instead (with a pixel diff).
-- **3D PCBA**: mounts `pcba3d/index.js` (`mountPcba3d(el, project, baseUrl) -> {destroy()}`); a
-  placeholder when the module is missing or when opened from file://.
+- **3D PCBA**: mounts `pcba3d/index.js` (`mountPcba3d(el, project, baseUrl) -> {destroy()}`), or from
+  file:// the prebuilt `pcba3d/pcba3d.bundle.js`; a placeholder when the module is missing. Once the
+  module has loaded its data, `.pcba3d-host[data-ready]` holds its error count (the browser tests wait on it).
 - **BOM / Netlist / ERC-DRC**: filter box (all terms must match), status filter, sortable columns;
   base → head values as del/ins. Filters are in the URL (`q`, `st`).
 
@@ -57,8 +58,9 @@ letting the browser re-rasterise a vector `<img>` on every pan and zoom.
 `index.html` loads `js/boot.js`, a classic script. Over http(s) it loads `js/app.js` as a module. From disk it
 loads `data.js` (`window.KIPR_DATA = {review}`) and `js/bundle.js` (the same modules as one classic script),
 and the pixel diffs read the SVGs from `offline/<slug>.js` packs, because file:// images would taint the
-canvas. The gerber renderer (WebAssembly) and the 3D module can't load from disk: the layout tab falls back
-to the SVG exports and says to run `serve.py`.
+canvas. The layout tab's gerber renderer (WebAssembly) can't load from disk, so it falls back to the SVG
+exports and says to run `serve.py`. The 3D tab works from disk: it loads the committed classic-script
+`pcba3d/pcba3d.bundle.js` and its data packs `offline/pcba3d-*.js` (see `pcba3d/README.md`).
 
 ## Security
 

@@ -1,0 +1,151 @@
+# Tests of the project reviewer (kipr.project, web/project): python, node, headless Chromium, and
+# the kicad-cli integration tests in the official KiCad image.
+#   unit        pytest tests/project (no KiCad), the viewer and 3D module tests (mock data, browsers),
+#               and a check that the committed file:// 3D bundle is fresh
+#   kicad       builds the base/head fixture repo from KiCad's demos (tests/project/fixtures/build.sh),
+#               runs the integration tests and the whole `kipr project` pipeline on it
+#   viewer-e2e  opens that real OUT in Chromium over http and from disk (file://), every tab incl. 3D
+name: project tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "kipr/cli.py"
+      - "kipr/common/**"
+      - "kipr/project/**"
+      - "web/project/**"
+      - "tests/project/**"
+      - "tests/web-project/**"
+      - "tests/web-3d/**"
+      - "pyproject.toml"
+      - ".github/workflows/project-*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fonts-dejavu-core libcairo2
+          python -m pip install -q -e ".[test]"
+          python -m playwright install --with-deps chromium
+          # the viewer tests drive Chromium from node (playwright pinned in tests/web-project)
+          (cd tests/web-project && npm ci --no-audit --no-fund && npx playwright install chromium)
+      - name: pytest tests/project
+        run: python -m pytest tests/project -q -rs
+      - name: 3D file:// bundle is fresh
+        run: node web/project/pcba3d/build_offline.mjs --check
+      - name: Viewer, site and report (tests/web-project/run_all.sh)
+        env:
+          SHOTS: ${{ runner.temp }}/shots/web-project
+        run: bash tests/web-project/run_all.sh
+      - name: 3D module (tests/web-3d/run.sh --browser)
+        env:
+          PYTHON: python
+        run: bash tests/web-3d/run.sh --browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: project-unit-screenshots
+          path: |
+            ${{ runner.temp }}/shots
+            tests/web-3d/out/shots
+          retention-days: 7
+          if-no-files-found: ignore
+
+  kicad:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The image's default user is `kicad`; root is needed for apt and the runner's workspace.
+    container:
+      image: kicad/kicad:10.0.6-amd64-full
+      options: --user root
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare tools
+        run: |
+          need=""
+          command -v git >/dev/null || need="$need git"
+          python3 -c 'import venv, ensurepip' 2>/dev/null || need="$need python3-venv python3-pip"
+          if [ -n "$need" ]; then
+            apt-get update -qq
+            # shellcheck disable=SC2086  # $need is a word list
+            env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates $need
+          fi
+          # root's KiCad config gets the stock global library tables, like the image's own user
+          mkdir -p "$HOME/.config/kicad/10.0"
+          for t in sym-lib-table fp-lib-table; do
+            [ -e "$HOME/.config/kicad/10.0/$t" ] || cp "/usr/share/kicad/template/$t" "$HOME/.config/kicad/10.0/$t"
+          done
+          git --version; python3 --version; kicad-cli version
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install kipr
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q ".[test]"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Build the fixture repo from KiCad's demos
+        run: bash tests/project/fixtures/build.sh "$RUNNER_TEMP/fixtures"
+      - name: Integration tests
+        env:
+          KIPR_FIXTURES: ${{ runner.temp }}/fixtures
+          KIPR_REQUIRE_INTEGRATION: "1"
+        run: python -m pytest tests/project/test_integration_fixtures.py -q -rs
+      - name: kipr project on the fixtures (review + site + report)
+        run: |
+          cd "$RUNNER_TEMP"
+          time kipr project --repo fixtures --base base --head head --out out
+          du -sh out; ls out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-fixtures-out
+          path: ${{ runner.temp }}/out
+          retention-days: 7
+
+  viewer-e2e:
+    needs: kicad
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: project-fixtures-out
+          path: ${{ runner.temp }}/out
+      - name: Install
+        run: cd tests/web-project && npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Every tab over http
+        run: node tests/web-project/screens.mjs --site "$RUNNER_TEMP/out" --shots "$RUNNER_TEMP/shots/http" --quick
+      - name: Every tab from disk (file://, like an unzipped artifact)
+        run: node tests/web-project/screens.mjs --site "$RUNNER_TEMP/out" --shots "$RUNNER_TEMP/shots/file" --mode file --quick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: project-e2e-screenshots
+          path: ${{ runner.temp }}/shots
+          retention-days: 7

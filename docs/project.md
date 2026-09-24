@@ -11,16 +11,29 @@ It replaces the kiri-based `.github/workflows/kicad-diff.yml` of PantsForBirds/i
 
 ## Running it
 
-Needs Python >= 3.10, git, and KiCad 10's `kicad-cli` for the exports (without it you still get
-the semantic diffs, with the netlist taken from the board and no ERC/DRC).
+Needs Python >= 3.10, git, the system cairo library (`libcairo2`, for the report images) and
+KiCad 10's `kicad-cli` for the exports (without it you still get the semantic diffs, with the
+netlist taken from the board and no ERC/DRC). No node or network is needed.
 
 ```sh
 pip install "kipr @ git+https://github.com/CoolNamesAllTaken/kipr@<ref>"
 kipr project --repo . --base origin/main --head HEAD --out review/
-python3 -m kipr.project.site --out review/          # add the interactive viewer
-python3 -m kipr.project.report --out review/        # review/project-review.html (no JavaScript)
-python3 review/serve.py                             # open the viewer
+python3 review/serve.py             # the viewer; or open review/index.html from disk
+                                    # review/project-review.html is the report (no JavaScript)
 ```
+
+`kipr project` runs three stages; each is also a subcommand (`python3 -m kipr.project.site|report`
+work too):
+
+| Command | Writes |
+|---|---|
+| `kipr project review --repo . --base B --head H --out OUT [options below]` | `OUT/project-review.json`, `OUT/p/<slug>/…` (kicad-cli exports + semantic diffs) |
+| `kipr project site --out OUT [--no-offline]` | the viewer (`index.html`, `js/`, `vendor/`, `pcba3d/`, `data.js`, `offline/`, `serve.py`) |
+| `kipr project report --out OUT [--output FILE] [--max-mb 25]` | `OUT/project-review.html` |
+
+The end-to-end run takes the review options below plus `--skip site|report` (repeatable),
+`--no-offline`, `--report FILE` and `--max-mb`. CI runs `kipr project … --skip site --skip report`,
+fits the data into its size budget, then runs `site` and `report`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -82,7 +95,8 @@ without ever running PR code.
 There is no GitHub Pages preview (internal is private): the comment links to the artifacts of
 the run, which expire after `retention-days`. `project-review.html` opens directly in the
 browser from the run page; the viewer zip is unzipped and started with `python3 serve.py`
-(opening `index.html` from disk works too, without the gerber/3D views).
+(opening `index.html` from disk works too: every tab including 3D; the layout tab then shows the
+per-layer SVG exports instead of the WebGL gerber renderer).
 
 Security notes (same as the library review):
 
@@ -219,17 +233,46 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/pcb.py`, `sch.py` | s-expression models of boards and schematic hierarchies |
 | `kipr/project/diff_pcb.py`, `diff_sch.py`, `diff_net.py` | semantic diffs, BOM, netlist, ERC/DRC deltas |
 | `kipr/project/ci/` | GitHub glue (above) |
-| `kipr/project/_compat.py` | git / kicad-cli helpers, to be folded into `kipr.common` |
+| `kipr/project/cli.py` | `kipr project [review\|site\|report\|ci]` |
+| `kipr/project/site.py`, `report.py` | viewer copy + file:// support, no-JS HTML report |
+| `kipr/project/web` | symlink to `web/project/` (the viewer, shipped in the wheel as package data) |
+| `kipr/common/git.py`, `kicad_cli.py`, `sexpr.py` | shared git (renames, blob ids, `git archive`), kicad-cli (option probing) and s-expression helpers |
 | `.github/workflows/project-review*.yml` | reusable workflows |
 
 ## Tests
 
 ```sh
 pytest tests/project                                              # unit tests, no KiCad needed
-KIPR_KICAD_CLI=/path/to/kicad-cli pytest tests/project            # + end-to-end against kipr-fixtures
+bash tests/project/fixtures/build.sh /tmp/fx                      # fixture repo from KiCad's demos (needs KiCad)
+KIPR_FIXTURES=/tmp/fx KIPR_KICAD_CLI=/path/to/kicad-cli pytest tests/project   # + end-to-end
+bash tests/web-project/run_all.sh [--real OUT]                    # viewer, site, report (node + Chromium)
+bash tests/web-3d/run.sh --browser                                # 3D module (node + Chromium)
+node web/project/pcba3d/build_offline.mjs --check                 # committed 3D file:// bundle is fresh
 ```
 
-The integration test runs `kipr project` on the public fixture repo (`$KIPR_FIXTURES`, default
-`../kipr-fixtures`, tags `base`/`head`, expected changes in its `CHANGES.md`) and is skipped
-without kicad-cli. `tests/project/test_workflows.py` checks the workflows' security properties
+The integration test runs `kipr project` on a public fixture repo (`$KIPR_FIXTURES`, tags
+`base`/`head`) and is skipped without kicad-cli. No KiCad demo boards are committed to kipr:
+`tests/project/fixtures/build.sh` builds the repo from the demos shipped with KiCad
+(`/usr/share/kicad/demos` in the `kicad/kicad` image) and the scripted edits in
+`tests/project/fixtures/scripts/`; the expected changes are in
+[`tests/project/fixtures/CHANGES.md`](../tests/project/fixtures/CHANGES.md).
+
+CI (`.github/workflows/project-tests.yml`): the unit, viewer and 3D tests on ubuntu-latest
+(`playwright install --with-deps chromium`); the fixture build, integration tests and a full
+`kipr project` run inside `kicad/kicad:10.0.6-amd64-full`; then that real output is opened in
+Chromium over http and from disk, every tab including 3D.
+
+### The 3D viewer from disk (file://)
+
+Browsers refuse ES modules and `fetch()` on `file://`. The 2D viewer is bundled into a classic
+script by `site.py` itself (a small Python transform). The 3D module (three.js + the gerber
+renderer) is bundled with esbuild, and that bundle, `web/project/pcba3d/pcba3d.bundle.js`, is
+**committed** instead of built at review time: building a site then needs no node, npx or
+network (the KiCad CI image has none of them and a reviewer's machine may not either), and the
+wheel ships the exact file that was tested. `site.py` writes the 3D data packs
+(`offline/pcba3d-<slug>.js`, GLBs as base64 and fab files as text, and the renderer's WASM) in
+Python, byte-for-byte the same data as `build_offline.mjs`. After changing anything under
+`web/project/pcba3d/` or `web/project/vendor/`, run `node web/project/pcba3d/build_offline.mjs
+--no-packs` and commit the bundle; CI fails with `--check` when it is stale (esbuild is pinned
+and runs from `web/project/`, so the build is reproducible). `tests/project/test_workflows.py` checks the workflows' security properties
 and runs actionlint when it is installed.

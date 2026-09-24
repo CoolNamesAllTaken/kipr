@@ -93,6 +93,12 @@ jobs:
             # shellcheck disable=SC2086  # $need is a word list
             $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates $need
           fi
+          # root's KiCad config gets the stock global library tables, like the image's own user
+          # (ERC/DRC library checks and the 3D/footprint lookups need them)
+          mkdir -p "$HOME/.config/kicad/10.0"
+          for t in sym-lib-table fp-lib-table; do
+            [ -e "$HOME/.config/kicad/10.0/$t" ] || cp "/usr/share/kicad/template/$t" "$HOME/.config/kicad/10.0/$t" || true
+          done
           git --version; python3 --version; kicad-cli version
           { echo "OUT=$RUNNER_TEMP/kipr-out"; echo "CACHE=$RUNNER_TEMP/kipr-cache"; } >> "$GITHUB_ENV"
 
@@ -152,7 +158,8 @@ jobs:
           set +f
           if [ "$FAST" = "true" ]; then args+=(--fast-checks); fi
           if [ "$STEP" = "true" ]; then args+=(--step); fi
-          kipr project "${args[@]}"
+          # site + report run after the size budget below
+          kipr project "${args[@]}" --skip site --skip report
 
       - name: Prune export cache
         if: always()
@@ -187,25 +194,13 @@ jobs:
 
       - name: Bundle viewer
         continue-on-error: true
-        run: |
-          if python3 -c 'import importlib.util as u, sys; sys.exit(u.find_spec("kipr.project.site") is None)'; then
-            python3 -m kipr.project.site --out "$OUT"
-          else
-            # TODO(kipr): the viewer (kipr/project/site.py, t-0020) is not in this kipr version yet;
-            # the site artifact then holds the data and exports only.
-            echo "::notice::TODO: kipr.project.site is not available in kipr@${KIPR_SPEC##*@}; uploading data only"
-          fi
+        run: kipr project site --out "$OUT"
 
       - name: Build HTML report
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/report"
-          if python3 -c 'import importlib.util as u, sys; sys.exit(u.find_spec("kipr.project.report") is None)'; then
-            python3 -m kipr.project.report --out "$OUT" --output "$RUNNER_TEMP/report/project-review.html" --max-mb "$MAX_MB"
-          else
-            # TODO(kipr): the no-JS report (kipr/project/report.py, t-0020) is not in this kipr version yet.
-            echo "::notice::TODO: kipr.project.report is not available in kipr@${KIPR_SPEC##*@}; no HTML report"
-          fi
+          kipr project report --out "$OUT" --output "$RUNNER_TEMP/report/project-review.html" --max-mb "$MAX_MB"
 
       - name: Check artifact size
         id: fits
