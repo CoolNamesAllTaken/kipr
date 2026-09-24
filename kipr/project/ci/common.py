@@ -8,13 +8,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kipr.library.ci.common import (GitHub, check_repo, check_sha, load_json, log, md_code, md_inline,  # noqa: F401
+from kipr.library.ci.common import (GitHub, check_repo, check_sha, load_json, log, md_inline,  # noqa: F401
                                     parse_pr_number, safe_http_url, safe_repo_path, truncate, write_outputs)
 
 MARKER = "<!-- kipr-project-review -->"
 CHECK_KINDS = ("erc", "drc")
 STATUS_ICON = {"added": "🆕", "removed": "🗑️", "modified": "✏️", "unchanged": "·"}
 SEVERITY_ICON = {"error": "🔴", "warning": "🟠"}
+
+
+def code(v, maxlen: int = 120) -> str:
+    """Identifier as <code>, escaped like any other text (a markdown code span would keep `<`, `|`)."""
+    s = md_inline(v, maxlen)
+    return f"<code>{s}</code>" if s else ""
 
 
 def d(v) -> dict:
@@ -79,7 +85,7 @@ def summary_table(doc: dict) -> str:
         errors = len(lst(p.get("errors")))
         st = status_of(p)
         rows.append("| " + " | ".join([
-            f"{md_code(text(p.get('name')) or text(p.get('slug')), 60)}<br><sub>{md_inline(text(p.get('path')) or '.', 120)}</sub>",
+            f"{code(text(p.get('name')) or text(p.get('slug')), 60)}<br><sub>{md_inline(text(p.get('path')) or '.', 120)}</sub>",
             f"{STATUS_ICON[st]} {st}",
             str(num(s.get("sheets_changed"))), str(num(s.get("layers_changed"))), " ".join(parts),
             str(num(s.get("nets_changed"))), checks[0], checks[1],
@@ -110,7 +116,7 @@ def _change(c: dict) -> str:
     who = text(c.get("ref")) or text(c.get("net"))
     head = " ".join(x for x in (md_inline(c.get("kind"), 20), md_inline(c.get("what"), 30)) if x)
     if who:
-        head += " " + md_code(who, 60)
+        head += " " + code(who, 60)
     det = md_inline(text(c.get("detail")), 160)
     return head + (f": {det}" if det else "")
 
@@ -122,5 +128,5 @@ def violation_line(v: dict, kind: str) -> str:
     at = ""
     if len(pos) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in pos):
         at = f" @ ({pos[0]:.2f}, {pos[1]:.2f}) mm"
-    return (f"- {icon} {kind.upper()} {md_code(text(v.get('type')), 40)}: "
+    return (f"- {icon} {kind.upper()} {code(text(v.get('type')), 40)}: "
             f"{md_inline(text(v.get('description')), 160)}{at}" + (f" — {items}" if items else ""))

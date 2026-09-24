@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, MARKER, change_lines, check_counts, d, load_review, md_inline, new_violations,
+from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, load_review, md_inline, new_violations,
                      safe_http_url, summary_table, text, truncate, violation_line)
 
 MAX_COMMENT = 60000  # GitHub's hard limit is 65536 characters
@@ -44,7 +44,7 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
     lines.append(TITLE)
     rng = ""
     if text(base.get("short")) and text(head.get("short")):
-        rng = f" between `{md_inline(base.get('short'), 12)}` (merge base) and `{md_inline(head.get('short'), 12)}`"
+        rng = f" between {code(base.get('short'), 12)} (merge base) and {code(head.get('short'), 12)}"
     kicad = md_inline(d(doc.get("tool")).get("kicad"), 20)
     if not projects:
         lines.append(f"No KiCad project changed{rng}.")
