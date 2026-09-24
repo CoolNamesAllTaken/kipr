@@ -74,16 +74,15 @@ failure, which is reported in the status line.
   on both faces in the overlaid modes. The copper diff also shows the outline's removed and
   added strokes.
 
-Empty KiCad layers (a header-only `B_SilkS.gbr`, or an `NPTH.drl` with no holes) are skipped.
-Empty masks are kept, because an empty mask means no openings. Fork main still throws on empty
-face layers; the fix is CoolNamesAllTaken/wasm-gerber-viewer#2.
+Empty KiCad layers (a header-only `B_SilkS.gbr`, or an `NPTH.drl` with no holes) are skipped by
+the renderer (fork PR #2); an empty mask is drawn as mask over the whole board.
 
 ### The shared gerber renderer
 
 Both the layout viewer and this module import one vendored copy of our fork,
 `web/project/vendor/wasm-gerber-renderer/`. It is owned by the project viewer (branch
 claud/web-project), synced by `web/project/scripts/sync_vendored_renderer.bash`, and pinned to fork
-main b8d2d78 with the npm 0.6.0 WASM. This module uses `index` (`createGerberRenderer`, with
+main 9b7ade3 with the npm 0.6.0 WASM. This module uses `index` (`createGerberRenderer`, with
 `wasmModule` and `wasmInitInput` passed explicitly so a bundle needs no dynamic import), `board`,
 `diff`, `drills`, `layers`, `outline` and `raster`.
 

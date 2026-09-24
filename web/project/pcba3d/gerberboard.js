@@ -60,27 +60,14 @@ async function loadSideFiles(project, side, assets) {
     return { name: basename(l[side].gerber), source: text, content: text, layer: l };
   }));
   if (!files.length) return null;
-  // KiCad writes a layer with nothing on it (B_SilkS on a board with no bottom silkscreen) as a
-  // header-only gerber, which fork main still refuses (fixed in CoolNamesAllTaken/
-  // wasm-gerber-viewer#2; drop this filter once that is vendored). Nothing on it is nothing to
-  // draw -- except a mask: an empty mask is no openings, mask over the whole board.
-  const grouped = groupBoardLayers(files.filter((f) => f.layer.kind === 'drill' || f.layer.kind === 'mask' || hasGeometry(f.content)));
-  // A drill file with no holes (KiCad writes a header-only NPTH.drl) is simply no holes.
+  // Empty KiCad layers (a header-only B_SilkS or NPTH.drl) are the renderer's to skip (fork #2).
+  const grouped = groupBoardLayers(files);
   const drills = files.filter((f) => f.layer.kind === 'drill').map((f) => ({
-    name: f.name, text: f.content, plated: !/^NPTH/i.test(f.layer.id) && !/NPTH/i.test(f.name),
+    name: f.name, text: f.content, plated: !/NPTH/i.test(f.layer.id) && !/NPTH/i.test(f.name),
     holes: parseExcellon(f.content, { plated: !/NPTH/i.test(f.name) }),
   })).filter((d) => d.holes.length);
-  grouped.drills = grouped.drills.filter((d) => drills.some((x) => x.name === d.name));
   const edge = files.find((f) => f.layer.kind === 'outline') || null;
   return { files, grouped, edge, drills };
-}
-
-/**
- * Whether a gerber draws anything: an interpolate (D01), a flash (D03) or a region (G36).
- * Aperture selections are D10 and up, so D1 and D3 (with or without the zero) are always operations.
- */
-export function hasGeometry(text) {
-  return /D0?[13]\*|G36\*/.test(text);
 }
 
 function boardInfo(project, side) {

@@ -1,9 +1,6 @@
-// Unit tests for web/project/pcba3d/boardgeom.js (the board solid) and the gerber helpers of
-// gerberboard.js that need no WebGL:  node --test 'tests/web-3d/*.test.mjs'
+// Unit tests for web/project/pcba3d/boardgeom.js (the board solid):  node --test 'tests/web-3d/*.test.mjs'
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import {
   usableHoles, boardGeometry, outlinesDiffer, rectOutline, clearance, segmentsFor, HOLE_BUDGET,
 } from '../../web/project/pcba3d/boardgeom.js';
@@ -71,15 +68,4 @@ test('outlinesDiffer and rectOutline', () => {
   assert.deepEqual(r.board, [[10, -60], [40, -60], [40, -20], [10, -20]]);
   assert.equal(r.approximate, true);
   assert.ok(segmentsFor(0.15) >= 10 && segmentsFor(1.6) <= 48);
-});
-
-const VENDOR = fileURLToPath(new URL('../../web/project/vendor/wasm-gerber-renderer/index.js', import.meta.url));
-test('hasGeometry tells an empty KiCad layer from a real one', { skip: !existsSync(VENDOR) && 'shared renderer not vendored in this checkout' }, async () => {
-  const { hasGeometry } = await import('../../web/project/pcba3d/gerberboard.js');
-  const header = '%TF.FileFunction,Legend,Bot*%\n%FSLAX46Y46*%\n%MOMM*%\nG04 APERTURE LIST*\n%ADD10C,0.150000*%\nD10*\nM02*\n';
-  assert.equal(hasGeometry(header), false);
-  assert.equal(hasGeometry(header.replace('M02*', 'X87900000Y-51800000D02*\nX198755000Y-51816000D01*\nM02*')), true);
-  assert.equal(hasGeometry(header.replace('M02*', 'X1Y2D03*\nM02*')), true);
-  assert.equal(hasGeometry(header.replace('M02*', 'G36*\nX1Y2D02*\nG37*\nM02*')), true);
-  assert.equal(hasGeometry('%ADD13R,1X1*%\nD13*\nM02*'), false);
 });
