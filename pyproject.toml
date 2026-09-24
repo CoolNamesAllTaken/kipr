@@ -10,7 +10,8 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    # library review: 2D renders -> PNG, diff.png, KiCad 10 embedded models
+    # library review: 2D renders -> PNG, diff.png, KiCad 10 embedded models;
+    # project report: sheet/layer PNGs (cairosvg + Pillow)
     "cairosvg>=2.7",   # needs the system cairo library (libcairo2)
     "pillow>=10",
     "numpy>=1.24",
@@ -31,6 +32,8 @@ include = ["kipr*"]
 [tool.setuptools.package-data]
 # kipr/library/web is a symlink to web/library (the static viewer)
 "kipr.library" = ["web/**/*", "render/stock_models_tag.txt", "ci/fetch_klc_utils.sh", "ci/klc_utils.ref"]
+# kipr/project/web is a symlink to web/project (the static viewer, incl. vendor/ and pcba3d/)
+"kipr.project" = ["web/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
