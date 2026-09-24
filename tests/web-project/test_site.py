@@ -86,7 +86,7 @@ class SiteTest(unittest.TestCase):
         (self.out / "project-review.json").write_text(json.dumps(r))
         site.build_site(self.out)
         stats = site.build_offline(self.out)
-        packs = sorted(p.name for p in (self.out / "offline").iterdir())
+        packs = sorted(p.name for p in (self.out / "offline").iterdir() if not p.name.startswith("pcba3d-"))
         self.assertEqual(packs, ["demo_board.js", "old_adapter.js", "sensor_breakout.js"])
         self.assertEqual(stats["packs"], 3)
         demo = (self.out / "offline" / "demo_board.js").read_text()
@@ -94,6 +94,58 @@ class SiteTest(unittest.TestCase):
         self.assertNotIn("p/sensor_breakout/", demo)
         self.assertIn("p/demo_board/sch/head/root.svg", demo)
         self.assertIn("p/demo_board/pcb/base/F_Cu.svg", demo)
+
+    @staticmethod
+    def pack_files(path: Path) -> dict:
+        """{path: entry} of a pcba3d pack (each `o.files[k] = v;` line is JSON)."""
+        out = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = re.fullmatch(r"  o\.files\[(.*?)\] = (.*);", line)
+            if m:
+                out[json.loads(m.group(1))] = json.loads(m.group(2))
+        return out
+
+    def test_pcba3d_constants_match_the_module(self):
+        src = (site.WEB / "pcba3d" / "gerberboard.js").read_text(encoding="utf-8")
+        self.assertIn(f"OFFLINE_WASM_KEY = '{site.PCBA3D_WASM}'", src)
+        kinds = re.search(r"FAB_KINDS = new Set\(\[([^\]]*)\]\)", src).group(1)
+        self.assertEqual(set(re.findall(r"'([a-z]+)'", kinds)), site.PCBA3D_FAB_KINDS)
+        self.assertTrue((site.WEB / "pcba3d" / site.PCBA3D_BUNDLE).is_file(), "committed 3D bundle missing")
+
+    def test_pcba3d_packs(self):
+        r = json.loads((self.out / "project-review.json").read_text())
+        (self.out / "secret.glb").write_bytes(b"SECRET")
+        glb = self.out / "p" / "demo_board" / "3d" / "head.glb"  # the mock has no GLBs
+        glb.parent.mkdir(parents=True, exist_ok=True)
+        glb.write_bytes(b"glTF\x02\x00\x00\x00")
+        p = r["projects"][2]  # a GLB path outside p/<slug>/ must not be packed
+        p["pcba3d"] = {**(p.get("pcba3d") or {}), "base": {"glb": "secret.glb"}}
+        (self.out / "project-review.json").write_text(json.dumps(r))
+        site.build_site(self.out)
+        site.build_offline(self.out)
+        data = json.loads(re.search(r"window\.KIPR_DATA = (.*);\n$", (self.out / "data.js").read_text()).group(1))
+        self.assertTrue(data["pcba3d"])
+        demo = self.pack_files(self.out / "offline" / "pcba3d-demo_board.js")
+        self.assertEqual(demo["p/demo_board/3d/head.glb"], {"b64": "Z2xURgIAAAA="})
+        self.assertTrue(any(k.endswith(".gbr") or k.endswith(".drl") for k in demo))
+        for f in (self.out / "offline").glob("pcba3d-*.js"):
+            self.assertNotIn("U0VDUkVU", f.read_text())  # base64("SECRET")
+        vendor = self.pack_files(self.out / "offline" / "pcba3d-vendor.js")
+        self.assertEqual(list(vendor), [site.PCBA3D_WASM])
+
+    @unittest.skipUnless(shutil.which("node"), "needs node")
+    def test_pcba3d_packs_match_build_offline_mjs(self):
+        """site.py writes the same 3D packs as the module's own node build."""
+        site.build_site(self.out)
+        site.build_offline(self.out)
+        py = {f.name: self.pack_files(f) for f in (self.out / "offline").glob("pcba3d-*.js")}
+        node_out = self.tmp / "node"
+        shutil.copytree(self.out, node_out)
+        shutil.rmtree(node_out / "offline")
+        subprocess.run(["node", str(site.WEB / "pcba3d" / "build_offline.mjs"), "--no-bundle", "--out", str(node_out)],
+                       check=True, capture_output=True)
+        js = {f.name: self.pack_files(f) for f in (node_out / "offline").glob("pcba3d-*.js")}
+        self.assertEqual(py, js)
 
     def test_confined_file(self):
         (self.out / "x.txt").write_text("x")

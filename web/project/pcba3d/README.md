@@ -93,11 +93,15 @@ following kicad-libs' component-review viewer:
 
 ```sh
 node web/project/pcba3d/build_offline.mjs --out OUT   # needs npx (esbuild@0.28.2 is fetched once)
+node web/project/pcba3d/build_offline.mjs --no-packs  # rebuild the committed bundle after a change
+node web/project/pcba3d/build_offline.mjs --check     # CI: fail if the committed bundle is stale
 ```
 
 - It writes `pcba3d.bundle.js` (sets `window.KIPR_PCBA3D = {mountPcba3d}` for the shell) and
   `demo.bundle.js`. Both are classic IIFE scripts with `import.meta.url` replaced by the
-  script's own URL, so relative assets resolve as before. They are git-ignored build output.
+  script's own URL, so relative assets resolve as before. `pcba3d.bundle.js` is **committed**
+  (and shipped in the wheel), so `kipr project site` needs no node: it copies the bundle and
+  writes the same packs in Python (`kipr/project/site.py`). `demo.bundle.js` is git-ignored.
 - It writes data packs in `OUT/offline/`:
   - `review.js`
   - `pcba3d-<slug>.js`: that project's GLBs as base64 and its fab files as text
@@ -165,8 +169,7 @@ files, one layer per call) and writes the contract.
 
 ## Known gaps
 
-- `file://` needs `build_offline.mjs` to run as part of building the report. Packs for boards with
-  big GLBs are large.
+- Packs for boards with big GLBs are large (base64, +33 %).
 - The silk toggle affects only the GLB's board. On the fab board the silkscreen is part of the
   face texture.
 - Only the head board is drawn in the overlay modes. A changed board outline or copper shows in

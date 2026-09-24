@@ -60,6 +60,7 @@ function autoViews(review) {
         [`${p.slug}-pcb-layers`, `${h}/layout?view=layers&mode=onion`], [`${p.slug}-pcb-diff`, `${h}/layout/F.Cu?view=top&mode=diff`]);
       if ((p.pcb.changes || []).length) v.push([`${p.slug}-pcb-change`, `${h}/layout?view=top&mode=side&c=0`]);
     }
+    if (hasPcba3d && (p.pcba3d?.base?.glb || p.pcba3d?.head?.glb)) v.push([`${p.slug}-pcba3d`, `${h}/pcba3d`]);
     v.push([`${p.slug}-bom`, `${h}/bom`], [`${p.slug}-netlist`, `${h}/netlist`], [`${p.slug}-checks`, `${h}/checks`]);
   }
   return v;
@@ -98,6 +99,17 @@ for (const theme of THEMES) {
       await page.goto('about:blank');
       await page.goto(base + hash);
       await settle(page);
+      if (!isMock && name.endsWith('-pcba3d')) {
+        // the real 3D viewer: wait until it has loaded both boards, and fail on a placeholder or viewer errors
+        const state = await page.waitForFunction(() => {
+          const host = document.querySelector('.pcba3d-host');
+          if (!host) return null;
+          if (host.dataset.ready !== undefined) return host.dataset.ready;
+          return host.querySelector(':scope > .empty') ? `placeholder: ${host.textContent.trim()}` : null;
+        }, null, { timeout: 180000 }).then((h) => h.jsonValue()).catch(() => 'timeout');
+        if (state !== '0') problems.push(`${tag} ${name}: 3D view not ready (${state})`);
+        await page.waitForTimeout(500);
+      }
       const file = path.join(a.shots, `${name}.${theme}.${sizeName}.png`);
       await page.screenshot({ path: file, fullPage: sizeName === 'narrow' });
       shots.push(file);

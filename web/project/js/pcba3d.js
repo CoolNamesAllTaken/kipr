@@ -23,6 +23,7 @@ export function createPcba3dView(project, container) {
       const h = await mod.mountPcba3d(host, project, baseUrl);
       if (destroyed) { h?.destroy?.(); return; }
       handle = h;
+      markReady(host, h);
     }).catch(() => { if (!destroyed) serveHint(); });
   } else {
     import('../pcba3d/index.js')
@@ -33,6 +34,7 @@ export function createPcba3dView(project, container) {
         const h = await mod.mountPcba3d(host, project, baseUrl);
         if (destroyed) { h?.destroy?.(); return; }
         handle = h;
+        markReady(host, h);
       })
       .catch((e) => {
         if (destroyed) return;
@@ -44,6 +46,11 @@ export function createPcba3dView(project, container) {
     destroy() { destroyed = true; try { handle?.destroy?.(); } catch { /* module teardown errors are not ours */ } },
     focusRef(ref) { handle?.focus?.(ref); },
   };
+}
+
+/** host[data-ready] = number of viewer errors once the module has loaded its data (for tests and scripts). */
+function markReady(host, h) {
+  Promise.resolve(h?.ready).then(() => { host.dataset.ready = String((h?.errors || []).length); }, () => { host.dataset.ready = 'failed'; });
 }
 
 let offlineBundle = null;
