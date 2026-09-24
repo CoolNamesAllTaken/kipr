@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kipr 3D PCBA demo</title>
+<style>
+  :root { --bg: #ffffff; --panel: #f6f8fa; --text: #1f2328; --muted: #656d76; --border: #d0d7de; --accent: #0969da; --add: #2ea043; --del: #e5534b; }
+  :root[data-theme="dark"] { --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8d96a0; --border: #30363d; --accent: #2f81f7; --add: #3fb950; --del: #f85149; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0; }
+  header select, header input, header button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+  header input { width: 320px; max-width: 100%; }
+  main { flex: 1; min-height: 0; padding: 10px 12px; }
+  #mount { height: 100%; min-height: 420px; }
+  #err { color: var(--del); }
+</style>
+</head>
+<body>
+<header>
+  <h1>kipr · 3D PCBA diff (standalone demo)</h1>
+  <label>OUT <input id="out" spellcheck="false"></label>
+  <label>Project <select id="project"></select></label>
+  <button id="theme" type="button">Theme</button>
+  <span id="err"></span>
+</header>
+<main><div id="mount"></div></main>
+<script type="module" src="./demo.js"></script>
+</body>
+</html>
