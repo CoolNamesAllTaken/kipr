@@ -1,6 +1,6 @@
-"""Unit tests for the component-review checks step. Stdlib unittest; also runs under pytest.
+"""Unit tests for the library review's checks stage (kipr.library.checks).
 
-  python3 -m unittest discover -s tools/component-review/checks/tests -v
+  python -m pytest tests/library
 """
 
 from __future__ import annotations
@@ -8,21 +8,21 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHECKS_DIR = os.path.dirname(HERE)
-REPO = os.path.abspath(os.path.join(CHECKS_DIR, "..", "..", ".."))
-sys.path.insert(0, CHECKS_DIR)
+FIXTURES = os.path.join(HERE, "fixtures", "kicad-libs", "head")
 sys.path.insert(0, HERE)
 
-import cr_checks as cr  # noqa: E402
-import kicad_checks as kc  # noqa: E402
-import make_mock_out  # noqa: E402
-import sexpr  # noqa: E402
+import fixture_repo  # noqa: E402
+import lib_mock_out as make_mock_out  # noqa: E402
+
+from kipr.common import sexpr  # noqa: E402
+from kipr.library.checks import kicad_checks as kc  # noqa: E402
+from kipr.library.checks import klc_utils  # noqa: E402
+from kipr.library.checks import main as cr  # noqa: E402
 
 FP_OK = """(footprint "R_0603_1608Metric"
 	(version 20260206)
@@ -196,7 +196,6 @@ class KlcUtilsTests(unittest.TestCase):
 
     def test_parse_junit_filters_repo_conventions(self):
         import xml.etree.ElementTree as ET
-        import klc_utils
         f = klc_utils.parse_junit(ET.fromstring(self.JUNIT))
         self.assertEqual([x["severity"] for x in f], ["info", "warning"])
         self.assertIn("Pad '9' missing layer 'Paste'", f[0]["message"])
@@ -205,8 +204,7 @@ class KlcUtilsTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
     def test_real_checker(self):
-        import klc_utils
-        path = os.path.join(REPO, "lib_fp/Custom_Package_SO.pretty/SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm.kicad_mod")
+        path = os.path.join(FIXTURES, "lib_fp/Custom_Package_SO.pretty/SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm.kicad_mod")
         if not os.path.isfile(path):
             self.skipTest("demo footprint not in this checkout")
         with open(path) as fh:
@@ -263,14 +261,6 @@ class PathSafetyTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # end-to-end on a mock OUT built from this repo's PR range (or synthetic data)
 # ---------------------------------------------------------------------------
-
-def _have_git_range():
-    try:
-        subprocess.run(["git", "-C", REPO, "rev-parse", "origin/main"], check=True, capture_output=True)
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-
 
 def build_synthetic_out(out):
     """Minimal OUT without git: one footprint + one symbol pointing at it."""
@@ -374,12 +364,13 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(cr.run(self.args()), 2)
 
 
-@unittest.skipUnless(_have_git_range(), "needs origin/main in the repo")
 class RepoMockOutTests(unittest.TestCase):
-    """Runs against the real PR files of the demo branch (origin/main..HEAD)."""
+    """Runs against real kicad-libs parts in a fixture repo (tests/library/fixture_repo.py)."""
 
     def test_repo_mock_out(self):
         with tempfile.TemporaryDirectory() as tmp:
+            REPO = os.path.join(tmp, "repo")
+            fixture_repo.build(REPO)
             out = os.path.join(tmp, "out")
             m = make_mock_out.build(REPO, "origin/main", "HEAD", out)
             if not m["items"]:

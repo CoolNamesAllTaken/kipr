@@ -1,9 +1,9 @@
-// Unit tests for the pure parts of the viewer.   node --test tools/component-review/viewer/testdata/unit.test.mjs
+// Unit tests for the pure parts of the viewer.   node --test tests/library/viewer/unit.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelMatrix, applyMatrix, padToPcb, padDrill, padCopperSides, padOutline } from '../js/kicad3d.js';
-import { safeUrl, assetUrl, githubBlobUrl } from '../js/util.js';
-import { diffRows } from '../js/details.js';
+import { modelMatrix, applyMatrix, padToPcb, padDrill, padCopperSides, padOutline } from '../../../web/library/js/kicad3d.js';
+import { safeUrl, assetUrl, githubBlobUrl } from '../../../web/library/js/util.js';
+import { diffRows } from '../../../web/library/js/details.js';
 
 const near = (a, b, eps = 1e-9) => a.every((v, i) => Math.abs(v - b[i]) < eps);
 

@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """Build a hand-made mock OUT directory for developing/testing the viewer.
 
-This is NOT the render engine (that lives in tools/component-review/render/). It is a
+This is NOT the render engine (that is kipr.library.render). It is a
 small, approximate stand-in that follows CONTRACT.md closely enough to exercise every
 viewer feature: added / modified / deleted footprints, a symbol, per-layer SVGs that
 share one viewBox, PNGs, diff.png, geom.json + STEP copies for the 3D view (CONTRACT Addendum 2),
@@ -10,7 +9,7 @@ unified diffs and a review.json.
 "Modified" base versions are synthesised by editing the head text (the demo PR only
 adds files), so the diffs are fake but structurally realistic.
 
-Usage:  python3 make_mock.py --repo <kicad-libs checkout> --out testdata/mock-out
+Usage:  python3 make_mock.py --repo <kicad-libs checkout or tests/library/fixture_repo.py repo> --out /tmp/mock-out
 Needs Pillow (for PNGs); everything else is stdlib.
 """
 import argparse

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build a contract-shaped mock OUT dir from a git range, for tests and local runs.
 
-Stand-in for the render step (tools/component-review/render/) when its output is
+Stand-in for the render stage (kipr.library.render) when its output is
 not available: renders are placeholder PNGs, stats are minimal.
 
-  python3 tests/make_mock_out.py --repo . --base origin/main --head HEAD --out /tmp/mock-out
+  python3 tests/library/lib_mock_out.py --repo . --base origin/main --head HEAD --out /tmp/mock-out
 """
 
 from __future__ import annotations
@@ -15,13 +15,9 @@ import os
 import re
 import struct
 import subprocess
-import sys
 import zlib
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-
-import sexpr  # noqa: E402
+from kipr.common import sexpr
 
 
 def tiny_png(w=64, h=48, rgb=(40, 40, 40)) -> bytes:
@@ -87,8 +83,9 @@ def build(repo, base, head, out, pr=None):
             d = os.path.join(out, "items", slug)
             os.makedirs(d, exist_ok=True)
             ext = "kicad_mod" if kind == "footprint" else "kicad_sym"
-            with open(os.path.join(d, f"head.{ext}"), "w") as f:
-                f.write(src)
+            if src is not None:  # deleted items have no head source
+                with open(os.path.join(d, f"head.{ext}"), "w") as f:
+                    f.write(src)
             with open(os.path.join(d, "head.png"), "wb") as f:
                 f.write(tiny_png())
             props = props_of(node) if node else {}
@@ -111,7 +108,7 @@ def build(repo, base, head, out, pr=None):
                 "model3d": models, "stats": {"head": {}, "base": None},
                 "renders": {"head": {"svg": None, "png": f"items/{slug}/head.png", "layers": {}}, "base": None},
                 "diff_png": None, "glb": {"head": None, "base": None}, "text_diff": None,
-                "source": {"head": f"items/{slug}/head.{ext}", "base": None},
+                "source": {"head": f"items/{slug}/head.{ext}" if src is not None else None, "base": None},
                 "warnings": ["mock: renders are placeholders"],
             })
     manifest = {"schema": 1, "repo": "PantsForBirds/kicad-libs", "pr": pr,

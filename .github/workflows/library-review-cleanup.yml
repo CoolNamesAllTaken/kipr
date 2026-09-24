@@ -1,0 +1,58 @@
+# kipr library review: remove a PR's preview (pr/<N>/ on gh-pages) when the PR is closed or merged.
+# Reusable. Call it from a `pull_request_target: types: [closed]` workflow; that trigger runs the
+# caller from the base branch, and no PR code is checked out here: only kipr at `kipr-ref` runs.
+#
+# Caller (see docs/library.md):
+#   on: pull_request_target: { types: [closed], paths: [lib_fp/**, lib_sch/**, lib_3d/**] }
+#   permissions: {}
+#   jobs:
+#     cleanup:
+#       if: vars.CR_PUBLISH != 'false'
+#       permissions: { contents: write, pull-requests: write }
+#       uses: CoolNamesAllTaken/kipr/.github/workflows/library-review-cleanup.yml@<ref>
+#       with: { kipr-ref: <same ref> }
+name: kipr library review (cleanup)
+
+on:
+  workflow_call:
+    inputs:
+      kipr-ref:
+        description: kipr git ref (tag/sha/branch) to install; use the ref of the `uses:` line
+        type: string
+        default: main
+      kipr-repository:
+        description: where kipr is installed from (owner/repo on github.com)
+        type: string
+        default: CoolNamesAllTaken/kipr
+
+permissions: {}
+
+jobs:
+  cleanup:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # push to gh-pages
+      pull-requests: write   # note on the sticky comment
+    concurrency:
+      group: component-review-cleanup-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GITHUB_TOKEN: ${{ github.token }}
+      KIPR_SPEC: kipr @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install kipr (trusted)
+        run: python3 -m pip install -q "$KIPR_SPEC"
+
+      - name: Remove preview from gh-pages
+        run: kipr library ci deploy-pages --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --delete --push
+
+      - name: Mark the review comment
+        continue-on-error: true
+        run: kipr library ci post-review --mark-closed --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"

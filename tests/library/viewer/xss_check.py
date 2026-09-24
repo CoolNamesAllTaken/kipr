@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Hostile-input check: the report is built from PR contents, so every string in manifest.json /
 review.json must be rendered as text and every URL filtered.
 
@@ -7,7 +6,7 @@ review.json must be rendered as text and every URL filtered.
 Rewrites manifest/review in a COPY of --site with injection payloads, opens every page and fails if
 any script runs, any injected element/attribute shows up, or any javascript:/data: link is rendered.
 --mode file rebuilds the file:// data (data.js, offline packs) from the poisoned copy with
-build_site.py and opens it from disk; it also poisons a diff with a </script> breakout and points
+kipr.library.site and opens it from disk; it also poisons a diff with a </script> breakout and points
 manifest paths outside the site, which must not end up in data.js or the packs.
 """
 import argparse
@@ -55,7 +54,7 @@ def poison(site: Path):
 
 def poison_offline(site: Path, m: dict) -> None:
     """Extra payloads for the file:// build: a diff that tries to break out of data.js, and manifest
-    paths that point outside the site (must be refused by build_site.py)."""
+    paths that point outside the site (must be refused by kipr.library.site)."""
     (site / "secret.txt").write_text("TOP-SECRET-OUTSIDE-ITEMS")
     for n, it in enumerate(m["items"]):
         d = site / "items" / it["slug"]
@@ -66,8 +65,7 @@ def poison_offline(site: Path, m: dict) -> None:
             it["geom"] = {"head": "secret.txt", "base": f"items/{it['slug']}/../../secret.txt"}
             it["model3d_by_side"] = {"head": [{"file": "/etc/passwd", "path_raw": P}], "base": [{"file": "items/../secret.txt"}]}
     (site / "manifest.json").write_text(json.dumps(m))
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    import build_site  # noqa: E402
+    from kipr.library import site as build_site
     build_site.build(site)
     build_site.build_offline(site)
     blobs = [(site / "data.js").read_text()] + [p.read_text() for p in (site / "offline").glob("*.js")]
