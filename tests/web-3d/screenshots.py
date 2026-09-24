@@ -91,6 +91,12 @@ def main():
         cases.append((f"{slug}-side", {"mode": "side"}, slug))
         cases.append((f"{slug}-highlight", {"mode": "highlight"}, slug))
 
+    slugs = {p["slug"] for p in review["projects"]}
+    unknown = sorted({slug for _, _, slug in cases} - slugs)
+    if unknown:
+        print(f"no such project in {out}: {', '.join(unknown)} (has: {', '.join(sorted(slugs))})")
+        return 2
+
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
         for name, spec, slug in cases:

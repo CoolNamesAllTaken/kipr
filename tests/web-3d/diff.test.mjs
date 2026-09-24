@@ -71,6 +71,8 @@ test('summary: one line per status', () => {
   assert.equal(summary(r), '0° → 90°');
   const [f] = normalizeComponents([{ ref: 'R5', base: side(), head: side({ footprint: 'Lib:R_0805' }) }]);
   assert.equal(summary(f), 'R_0603 → R_0805');
+  const [o] = normalizeComponents([{ ref: 'R5', status: 'changed', base: side(), head: side(), what: ['pads', 'fields'] }]);
+  assert.equal(summary(o), 'pads, fields');
   const [a] = normalizeComponents([{ ref: 'R5', base: null, head: side() }]);
   assert.equal(summary(a), '10k · Lib:R_0603');
 });
