@@ -494,6 +494,9 @@ def make_item(out, repo_root, kind, lib, name, path, status, head_text, base_tex
         "stats": {s: (info[s][3] if info[s] else None) for s in ("head", "base")},
         "model3d_by_side": model3d_by_side if kind == "footprint" else None,
         "geom": geoms if kind == "footprint" else None,
+        # the shared frame, as the renderer writes it (the viewer reads it instead of an SVG's viewBox,
+        # which a page opened from file:// could not fetch)
+        "view": {"viewbox": [round(v, 4) for v in vb], "units": "mm", "y_axis": "down"},
         "renders": renders, "diff_png": diff, "glb": None,
         "text_diff": f"items/{slug}/diff.patch",
         "source": {s: (f"items/{slug}/{s}.{ext}" if info[s] else None) for s in ("head", "base")},
