@@ -6,7 +6,7 @@ https://github.com/CoolNamesAllTaken/wasm-gerber-viewer, which adds the exported
 
 **Generated; do not edit.** Refresh with `bash web/project/scripts/sync_vendored_renderer.bash`.
 
-- JavaScript: fork commit `ec2afa6` (`claud/board-diff`), `packages/wasm-gerber-renderer/*.js` and `*.d.ts` minus the Node entry point.
+- JavaScript: fork commit `9b95fbc` (`claud/board-diff`), `packages/wasm-gerber-renderer/*.js` and `*.d.ts` minus the Node entry point.
   Shared by the layout view (`js/gerber.js`) and the 3D module (`pcba3d/`).
 - wasm: the published npm release wasm-gerber-renderer@0.6.0 (wasm-pack not installed here).
 

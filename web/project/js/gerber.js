@@ -5,7 +5,7 @@
 // into a plain 2D canvas that the view places in its world. Renders are queued: the renderer cannot run
 // two frames at once.
 import { fetchText, OFFLINE } from './util.js';
-import { kicadBoxToGerber } from './board.js';
+import { kicadBoxToGerber, gerberPointToKicad } from './board.js';
 
 let rendererPromise = null;
 let glCanvas = null;
@@ -34,7 +34,12 @@ async function getRenderer() {
       const wasmUrl = new URL('../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm', import.meta.url);
       // wasm-bindgen's init takes {module_or_path}; a bare URL still works but logs a deprecation warning
       const renderer = await mod.createGerberRenderer(glCanvas, { wasmInitInput: { module_or_path: wasmUrl } });
-      return { mod, renderer };
+      // the fork's board compositing and layer diff (claud/board-diff); same renderer, same frame rules
+      const [board, diff] = await Promise.all([
+        import('../vendor/wasm-gerber-renderer/board.js'),
+        import('../vendor/wasm-gerber-renderer/diff.js'),
+      ]);
+      return { mod, renderer, board, diff };
     })();
     rendererPromise.catch(() => { rendererPromise = null; });
   }
@@ -88,6 +93,75 @@ async function doRender(layers, box, r, origin) {
   out.width = W; out.height = H;
   out.getContext('2d').drawImage(glCanvas, 0, 0);
   return { canvas: out, failures };
+}
+
+function frameSize(box, r) {
+  return { W: Math.max(1, Math.round(box.w * r)), H: Math.max(1, Math.round(box.h * r)) };
+}
+
+function copyCanvas(W, H) {
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  out.getContext('2d').drawImage(glCanvas, 0, 0);
+  return out;
+}
+
+async function texts(paths) {
+  const t = await Promise.all(paths.map((p) => (p ? fetchText(p).catch(() => null) : null)));
+  return t;
+}
+
+/**
+ * A realistic board face (the fork's addBoardLayers: substrate inside the outline, finish on copper in
+ * mask openings, mask, silk clipped to the openings and the outline, transparent holes) over KiCad mm
+ * `box` at r px/mm. Not mirrored: the stage mirrors the bottom view itself.
+ * face: {outline, copper, mask, silk, drills: []} gerber paths (null when absent).
+ */
+export function renderFace(face, side, box, r, { origin = [0, 0], palette = {} } = {}) {
+  const job = queue.then(async () => {
+    const { mod, renderer, board } = await getRenderer();
+    const { W, H } = frameSize(box, r);
+    const [outline, copper, mask, silk, ...drills] = await texts([face.outline, face.copper, face.mask, face.silk, ...(face.drills || [])]);
+    const src = (text, name) => (text && !isEmpty(text, name === 'drill' ? 'drill' : 'gerber') ? { source: text, name } : null);
+    const desc = {
+      outline: src(outline, 'outline'),
+      [side]: { copper: src(copper, 'copper'), mask: src(mask, 'mask'), silk: src(silk, 'silk') },
+      drills: drills.map((t) => src(t, 'drill')).filter(Boolean),
+    };
+    const view = mod.calculateFitView(kicadBoxToGerber(box, origin), W, H, 0);
+    await renderer.withFrame({ width: W, height: H, background: null, compositeMode: 'stack', view, renderDrills: true }, async () => {
+      await board.addBoardLayers(renderer, desc, { side, palette, holes: true, clipSilk: true });
+    });
+    return { canvas: copyCanvas(W, H), failures: [] };
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+
+/**
+ * The fork's GPU layer diff of one layer (base vs head gerber paths, either may be null) over KiCad mm
+ * `box` at r px/mm: {canvas, regions: [{x, y, w, h} KiCad mm], counts: {removed, added, common}}.
+ */
+export function renderLayerDiff(basePath, headPath, box, r, { origin = [0, 0], kind = 'gerber', colors = null } = {}) {
+  const job = queue.then(async () => {
+    const { mod, renderer, diff } = await getRenderer();
+    const { W, H } = frameSize(box, r);
+    const [b, h] = await texts([basePath, headPath]);
+    const side = (t) => (t && !isEmpty(t, kind) ? { source: t } : null);
+    const view = mod.calculateFitView(kicadBoxToGerber(box, origin), W, H, 0);
+    const rep = await diff.analyzeLayerDiff(renderer, { base: side(b), head: side(h) }, {
+      width: W, height: H, view, skipIdentical: false, showUnchanged: true, colors: colors || undefined,
+      mergeDistance: Math.max(2, Math.round(1.5 * r)), minRegionPixels: 3, maxRegions: 200,
+    });
+    const regions = (rep.regions || []).filter((q) => q.world).map((q) => {
+      const [x0, y1] = gerberPointToKicad(q.world.minX, q.world.minY, origin);
+      const [x1, y0] = gerberPointToKicad(q.world.maxX, q.world.maxY, origin);
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, kind: q.kind, pixels: q.addedPixels + q.removedPixels };
+    });
+    return { canvas: copyCanvas(W, H), regions, counts: { removed: rep.removedPixels, added: rep.addedPixels, common: rep.unchangedPixels } };
+  });
+  queue = job.catch(() => {});
+  return job;
 }
 
 /** True for a gerber/drill file that draws nothing (the renderer rejects those). */

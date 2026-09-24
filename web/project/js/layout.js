@@ -8,13 +8,15 @@ import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './rast
 import { createModeBar, legend } from './widgets.js';
 import { comparePanes } from './compare.js';
 import {
-  layerList, sortLayers, defaultOn, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin, boardStyle,
+  layerList, sortLayers, defaultOn, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
   layerColor, cssColor, grow, union,
 } from './board.js';
-import { renderGerbers, gerberUnavailableReason } from './gerber.js';
+import { renderGerbers, renderFace, renderLayerDiff, gerberUnavailableReason } from './gerber.js';
 
 const MODES = [['side', 'Side by side'], ['diff', 'Diff'], ['onion', 'Onion skin'], ['swipe', 'Swipe']];
 const VIEWS = [['top', 'Top'], ['bottom', 'Bottom'], ['layers', 'Layers']];
+// same red / green / grey as the SVG and schematic diffs (inkdiff.js DIFF_COLORS)
+const GPU_DIFF_COLORS = { removed: [0.88, 0.16, 0.16], added: [0.12, 0.69, 0.27], unchanged: [0.43, 0.43, 0.43] };
 const LAYER_ALPHA = { copper: 0.85, mask: 0.45, paste: 0.6, silk: 0.95, outline: 1, drill: 1, fab: 0.8, courtyard: 0.8, user: 0.7 };
 const layerVisible = new Map(); // persists across projects, like the library viewer's layer state
 let preferred = { mode: 'side', view: 'top' };
@@ -52,7 +54,10 @@ export function createLayoutView(project, container, ctx) {
   const hasGerbers = layers.some((l) => gerberOf(l, 'head') || gerberOf(l, 'base'));
   const useGl = !noGl && hasGerbers;
   const origin = gerberOrigin(pcb);
-  const style = boardStyle(pcb.board);
+  const b0 = obj(pcb.board) || {};
+  // the fork's palette resolves colour names / #hex itself; unknown values fall back to its defaults
+  const palette = { mask: typeof b0.mask_color === 'string' ? b0.mask_color : undefined, silk: typeof b0.silk_color === 'string' ? b0.silk_color : undefined,
+    finish: typeof b0.finish === 'string' && b0.finish.toLowerCase() !== 'none' ? b0.finish : undefined, maskAlpha: 0.85 };
   const sides = { base: project.status !== 'added', head: project.status !== 'removed' };
   const bothSides = sides.base && sides.head;
   const modes = bothSides ? MODES : [['single', sides.head ? 'Head (added)' : 'Base (removed)'], ['diff', 'Diff']];
@@ -153,20 +158,8 @@ export function createLayoutView(project, container, ctx) {
   }
 
   function gerberJob(side) {
-    const set = layerSetFor(side).filter((x) => x.path);
-    if (view === 'layers') {
-      return set.map(({ l, path }) => ({ path, color: layerColor(l), alpha: LAYER_ALPHA[l.kind] ?? 0.8, kind: l.kind }));
-    }
-    const job = [];
-    for (const { l, path } of set) {
-      if (l.kind === 'outline') {
-        job.push({ path, outline: true, hidden: true }, { path, invert: true, color: style.fr4, alpha: 1 });
-      } else if (l.kind === 'copper') job.push({ path, color: style.copper, alpha: 1 });
-      else if (l.kind === 'mask') job.push({ path, invert: true, color: style.mask, alpha: 0.8 }); // copper under the mask shows, like a real board
-      else if (l.kind === 'silk') job.push({ path, color: style.silk, alpha: 1 });
-      else if (l.kind === 'drill') job.push({ path, kind: 'drill', color: [0.04, 0.04, 0.05], alpha: 1 });
-    }
-    return job;
+    return layerSetFor(side).filter((x) => x.path)
+      .map(({ l, path }) => ({ path, color: layerColor(l), alpha: LAYER_ALPHA[l.kind] ?? 0.8, kind: l.kind }));
   }
 
   function wantR() {
@@ -184,12 +177,24 @@ export function createLayoutView(project, container, ctx) {
     const holder = el('div', { class: 'layer-holder', dataset: { side } });
     stage.place(holder, box);
     if (useGl) {
-      const job = gerberJob(side);
-      if (!job.length) { holder.append(el('div', { class: 'missing-msg' }, 'no gerbers for these layers')); return holder; }
-      const key = `${side}|${view}|${JSON.stringify(job.map((j) => [j.path, j.invert, j.color]))}|${renderR}`;
+      let key;
+      let make;
+      if (view === 'layers') {
+        const job = gerberJob(side);
+        if (!job.length) { holder.append(el('div', { class: 'missing-msg' }, 'no gerbers for these layers')); return holder; }
+        key = `${side}|layers|${JSON.stringify(job.map((j) => [j.path, j.color]))}|${renderR}`;
+        make = () => renderGerbers(job, box, renderR, { origin });
+      } else {
+        const f = faceLayers(layers, view);
+        const face = { outline: gerberOf(f.outline, side), copper: gerberOf(f.copper, side), mask: gerberOf(f.mask, side), silk: gerberOf(f.silk, side),
+          drills: f.drills.map((l) => gerberOf(l, side)).filter(Boolean) };
+        if (!face.outline && !face.copper) { holder.append(el('div', { class: 'missing-msg' }, 'no gerbers for this face')); return holder; }
+        key = `${side}|${view}|${JSON.stringify(face)}|${renderR}`;
+        make = () => renderFace(face, view, box, renderR, { origin, palette });
+      }
       if (!cache.has(key)) {
         if (cache.size > 16) cache.delete(cache.keys().next().value);
-        cache.set(key, renderGerbers(job, box, renderR, { origin }));
+        cache.set(key, make());
       }
       holder.append(el('div', { class: 'loading small' }, 'Rendering…'));
       cache.get(key).then(({ canvas, failures }) => {
@@ -237,7 +242,9 @@ export function createLayoutView(project, container, ctx) {
         const one = (side) => (gerberOf(layer, side) && sides[side]
           ? renderGerbers([{ path: gerberOf(layer, side), color: [1, 1, 1], alpha: 1, kind: layer.kind }], box, r, { origin }).then(({ canvas }) => canvasRgba(canvas))
           : Promise.resolve(null));
-        p = Promise.all([one('base'), one('head')]).then(([b, h]) => ensure(b, h, box, r)).then(([b, h]) => diffRasters(b, h, box, r, { mode: 'alpha', tol: 1 }));
+        p = renderLayerDiff(sides.base ? gerberOf(layer, 'base') : null, sides.head ? gerberOf(layer, 'head') : null, box, r,
+          { origin, kind: layer.kind === 'drill' ? 'drill' : 'gerber', colors: GPU_DIFF_COLORS })
+          .catch(() => Promise.all([one('base'), one('head')]).then(([b, h]) => ensure(b, h, box, r)).then(([b, h]) => diffRasters(b, h, box, r, { mode: 'alpha', tol: 1 })));
       } else {
         const r = rasterScale(box.w, box.h, 12);
         const one = (side) => (svgOf(layer, side) && sides[side]
