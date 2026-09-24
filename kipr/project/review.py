@@ -18,6 +18,10 @@ from ._compat import Git, KicadCli, find_kicad_cli
 
 SIDES = ("base", "head")
 
+# Violation types that compare against the global libraries; meaningless with --fast-checks.
+LIBRARY_CHECKS = {"lib_footprint_issues", "lib_footprint_mismatch", "footprint_link_issues",
+                  "lib_symbol_issues", "lib_symbol_mismatch"}
+
 
 def default_cache_dir() -> str:
     base = os.environ.get("KIPR_CACHE_DIR") or os.path.join(
@@ -47,9 +51,10 @@ class Side:
 
 class ProjectReview:
     def __init__(self, git: Git, proj: discover.Project, slug: str, out: str, tmp: str, shas: dict,
-                 exporter: export.Exporter | None, step: bool, glb: bool, log):
+                 exporter: export.Exporter | None, step: bool, glb: bool, log, fast_checks: bool = False):
         self.git, self.proj, self.slug, self.out = git, proj, slug, out
         self.tmp, self.exporter, self.step, self.glb, self.log = tmp, exporter, step, glb, log
+        self.fast_checks = fast_checks
         self.errors: list[str] = []
         self.timings: dict[str, float] = {}
         self.sides = {s: Side(s, shas[s]) for s in SIDES}
@@ -102,7 +107,8 @@ class ProjectReview:
             layers = []
             if s.pcb:
                 layers = self._quick_layers(os.path.join(s.root, s.pcb))
-            for job in export.side_jobs(s.pcb, s.sch, layers, step=self.step, glb=self.glb):
+            for job in export.side_jobs(s.pcb, s.sch, layers, step=self.step, glb=self.glb,
+                                        fast_checks=self.fast_checks):
                 s.futures[job.name] = self.exporter.submit(job, s.root, s.blobs, self.pdir)
 
     @staticmethod
@@ -393,6 +399,8 @@ class ProjectReview:
                 try:
                     with open(f, encoding="utf-8") as fh:
                         parsed[s.name] = diff_net.parse_report(fh.read(), kind)
+                    if self.fast_checks:
+                        parsed[s.name] = [v for v in parsed[s.name] if v["type"] not in LIBRARY_CHECKS]
                     if kind == "erc" and s.schem is not None and s.schem.sheets:
                         page = max(max(x.size_mm) for x in s.schem.sheets)
                         if diff_net.fix_erc_scale(parsed[s.name], page):
@@ -407,6 +415,8 @@ class ProjectReview:
             d["report"] = report
             if scaled:
                 d["pos_scale_fixed"] = 100
+            if self.fast_checks:
+                d["libraries"] = "project"  # global libraries not loaded, library checks dropped
             out[kind] = d
         return out
 
@@ -489,7 +499,7 @@ def unique_slug(name: str, used: set) -> str:
 
 def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str | None = None,
         jobs: int = 4, cache_dir: str | None = None, step: bool = False, glb: bool = True,
-        repo_url: str | None = None, no_export: bool = False, log=print) -> dict:
+        repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print) -> dict:
     git = Git(repo)
     shas = {"base": git.rev_parse(base), "head": git.rev_parse(head)}
     os.makedirs(out, exist_ok=True)
@@ -520,7 +530,7 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
         for proj in projects:
             slug = unique_slug(proj.name, used)
             log(f"- {proj.path or '.'} ({proj.status}) -> p/{slug}")
-            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log)
+            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks)
             try:
                 doc["projects"].append(pr.run())
             except Exception as e:  # noqa: BLE001  never crash the whole review for one project

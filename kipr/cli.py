@@ -20,6 +20,9 @@ def main(argv=None):
     pp.add_argument("--no-export", action="store_true", help="semantic diffs only, don't run kicad-cli")
     pp.add_argument("--step", action="store_true", help="also export STEP models of the boards")
     pp.add_argument("--no-glb", action="store_true", help="skip the GLB (3D PCBA) export")
+    pp.add_argument("--fast-checks", action="store_true",
+                    help="run ERC/DRC without the global KiCad libraries (much faster; library "
+                         "mismatch checks are skipped)")
     pp.add_argument("--jobs", type=int, default=4, help="parallel kicad-cli processes (default: 4)")
     pp.add_argument("--cache-dir", help="export cache (default: $KIPR_CACHE_DIR or ~/.cache/kipr)")
     pp.add_argument("--repo-url", help="https URL of the repo for source links (default: origin if GitHub)")
@@ -32,7 +35,7 @@ def main(argv=None):
         from kipr.project.review import run
         doc = run(args.repo, args.base, args.head, args.out, patterns=args.projects, kicad_cli=args.kicad_cli,
                   jobs=args.jobs, cache_dir=args.cache_dir, step=args.step, glb=not args.no_glb,
-                  repo_url=args.repo_url, no_export=args.no_export)
+                  repo_url=args.repo_url, no_export=args.no_export, fast_checks=args.fast_checks)
         n_err = sum(len(p.get("errors") or []) for p in doc["projects"]) + len(doc["errors"])
         print(f"wrote {args.out}/project-review.json: {len(doc['projects'])} project(s), {n_err} error(s)")
         return 0

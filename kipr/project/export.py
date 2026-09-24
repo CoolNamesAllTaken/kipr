@@ -38,6 +38,7 @@ class Job:
     output: str  # "dir" | file name
     inputs: tuple[str, ...]  # suffixes of the files this job depends on
     ok_codes: tuple[int, ...] = (0,)
+    isolated_libs: bool = False  # run with empty global symbol/footprint library tables (fast checks)
 
 
 @dataclass
@@ -52,7 +53,7 @@ class JobResult:
 
 
 def side_jobs(board_file: str | None, sch_file: str | None, layers: list[str], step: bool = False,
-              glb: bool = True) -> list[Job]:
+              glb: bool = True, fast_checks: bool = False) -> list[Job]:
     """Jobs for one side. `board_file`/`sch_file` are paths relative to the side root."""
     jobs = []
     if sch_file:
@@ -94,7 +95,28 @@ def side_jobs(board_file: str | None, sch_file: str | None, layers: list[str], s
             jobs.append(Job("step", ("pcb", "export", "step"), ["--subst-models", ("--user-origin", "0x0mm"), "--force",
                                                                 ("--output", "{out}/board.step")],
                             board_file, "board.step", PCB_INPUTS + MODEL_INPUTS, ok_codes=(0, 2)))
+    if fast_checks:
+        for j in jobs:
+            if j.name in ("erc", "drc"):
+                j.isolated_libs = True
     return jobs
+
+
+# Global library tables kicad-cli would otherwise load in full (the slow part of ERC/DRC).
+_EMPTY_TABLES = {"sym-lib-table": "(sym_lib_table\n  (version 7)\n)\n",
+                 "fp-lib-table": "(fp_lib_table\n  (version 7)\n)\n"}
+
+
+def isolated_home(parent: str) -> str:
+    """A throw-away HOME whose KiCad config has empty global library tables."""
+    home = tempfile.mkdtemp(prefix=".home-", dir=parent)
+    for ver in ("9.0", "10.0"):
+        d = os.path.join(home, ".config", "kicad", ver)
+        os.makedirs(d)
+        for name, text in _EMPTY_TABLES.items():
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write(text)
+    return home
 
 
 class Exporter:
@@ -112,7 +134,8 @@ class Exporter:
     def key(self, job: Job, root_rel: str, blobs: dict[str, str]) -> str:
         """`blobs`: {path relative to the side root: git blob id} of the checked-out files."""
         h = hashlib.sha256()
-        h.update(f"{CACHE_VERSION}\0{self.cli.version}\0{job.cmd}\0{job.options}\0{job.target}\0{root_rel}\0".encode())
+        h.update(f"{CACHE_VERSION}\0{self.cli.version}\0{job.cmd}\0{job.options}\0{job.target}\0{root_rel}\0"
+                 f"{job.isolated_libs}\0".encode())
         for p in sorted(blobs):
             if p.endswith(job.inputs) or posixpath.basename(p) in job.inputs:
                 h.update(f"{p}\0{blobs[p]}\0".encode())
@@ -137,7 +160,16 @@ class Exporter:
         tmp = tempfile.mkdtemp(prefix=f".{key}-", dir=self.cache_dir)
         opts = [(o[0], o[1].replace("{out}", tmp)) if isinstance(o, tuple) else o for o in job.options]
         t0 = time.monotonic()
-        ok, msg, rc = self.cli.run(job.cmd, opts, os.path.join(side_root, job.target), cwd=side_root)
+        env, home = None, None
+        if job.isolated_libs:
+            home = isolated_home(self.cache_dir)
+            # HOME/XDG for a plain kicad-cli, KIPR_KICAD_HOME for the kipr-tools wrapper
+            env = {"HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config"), "KIPR_KICAD_HOME": home}
+        try:
+            ok, msg, rc = self.cli.run(job.cmd, opts, os.path.join(side_root, job.target), cwd=side_root, env=env)
+        finally:
+            if home:
+                shutil.rmtree(home, ignore_errors=True)
         dt = time.monotonic() - t0
         files = sorted(os.path.relpath(os.path.join(d, f), tmp) for d, _, fs in os.walk(tmp) for f in fs)
         if job.output != "dir":

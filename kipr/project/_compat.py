@@ -154,7 +154,8 @@ class KicadCli:
     def supports(self, cmd: tuple[str, ...], option: str) -> bool:
         return option in self.help(*cmd)
 
-    def run(self, cmd: tuple[str, ...], options: list, target: str, cwd: str | None = None):
+    def run(self, cmd: tuple[str, ...], options: list, target: str, cwd: str | None = None,
+            env: dict | None = None):
         """Run `kicad-cli *cmd [options] target`. `options` items are "--flag" or ("--opt", value);
         ones the installed kicad-cli doesn't list in --help are skipped. Returns (ok, message, rc)."""
         args = [self.exe, *cmd]
@@ -165,7 +166,8 @@ class KicadCli:
             args.extend([o[0], str(o[1])] if isinstance(o, tuple) else [o])
         args.append(target)
         try:
-            r = subprocess.run(args, capture_output=True, text=True, timeout=self.timeout, cwd=cwd)
+            r = subprocess.run(args, capture_output=True, text=True, timeout=self.timeout, cwd=cwd,
+                               env={**os.environ, **env} if env else None)
         except subprocess.TimeoutExpired:
             return False, f"timed out after {self.timeout:.0f}s: {' '.join(cmd)}", -1
         except OSError as e:
