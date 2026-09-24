@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from kipr.project import discover, review
-from kipr.project._compat import Git
+from kipr.common.git import Git
 
 from .test_pcb_diff import HEADER, fp
 from .test_sch_diff import root, sym
@@ -122,7 +122,7 @@ def test_review_without_kicad_cli(repo, tmp_path):
 
 def test_review_missing_kicad_cli_is_reported_not_fatal(repo, tmp_path, monkeypatch):
     r, base = repo
-    monkeypatch.setattr("kipr.project._compat.shutil.which", lambda *_: None)
+    monkeypatch.setattr("kipr.common.kicad_cli.shutil.which", lambda *_: None)
     monkeypatch.delenv("KIPR_KICAD_CLI", raising=False)
     write(r, "boards/b/b.kicad_pcb", "(kicad_pcb (unbalanced")
     head = commit(r, "broken board")

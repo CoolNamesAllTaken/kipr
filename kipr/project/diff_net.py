@@ -7,7 +7,7 @@ import math
 import re
 from collections import defaultdict
 
-from ._compat import parse
+from kipr.common.sexpr import parse
 
 # --- netlist ---------------------------------------------------------------------------
 

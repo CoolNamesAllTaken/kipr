@@ -1,7 +1,9 @@
 """End-to-end run against the public kipr-fixtures repo with a real kicad-cli.
 
-Skipped unless both exist. Locations: $KIPR_FIXTURES (default: ../kipr-fixtures next to this
-checkout, then /workspace/projects/kipr-fixtures) and $KIPR_KICAD_CLI / kicad-cli on PATH.
+Skipped unless both exist (an error instead with $KIPR_REQUIRE_INTEGRATION=1, as in CI).
+Locations: $KIPR_FIXTURES (default: ../kipr-fixtures next to this checkout, then
+/workspace/projects/kipr-fixtures) and $KIPR_KICAD_CLI / kicad-cli on PATH. Build the fixture repo
+with tests/project/fixtures/build.sh DEST (expected changes: tests/project/fixtures/CHANGES.md).
 Set $KIPR_CACHE_DIR to reuse exports between runs (a cold run takes ~1-2 minutes, mostly ERC/DRC).
 """
 
@@ -12,7 +14,7 @@ import subprocess
 import pytest
 
 from kipr.project import review
-from kipr.project._compat import find_kicad_cli
+from kipr.common.kicad_cli import find as find_kicad_cli
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,6 +35,8 @@ def rev(repo, ref):
 
 REPO = fixtures_repo()
 CLI = find_kicad_cli()
+if os.environ.get("KIPR_REQUIRE_INTEGRATION") and (not REPO or not CLI):  # CI: fail instead of skipping
+    raise RuntimeError(f"KIPR_REQUIRE_INTEGRATION is set but fixtures={REPO} kicad-cli={CLI}")
 pytestmark = pytest.mark.skipif(not REPO or not CLI, reason="needs kipr-fixtures and kicad-cli")
 
 

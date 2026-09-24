@@ -14,7 +14,9 @@ from dataclasses import dataclass, field
 
 from .. import __version__
 from . import diff_net, diff_pcb, diff_sch, discover, export, pcb, sch
-from ._compat import Git, KicadCli, find_kicad_cli
+from ..common import kicad_cli as kicad_cli_mod
+from ..common.git import Git
+from ..common.kicad_cli import KicadCli
 
 SIDES = ("base", "head")
 
@@ -501,20 +503,20 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
         jobs: int = 4, cache_dir: str | None = None, step: bool = False, glb: bool = True,
         repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print) -> dict:
     git = Git(repo)
-    shas = {"base": git.rev_parse(base), "head": git.rev_parse(head)}
+    shas = {"base": git.rev(base), "head": git.rev(head)}
     os.makedirs(out, exist_ok=True)
     top_errors = []
     cli = None
-    exe = None if no_export else find_kicad_cli(kicad_cli)
+    exe = None if no_export else kicad_cli_mod.find(kicad_cli)
     if exe:
-        cli = KicadCli(exe)
+        cli = KicadCli(os.path.abspath(exe))
     elif not no_export:
         top_errors.append("kicad-cli not found: no SVG/gerber/3D exports, netlist taken from the board, "
                           "no ERC/DRC (use --kicad-cli or $KIPR_KICAD_CLI)")
     exporter = export.Exporter(cli, cache_dir or default_cache_dir(), jobs) if cli else None
     projects = discover.find_projects(git, shas["base"], shas["head"], patterns)
     log(f"kipr project: {len(projects)} changed project(s) between {shas['base'][:7]} and {shas['head'][:7]}")
-    url = repo_url or git.remote_url()
+    url = repo_url or git.github_url()
     doc = {
         "version": 1,
         "tool": {"name": "kipr", "version": __version__, "kicad": cli.version if cli else None},

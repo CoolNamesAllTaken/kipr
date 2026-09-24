@@ -19,7 +19,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from ._compat import KicadCli
+from kipr.common.kicad_cli import KicadCli
 
 CACHE_VERSION = "1"
 

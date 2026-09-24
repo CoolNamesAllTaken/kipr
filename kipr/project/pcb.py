@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass, field
 
 from . import geom
-from ._compat import Atom, Node, dumps, parse
+from kipr.common.sexpr import Atom, Node, dumps, parse
 
 R = 4  # rounding for geometric keys (0.1 µm)
 

@@ -7,7 +7,7 @@ import posixpath
 import re
 from dataclasses import dataclass, field
 
-from ._compat import Git
+from kipr.common.git import Git
 
 # Same noise filter as the old kiri workflow (.github/workflows/kicad-diff.yml in internal).
 NOISE = re.compile(r"(^|/)\.history/|-backups/|(^|/)panelized/")
@@ -56,13 +56,13 @@ def project_deps(git: Git, sha: str, pdir: str, files: list[str]) -> set[str]:
     for f in files:
         base = posixpath.basename(f)
         if base in TABLES:
-            text = git.show_text(sha, f) or ""
+            text = git.text(sha, f) or ""
             for uri in URI_RE.findall(text):
                 p = resolve(uri, pdir)
                 if p:
                     deps.add(p)
         elif f.endswith(".kicad_pcb"):
-            text = git.show_text(sha, f) or ""
+            text = git.text(sha, f) or ""
             for m in set(MODEL_RE.findall(text)):
                 p = resolve(m, pdir)
                 if p:

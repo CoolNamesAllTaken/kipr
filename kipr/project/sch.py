@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import geom
-from ._compat import Node, dumps, parse
+from kipr.common.sexpr import Node, dumps, parse
 from .pcb import pt, rnd, shape_points
 
 # Paper sizes in mm (landscape), see KiCad's PAGE_INFO.
