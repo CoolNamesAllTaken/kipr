@@ -1,0 +1,128 @@
+# kipr project review: sticky PR comment (privileged). Reusable.
+#
+# Call it from a `workflow_run` workflow of the repository (triggered when its project-review
+# caller finishes). workflow_run workflows always run from the caller's DEFAULT BRANCH, so the
+# `uses: ...@<ref>` line and `kipr-ref` come from trusted, merged code. This workflow never
+# checks out or executes anything from the pull request: the only code it runs is kipr, installed
+# from `kipr-repository` at `kipr-ref`. The artifacts of the PR run are untrusted data: the PR
+# number is verified against the API (resolve-pr), only project-review.json is downloaded (size
+# capped, type-checked), and all its text is escaped before it reaches the PR. No GitHub Pages
+# (works for private repositories): the comment links to the run's artifacts.
+#
+# Caller (see docs/project.md):
+#   on: workflow_run: { workflows: ["KiCad project review"], types: [completed] }
+#   permissions: {}
+#   jobs:
+#     publish:
+#       permissions: { pull-requests: write, actions: read }
+#       uses: CoolNamesAllTaken/kipr/.github/workflows/project-review-publish.yml@<ref>
+#       with: { kipr-ref: <same ref> }
+name: kipr project review (publish)
+
+on:
+  workflow_call:
+    inputs:
+      kipr-ref:
+        description: kipr git ref (tag/sha/branch) to install; use the ref of the `uses:` line
+        type: string
+        default: main
+      kipr-repository:
+        description: where kipr is installed from (owner/repo on github.com)
+        type: string
+        default: CoolNamesAllTaken/kipr
+
+permissions: {}
+
+jobs:
+  publish:
+    # A failed review run still gets a comment (pointing at the log) if it produced pr-meta.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pull-requests: write   # sticky comment
+      actions: read          # download the artifacts of the triggering run
+    concurrency:
+      group: kipr-project-review-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      KIPR_SPEC: kipr @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+    steps:
+      - name: Set paths
+        run: |
+          # Untrusted downloads live in their own directory, away from the tools.
+          echo "UNTRUSTED=$RUNNER_TEMP/untrusted" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Trusted code: kipr at the ref pinned by the caller's default-branch workflow file.
+      - name: Install kipr (trusted)
+        run: |
+          python3 -m pip install -q "$KIPR_SPEC"
+          kipr project ci --help > /dev/null
+
+      - name: Download PR metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-meta
+          path: ${{ runner.temp }}/untrusted/meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve and verify PR
+        id: pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          kipr project ci resolve-pr --meta "$UNTRUSTED/meta/pr.json" \
+            --repo "$GITHUB_REPOSITORY" --run-head-sha "$RUN_HEAD_SHA"
+
+      - name: Download review data
+        if: steps.pr.outputs.skip == 'false'
+        continue-on-error: true   # a failed run may have none; the comment then says so
+        uses: actions/download-artifact@v4
+        with:
+          name: project-review-data
+          path: ${{ runner.temp }}/untrusted/data
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Comment
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          # artifact ids of the triggering run -> direct download links
+          artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" || echo '{}')
+          url_of() {
+            local id
+            id=$(jq -r --arg n "$1" '[.artifacts[]? | select(.name == $n) | .id][0] // empty' <<< "$artifacts")
+            if [[ "$id" =~ ^[0-9]+$ ]]; then echo "$run_url/artifacts/$id"; fi
+          }
+          note=""
+          if [ "$RUN_CONCLUSION" != "success" ]; then note="The review run failed; see the workflow run for the log."; fi
+          kipr project ci post-comment --data "$UNTRUSTED/data/project-review.json" \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" --run-url "$run_url" \
+            --report-url "$(url_of project-review.html)" --site-url "$(url_of project-review-site)" \
+            --data-url "$(url_of project-review-data)" ${note:+--note "$note"} \
+            --comment-out "$RUNNER_TEMP/comment.md"
+          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Skipped
+        if: steps.pr.outputs.skip == 'true'
+        env:
+          REASON: ${{ steps.pr.outputs.reason }}
+        run: |
+          echo "::notice::KiCad project review not published: $REASON"
