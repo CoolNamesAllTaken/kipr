@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  angleDelta, whatChanged, deriveStatus, normalizeComponents, countByStatus, describe, summary,
+  tagsOf, angleDelta, whatChanged, deriveStatus, normalizeComponents, countByStatus, describe, summary,
 } from '../../web/project/pcba3d/diff.js';
 
 const side = (o = {}) => ({ x: 10, y: 20, rot: 0, side: 'top', footprint: 'Lib:R_0603', value: '10k', model: 'r.step', dnp: false, ...o });
@@ -75,4 +75,16 @@ test('summary: one line per status', () => {
   assert.equal(summary(o), 'pads, fields');
   const [a] = normalizeComponents([{ ref: 'R5', base: null, head: side() }]);
   assert.equal(summary(a), '10k · Lib:R_0603');
+});
+
+test('tagsOf: a part moved and turned counts under both, primary status first', () => {
+  const [d12] = normalizeComponents([{ ref: 'D12', status: 'moved', base: side({ rot: 180 }), head: side({ x: 13, rot: 270 }), what: ['position', 'rotation'] }]);
+  assert.deepEqual(tagsOf(d12), ['moved', 'rotated']);
+  assert.equal(summary(d12), 'moved 3.00 mm · 180° → 270°');
+  const [c] = normalizeComponents([{ ref: 'C9', base: side(), head: side({ footprint: 'Lib:X', x: 11 }) }]);
+  assert.deepEqual(tagsOf(c), ['changed', 'moved']);
+  const [a] = normalizeComponents([{ ref: 'A1', base: null, head: side() }]);
+  assert.deepEqual(tagsOf(a), ['added']);
+  const counts = countByStatus([d12, c, a]);
+  assert.deepEqual([counts.moved, counts.rotated, counts.changed, counts.added], [2, 1, 1, 1]);
 });

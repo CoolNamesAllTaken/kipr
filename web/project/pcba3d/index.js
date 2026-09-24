@@ -13,7 +13,7 @@
 // and `ready` resolves when they are in (it never rejects: problems are shown in the viewer
 // and listed in `h.errors`).
 
-import { normalizeComponents, countByStatus, describe, summary, STATUSES } from './diff.js';
+import { normalizeComponents, countByStatus, describe, summary, tagsOf, STATUSES } from './diff.js';
 import { fetchBytes, parseGlb, prepareSide } from './scene.js';
 import { Pcba3dView, MODES } from './viewer.js';
 
@@ -150,7 +150,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   let meshless = new Set();
   function renderList() {
     const q = search.value.trim().toLowerCase();
-    const shown = components.filter((c) => filters.has(c.status) && (!q || [c.ref, c.base?.value, c.head?.value, c.base?.footprint, c.head?.footprint]
+    const shown = components.filter((c) => tagsOf(c).some((t) => filters.has(t)) && (!q || [c.ref, c.base?.value, c.head?.value, c.base?.footprint, c.head?.footprint]
       .some((v) => v && String(v).toLowerCase().includes(q))));
     rowByRef = new Map();
     rows.replaceChildren(...shown.map((c) => {
@@ -161,6 +161,8 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
         onmouseleave: () => view.highlight(null),
       }, h('span', { class: `kp3d-dot ${c.status}` }), h('span', { class: 'ref' }, c.ref),
       h('span', { class: 'sum' }, summary(c) || STATUS_LABELS[c.status]),
+      tagsOf(c).length > 1 ? h('span', { class: 'kp3d-tags' }, tagsOf(c).map((t) =>
+        h('span', { class: `kp3d-badge ${t}`, title: STATUS_LABELS[t] }, t))) : null,
       meshless.has(c.ref) ? h('span', { class: 'nomesh', title: 'No 3D geometry found for this component' }, 'no 3D') : null);
       rowByRef.set(c.ref, li);
       return li;
@@ -235,7 +237,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   function statusLine() {
     const parts = [];
     const total = components.length;
-    const changed = total - counts.unchanged;
+    const changed = components.filter((c) => c.status !== 'unchanged').length;
     parts.push(`${total} components, ${changed} changed`);
     for (const k of ['base', 'head']) {
       const s = sideState[k];

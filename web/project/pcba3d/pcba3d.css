@@ -125,6 +125,8 @@
 .kp3d-rows li[aria-selected="true"] { background: color-mix(in srgb, var(--kp3d-accent) 18%, transparent); }
 .kp3d-rows .ref { font-weight: 600; min-width: 42px; }
 .kp3d-rows .sum { color: var(--kp3d-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.kp3d-tags { display: inline-flex; gap: 3px; flex: none; }
+.kp3d-tags .kp3d-badge { font-size: 10px; padding: 0 5px; }
 .kp3d-rows .nomesh { color: var(--kp3d-muted); font-size: 11px; }
 .kp3d-empty { padding: 12px; color: var(--kp3d-muted); }
 

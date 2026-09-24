@@ -71,10 +71,26 @@ export function isChange(c) {
   return c.status !== 'unchanged';
 }
 
-/** Counts per status, every status present (0 when none). */
+/**
+ * Every kind of change a component shows, primary status first. The contract gives one status
+ * per part (changed > moved > rotated), but a part that was moved AND turned is both, and a
+ * reviewer filtering for rotations must not miss it: D12 moved 3.59 mm and 180° -> 270° is
+ * tagged ['moved', 'rotated'].
+ */
+export function tagsOf(c) {
+  const tags = [c.status];
+  const what = c.what || [];
+  if (c.status === 'unchanged' || c.status === 'added' || c.status === 'removed') return tags;
+  if (what.includes('position') && !tags.includes('moved')) tags.push('moved');
+  if (what.includes('rotation') && !tags.includes('rotated')) tags.push('rotated');
+  if (what.some((w) => !['position', 'rotation'].includes(w)) && !tags.includes('changed')) tags.push('changed');
+  return tags;
+}
+
+/** Counts per tag (see tagsOf), every status present (0 when none): a part counts once per tag. */
 export function countByStatus(list) {
   const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-  for (const c of list) counts[c.status] = (counts[c.status] || 0) + 1;
+  for (const c of list) for (const t of tagsOf(c)) counts[t] = (counts[t] || 0) + 1;
   return counts;
 }
 
