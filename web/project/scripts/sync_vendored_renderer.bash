@@ -3,8 +3,9 @@
 #
 #     bash web/project/scripts/sync_vendored_renderer.bash [FORK_CHECKOUT] [REF]
 #
-# FORK_CHECKOUT defaults to $WGV or ../wasm-gerber-viewer next to this repo; REF (default: the
-# checkout's HEAD) is exported with `git archive`, so the checkout's working tree is not touched.
+# FORK_CHECKOUT defaults to $WGV or ../wasm-gerber-viewer next to this repo; REF defaults to the pinned
+# fork commit below (bump it deliberately, then re-run); it is exported with `git archive`, so the
+# checkout's working tree is not touched (fetch first if the commit is missing).
 # The JavaScript half (index.js, shared.js, index.d.ts and any extra ES modules the package ships,
 # e.g. diff.js / board.js) comes from REF. The wasm half needs a Rust toolchain: with `wasm-pack`
 # it is built from REF; without it the published npm release WASM_NPM_VERSION (default 0.6.0) is
@@ -17,7 +18,9 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 repo_root=$(cd "$here/../.." && pwd)
 fork=${1:-${WGV:-$repo_root/../wasm-gerber-viewer}}
-ref=${2:-HEAD}
+# pinned: fork main after PR #1 (board compositing + layer diff, outline.js) was merged
+PINNED_REF=b8d2d78
+ref=${2:-$PINNED_REF}
 target="$here/vendor/wasm-gerber-renderer"
 pkg=packages/wasm-gerber-renderer
 

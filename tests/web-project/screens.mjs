@@ -117,6 +117,7 @@ for (const theme of THEMES) {
     await settle(page);
     await page.keyboard.press('r');
     const pane = page.locator('.pane').first();
+    await pane.scrollIntoViewIfNeeded();
     const bb = await pane.boundingBox();
     if (bb) {
       await page.mouse.click(bb.x + bb.width * 0.3, bb.y + bb.height * 0.4);
