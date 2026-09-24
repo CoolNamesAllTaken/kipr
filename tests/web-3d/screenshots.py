@@ -141,7 +141,14 @@ def main():
             for t in ([toggle] if isinstance(toggle, str) else toggle or []):
                 page.click(f"input[data-toggle={t}]")
             if board_source:
-                page.click(f"button[data-board={board_source}]")
+                button = page.query_selector(f"button[data-board={board_source}]")
+                if button and button.is_visible() and button.is_enabled():
+                    button.click()
+                else:
+                    # No fab outputs in this OUT (the mocks): the GLB board is the only board.
+                    print(f"{name:14s} skipped: this project has no board from gerbers to switch from")
+                    page.close()
+                    continue
             if cycle:
                 # Mount/dispose through every project twice (what the shell does on tab changes):
                 # nothing may throw and WebGL contexts must not pile up.

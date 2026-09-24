@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # All 3D PCBA viewer tests. Usage: sh tests/web-3d/run.sh [--real] [--browser]
 #   (always)   node unit tests: matching, diff, board solid, offline packs, GLB preparation
 #              (the mock OUT is generated if missing)
@@ -10,6 +10,8 @@
 # The board-from-gerbers parts need the shared renderer vendored in web/project/vendor/ (the
 # project viewer's copy); without it those tests skip and the viewer falls back to the GLB board.
 set -eu
+# kipr-tools' pw-env finds itself through BASH_SOURCE, so this runs under bash even as `sh run.sh`.
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 cd "$(dirname "$0")/../.."
 TOOLS=/workspace/projects/kipr-tools
 if [ -z "${PYTHON:-}" ] && [ -x "$TOOLS/pw-venv/bin/python" ]; then
