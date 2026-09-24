@@ -254,6 +254,7 @@ changed name are not reported.
 ```jsonc
 {"base_count": 12, "head_count": 13,
  "new": [{"severity": "error", "type": "clearance", "description": "…", "items": ["…"],
+          "uuids": ["…"],               // KiCad uuids of the items (locate them in the files)
           "pos_mm": [x, y],             // first item's position; board mm (DRC) or sheet mm (ERC)
           "sheet": "/",                 // ERC: sheet path as KiCad prints it; DRC: null
           "category": "violation"}],    // violation | unconnected | parity (DRC schematic parity)

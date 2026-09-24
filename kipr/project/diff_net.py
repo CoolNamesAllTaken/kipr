@@ -123,6 +123,7 @@ def parse_report(text: str, kind: str) -> list[dict]:
         pos = next((i["pos"] for i in items if i["pos"] and i["pos"][0] is not None), None)
         out.append({"severity": v.get("severity", "error"), "type": v.get("type", ""),
                     "description": v.get("description", ""), "items": [i["description"] for i in items],
+                    "uuids": [i["uuid"] for i in items if isinstance(i.get("uuid"), str) and i["uuid"]],
                     "pos_mm": [round(pos[0], 4), round(pos[1], 4)] if pos else None, "sheet": sheet,
                     "category": category})
 

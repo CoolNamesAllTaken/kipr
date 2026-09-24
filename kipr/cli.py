@@ -27,6 +27,9 @@ def main(argv=None):
     pp.add_argument("--cache-dir", help="export cache (default: $KIPR_CACHE_DIR or ~/.cache/kipr)")
     pp.add_argument("--repo-url", help="https URL of the repo for source links (default: origin if GitHub)")
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:2] == ["project", "ci"]:
+        from kipr.project.ci import main as ci_main
+        return ci_main(argv[2:])
     if argv[:1] == ["library"]:
         from kipr.library.cli import main as library_main
         return library_main(argv[1:])

@@ -156,6 +156,10 @@ class Exporter:
         if os.path.isfile(manifest):
             with open(manifest) as fh:
                 m = json.load(fh)
+            try:  # mark as used, so a CI cache can drop entries a run didn't need
+                os.utime(manifest)
+            except OSError:
+                pass
             return JobResult(job.name, True, final, m["files"], m.get("message", ""), 0.0, cached=True)
         tmp = tempfile.mkdtemp(prefix=f".{key}-", dir=self.cache_dir)
         opts = [(o[0], o[1].replace("{out}", tmp)) if isinstance(o, tuple) else o for o in job.options]
