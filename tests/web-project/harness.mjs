@@ -1,6 +1,7 @@
 // Shared bits of the browser tests: a static server for a site dir and a Chromium launcher.
 // Chromium runs headless with SwiftShader, so WebGL2 (the gerber renderer) works without a GPU.
-// If Chromium's shared libraries are not installed system-wide, point LD_LIBRARY_PATH at them.
+// On the fleet container: `source /workspace/projects/kipr-tools/bin/pw-env` first (Chromium's shared
+// libraries, fonts, and PW_CHROMIUM_ARGS).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +30,8 @@ export function serve(root) {
 }
 
 export function launch() {
-  return chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] });
+  const env = process.env.PW_CHROMIUM_ARGS;
+  return chromium.launch({ args: env ? env.split(' ').filter(Boolean) : ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'] });
 }
 
 /** Wait until the viewer has settled: no loading placeholders, no pending renders. */

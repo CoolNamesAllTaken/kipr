@@ -162,7 +162,7 @@ export function createLayoutView(project, container, ctx) {
       if (l.kind === 'outline') {
         job.push({ path, outline: true, hidden: true }, { path, invert: true, color: style.fr4, alpha: 1 });
       } else if (l.kind === 'copper') job.push({ path, color: style.copper, alpha: 1 });
-      else if (l.kind === 'mask') job.push({ path, invert: true, color: style.mask, alpha: 0.9 });
+      else if (l.kind === 'mask') job.push({ path, invert: true, color: style.mask, alpha: 0.8 }); // copper under the mask shows, like a real board
       else if (l.kind === 'silk') job.push({ path, color: style.silk, alpha: 1 });
       else if (l.kind === 'drill') job.push({ path, kind: 'drill', color: [0.04, 0.04, 0.05], alpha: 1 });
     }

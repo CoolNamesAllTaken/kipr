@@ -90,7 +90,7 @@ for (const theme of THEMES) {
       if (!hasPcba3d && /pcba3d|404/.test(t)) return; // 3D module not part of this build
       problems.push(`${tag} console: ${t}`);
     });
-    page.on('requestfailed', (r) => problems.push(`${tag} requestfailed: ${r.url()} ${r.failure()?.errorText}`));
+    page.on('requestfailed', (r) => { if (!(!hasPcba3d && r.url().includes('/pcba3d/'))) problems.push(`${tag} requestfailed: ${r.url()} ${r.failure()?.errorText}`); });
     page.on('response', (r) => {
       if (r.status() >= 400 && !(!hasPcba3d && r.url().includes('/pcba3d/')) && !r.url().endsWith('.glb')) problems.push(`${tag} HTTP ${r.status()} ${r.url()}`);
     });
