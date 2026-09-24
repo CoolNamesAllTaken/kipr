@@ -1,0 +1,50 @@
+# Tests of the library reviewer (kipr.library, web/library): python, node and headless Chromium.
+name: library tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "kipr/common/**"
+      - "kipr/library/**"
+      - "web/library/**"
+      - "tests/library/**"
+      - "pyproject.toml"
+      - ".github/workflows/library-*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fonts-dejavu-core libcairo2
+          python -m pip install -q -e ".[3d,test]"
+          python -m playwright install --with-deps chromium
+      - name: Tests
+        run: python -m pytest tests/library -q
+      - name: kipr library on its fixture repo
+        run: |
+          python tests/library/fixture_repo.py "$RUNNER_TEMP/repo"
+          kipr library --repo "$RUNNER_TEMP/repo" --base origin/main --head HEAD --out "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: library-test-output
+          path: ${{ runner.temp }}/out
+          retention-days: 7
