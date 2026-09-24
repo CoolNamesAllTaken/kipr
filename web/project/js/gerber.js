@@ -32,7 +32,8 @@ async function getRenderer() {
       glCanvas = document.createElement('canvas');
       glCanvas.width = 16; glCanvas.height = 16;
       const wasmUrl = new URL('../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm', import.meta.url);
-      const renderer = await mod.createGerberRenderer(glCanvas, { wasmInitInput: wasmUrl });
+      // wasm-bindgen's init takes {module_or_path}; a bare URL still works but logs a deprecation warning
+      const renderer = await mod.createGerberRenderer(glCanvas, { wasmInitInput: { module_or_path: wasmUrl } });
       return { mod, renderer };
     })();
     rendererPromise.catch(() => { rendererPromise = null; });

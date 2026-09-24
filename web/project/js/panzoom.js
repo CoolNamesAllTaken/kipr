@@ -70,8 +70,11 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   }
 
   function apply() {
+    // overlay strokes are in mm (the SVG's viewBox); --px is one screen pixel in mm, so CSS can size them
+    const px = `${1 / (view.s * PX_PER_MM)}`;
     for (const p of panes) {
       p._world.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`;
+      p._overlay.style.setProperty('--px', px);
     }
     if (zoomLabel) zoomLabel.textContent = `${(view.s * PX_PER_MM).toFixed(1)} px/mm`;
     for (const fn of listeners) fn(view);
@@ -122,10 +125,10 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
       }
       if (measure.length) {
         const [a, b] = measure;
-        o.append(svgEl('circle', { cx: a.x, cy: a.y, r: 0.25, class: 'measure-pt' }));
+        o.append(svgEl('circle', { cx: a.x, cy: a.y, class: 'measure-pt' }));
         if (b) {
           o.append(svgEl('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'measure-line' }));
-          o.append(svgEl('circle', { cx: b.x, cy: b.y, r: 0.25, class: 'measure-pt' }));
+          o.append(svgEl('circle', { cx: b.x, cy: b.y, class: 'measure-pt' }));
         }
       }
     }

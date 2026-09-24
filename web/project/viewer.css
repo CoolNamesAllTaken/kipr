@@ -164,12 +164,13 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 .layer-holder.faint { opacity: .35; }
 .diff-canvas { image-rendering: auto; }
 .overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; transform-origin: 50% 50%; }
-.overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .55); stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-dasharray: 4 3; }
-.overlay .hl { fill: none; stroke: var(--hl); stroke-width: 3px; vector-effect: non-scaling-stroke; animation: pulse 1.2s ease-in-out 3; }
-@keyframes pulse { 50% { stroke-width: 7px; stroke-opacity: .5; } }
+.overlay { --px: 0.25; }
+.overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .6); stroke-width: calc(var(--px) * 1.5px); stroke-dasharray: calc(var(--px) * 5px) calc(var(--px) * 3px); }
+.overlay .hl { fill: none; stroke: var(--hl); stroke-width: calc(var(--px) * 3px); animation: pulse 1.2s ease-in-out 3; }
+@keyframes pulse { 50% { stroke-width: calc(var(--px) * 7px); stroke-opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .overlay .hl { animation: none; } }
-.overlay .measure-line { stroke: #00e5ff; stroke-width: 2px; vector-effect: non-scaling-stroke; }
-.overlay .measure-pt { fill: #00e5ff; }
+.overlay .measure-line { stroke: #00e5ff; stroke-width: calc(var(--px) * 2px); }
+.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .missing-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #8b949e; font-size: 20px; border: 2px dashed #8b949e; padding: 16px 20px; border-radius: 8px; white-space: nowrap; }
 .pane-label { position: absolute; top: 6px; right: 8px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .6); padding: 1px 8px; border-radius: 10px; pointer-events: none; }
 .pane-label.left { right: auto; left: 8px; }
