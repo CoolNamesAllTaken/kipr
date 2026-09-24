@@ -2,7 +2,8 @@
 // drill files), read either with fetch() or, when the report was opened from disk (file://,
 // where browsers block fetch), from data packs the report build embedded as classic scripts.
 //
-// A pack is `OUT/offline/pcba3d-<slug>.js` (written by pcba3d/build_offline.mjs) and does
+// A pack is `OUT/offline/pcba3d-<slug>.js` (plus `pcba3d-vendor.js` for the renderer's WASM),
+// written by pcba3d/build_offline.mjs, and does
 //     (window.KIPR_OFFLINE ||= {files: {}}).files['p/<slug>/3d/head.glb'] = {b64: '…'} | {text: '…'}
 // It is loaded on demand with a <script> tag, which file:// allows. The same idea as kicad-libs'
 // component-review viewer (tools/component-review/viewer/js/boot.js and its offline packs).
@@ -44,9 +45,13 @@ export function assetLoader(base, slug = null) {
 
   async function embedded(path) {
     let files = offlineFiles();
-    if ((!files || !(path in files)) && offline && slug) {
-      try { await loadScript(new URL(`offline/pcba3d-${slug}.js`, baseUrl).href); } catch { /* reported below */ }
-      files = offlineFiles();
+    if ((!files || !(path in files)) && offline) {
+      // The renderer's WASM is in a pack of its own (every project needs the same one).
+      const pack = path.startsWith('vendor/') ? 'offline/pcba3d-vendor.js' : slug ? `offline/pcba3d-${slug}.js` : null;
+      if (pack) {
+        try { await loadScript(new URL(pack, baseUrl).href); } catch { /* reported below */ }
+        files = offlineFiles();
+      }
     }
     return files && path in files ? files[path] : null;
   }

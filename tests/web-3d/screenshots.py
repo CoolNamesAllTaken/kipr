@@ -65,6 +65,8 @@ def main():
     ap.add_argument("--case", action="append", help="only these cases")
     ap.add_argument("--extra-project", action="append", default=[], help="also screenshot these projects in side mode")
     ap.add_argument("--prefix", default="", help="prefix for PNG names")
+    ap.add_argument("--file", action="store_true",
+                    help="open demo.html from disk (file://); needs build_offline.mjs --out OUT first")
     ap.add_argument("--allow-missing", action="store_true", help="do not fail on components without 3D geometry")
     args = ap.parse_args()
 
@@ -77,7 +79,7 @@ def main():
     httpd, root_url = serve(root)
     demo_dir = REPO / "web/project/pcba3d"
     out_rel = os.path.relpath(out, demo_dir) + "/"
-    demo_url = root_url + str(demo_dir.relative_to(root)) + "/demo.html?"
+    demo_url = (demo_dir / "demo.html").as_uri() + "?" if args.file else root_url + str(demo_dir.relative_to(root)) + "/demo.html?"
     failures = []
     written = []
 

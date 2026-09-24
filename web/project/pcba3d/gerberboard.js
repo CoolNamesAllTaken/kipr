@@ -32,7 +32,7 @@ const DIFF_BACKGROUND = '#2d333b'; // the board behind the diff: neutral, dark e
 // Unchanged copper has to read as copper at board scale (the fork's default is tuned for an
 // overlay on top of a render); changes stay the fork's red and green.
 const DIFF_STYLE = { unchanged: { color: [0.72, 0.64, 0.5], alpha: 0.7 } };
-const KINDS = new Set(['copper', 'mask', 'silk', 'outline', 'drill']);
+export const FAB_KINDS = new Set(['copper', 'mask', 'silk', 'outline', 'drill']);   // the layers a board is built from
 
 function basename(path) {
   return String(path).split('/').pop();
@@ -53,7 +53,7 @@ async function makeRenderer(assets) {
 
 /** One side's fab files: {files, grouped, edge, drills: [{name, text, plated}]}. */
 async function loadSideFiles(project, side, assets) {
-  const layers = (project.pcb?.layers || []).filter((l) => l[side]?.gerber && KINDS.has(l.kind)
+  const layers = (project.pcb?.layers || []).filter((l) => l[side]?.gerber && FAB_KINDS.has(l.kind)
     && !(l.kind === 'copper' && l.side === 'inner'));
   const files = await Promise.all(layers.map(async (l) => {
     const text = await assets.text(l[side].gerber);
@@ -61,8 +61,10 @@ async function loadSideFiles(project, side, assets) {
   }));
   if (!files.length) return null;
   // KiCad writes a layer with nothing on it (B_SilkS on a board with no bottom silkscreen) as a
-  // header-only gerber, which the renderer refuses; nothing on it is nothing to draw.
-  const grouped = groupBoardLayers(files.filter((f) => f.layer.kind === 'drill' || hasGeometry(f.content)));
+  // header-only gerber, which fork main still refuses (fixed in CoolNamesAllTaken/
+  // wasm-gerber-viewer#2; drop this filter once that is vendored). Nothing on it is nothing to
+  // draw -- except a mask: an empty mask is no openings, mask over the whole board.
+  const grouped = groupBoardLayers(files.filter((f) => f.layer.kind === 'drill' || f.layer.kind === 'mask' || hasGeometry(f.content)));
   // A drill file with no holes (KiCad writes a header-only NPTH.drl) is simply no holes.
   const drills = files.filter((f) => f.layer.kind === 'drill').map((f) => ({
     name: f.name, text: f.content, plated: !/^NPTH/i.test(f.layer.id) && !/NPTH/i.test(f.name),

@@ -1,6 +1,7 @@
 // Standalone harness for the 3D PCBA module: loads OUT/project-review.json and mounts one
-// project, the way the project viewer shell does. Serve the repository root over HTTP (ES modules
-// and fetch() do not work from file://):
+// project, the way the project viewer shell does. Serve the repository root over HTTP, or open
+// demo.html from disk after `node web/project/pcba3d/build_offline.mjs --out <OUT>` (see
+// demo-boot.js):
 //
 //   python3 -m http.server -d <repo> 8000
 //   http://localhost:8000/web/project/pcba3d/demo.html?out=../../../tests/web-3d/out/mock/&project=demo
@@ -26,9 +27,15 @@ let handle = null;
 
 async function loadOut(out) {
   const base = new URL(out.endsWith('/') ? out : `${out}/`, location.href);
-  const r = await fetch(new URL('project-review.json', base));
-  if (!r.ok) throw new Error(`HTTP ${r.status} for project-review.json`);
-  review = await r.json();
+  if (location.protocol === 'file:') {
+    // Opened from disk: demo-boot.js loaded OUT/offline/review.js (build_offline.mjs).
+    review = window.KIPR_OFFLINE?.review;
+    if (!review) throw new Error('no offline data: run node web/project/pcba3d/build_offline.mjs --out <OUT>');
+  } else {
+    const r = await fetch(new URL('project-review.json', base));
+    if (!r.ok) throw new Error(`HTTP ${r.status} for project-review.json`);
+    review = await r.json();
+  }
   review.baseUrl = base.href;
   select.replaceChildren(...review.projects.map((p) => new Option(`${p.name} (${p.status})`, p.slug)));
 }

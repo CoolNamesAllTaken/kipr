@@ -168,6 +168,13 @@ def derive_head(base_text):
     seg = re.sub(r'LED_D5\.0mm\.(wrl|step)"', r'LED_D3.0mm.\1"', seg)
     seg = re.sub(r'^\(footprint "[^"]*"', '(footprint "LED_THT:LED_D3.0mm"', seg, count=1)
     text = text[:f["node"].start] + seg + text[f["node"].end:]; edits.append("D10 footprint LED_D5.0mm -> LED_D3.0mm")
+    # Routing: the three longest track segments deleted, so the copper diff has something red.
+    board = parse(text)
+    segs = sorted(board.findall("segment"), key=lambda n: -math.hypot(
+        float(n.find("end")[1]) - float(n.find("start")[1]), float(n.find("end")[2]) - float(n.find("start")[2])))[:3]
+    for n in sorted(segs, key=lambda n: -n.start):
+        text = text[:n.start] + text[n.end:]
+    edits.append(f"{len(segs)} longest track segments deleted")
     return text, edits
 
 
@@ -219,6 +226,74 @@ def export_glb(pcb, out, errors, label):
     return True
 
 
+# Fab outputs: what the backend exports for the layout diff and the 3D board (contract Pcb.layers).
+FAB_LAYERS = [("F.Cu", "copper", "top"), ("B.Cu", "copper", "bottom"), ("F.Mask", "mask", "top"),
+              ("B.Mask", "mask", "bottom"), ("F.SilkS", "silk", "top"), ("B.SilkS", "silk", "bottom"),
+              ("Edge.Cuts", "outline", "none")]
+
+
+def export_fab(pcb, outdir, errors, label):
+    """Gerbers + separate PTH/NPTH Excellon into outdir, named like the backend names them.
+
+    One layer per kicad-cli call: KiCad names plot files after the board's own layer names
+    ("top_layer", "F_Silkscreen"), so a file's name does not say which layer it is."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    found, problems = {}, []
+    for layer, _, _ in FAB_LAYERS:
+        tmp = outdir / "_kicad"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        r = subprocess.run([KICAD_CLI, "pcb", "export", "gerbers", "--no-protel-ext", "-l", layer, "-o", str(tmp) + "/", str(pcb)],
+                           capture_output=True, text=True, timeout=600)
+        plots = list(tmp.glob("*.gbr"))
+        if r.returncode or len(plots) != 1:
+            problems.append(f"{layer}: rc={r.returncode} {r.stderr[-200:]}")
+        else:
+            name = layer.replace(".", "_") + ".gbr"
+            plots[0].replace(outdir / name)
+            found[layer] = name
+    tmp = outdir / "_kicad"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    r = subprocess.run([KICAD_CLI, "pcb", "export", "drill", "--excellon-separate-th", "-o", str(tmp) + "/", str(pcb)],
+                       capture_output=True, text=True, timeout=600)
+    for drill in ("PTH", "NPTH"):
+        files = list(tmp.glob(f"*-{drill}.drl"))
+        if files:
+            files[0].replace(outdir / f"{drill}.drl")
+            found[drill] = f"{drill}.drl"
+    if r.returncode:
+        problems.append(f"drill: rc={r.returncode} {r.stderr[-200:]}")
+    shutil.rmtree(tmp, ignore_errors=True)
+    if problems:
+        errors.append(f"kicad-cli fab export for {label}: " + "; ".join(problems))
+    return found
+
+
+def comparable(path):
+    """File text without the lines that differ between identical re-exports (dates, comments)."""
+    if not path.exists():
+        return None
+    return "\n".join(l for l in path.read_text().splitlines()
+                     if "CreationDate" not in l and not l.startswith(("G04", "; DRILL file", "; #@! TF.CreationDate")))
+
+
+def fab_layers(out, slug, found):
+    layers = []
+    for layer, kind, side in FAB_LAYERS + [("PTH", "drill", "none"), ("NPTH", "drill", "none")]:
+        entry = {"id": layer, "kind": kind, "side": side}
+        for s in ("base", "head"):
+            name = found[s].get(layer)
+            entry[s] = {"gerber": f"p/{slug}/pcb/{s}/{name}", "svg": None} if name else None
+        if not entry["base"] and not entry["head"]:
+            continue
+        a = comparable(out / entry["base"]["gerber"]) if entry["base"] else None
+        b = comparable(out / entry["head"]["gerber"]) if entry["head"] else None
+        entry["status"] = "added" if a is None else "removed" if b is None else "unchanged" if a == b else "modified"
+        layers.append(entry)
+    return layers
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(REPO / "tests/web-3d/out/real"))
@@ -254,6 +329,8 @@ def main():
     for side, pcb in (("base", base_pcb), ("head", head_pcb)):
         ok = export_glb(pcb, d3 / f"{side}.glb", errors, side)
         sides[side] = {"glb": f"p/{args.slug}/3d/{side}.glb"} if ok else None
+    found = {side: export_fab(pcb, out / "p" / args.slug / "pcb" / side, errors, side)
+             for side, pcb in (("base", base_pcb), ("head", head_pcb))}
     comps = components(footprints(base_board), footprints(head_board))
     bbox = board_bbox(head_board)
     counts = {k: sum(1 for c in comps if c["status"] == k) for k in ("added", "removed", "moved", "changed")}
@@ -261,7 +338,7 @@ def main():
         "slug": args.slug, "name": args.slug, "path": f"demos/{args.slug}", "status": "modified",
         "summary": {"components": counts}, "schematic": None,
         "pcb": {"board": {"origin_mm": bbox[0], "size_mm": bbox[1], "thickness_mm": 1.6} if bbox else None,
-                "layers": [], "changes": []},
+                "layers": fab_layers(out, args.slug, found), "changes": []},
         "pcba3d": {"base": sides["base"], "head": sides["head"], "components": comps},
         "bom": None, "netlist": None, "checks": {"erc": None, "drc": None}, "errors": errors,
     }
