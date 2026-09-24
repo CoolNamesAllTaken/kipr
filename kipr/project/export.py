@@ -198,8 +198,10 @@ def sheet_file_map(files: list[str], root_stem: str, sheets) -> dict[str, str]:
     return out
 
 
-# Creation timestamps (gerber %TF.CreationDate, drill headers, SVG <title>, gbrjob) differ per run.
-_VOLATILE = re.compile(rb"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?")
+# Creation timestamps (gerber %TF.CreationDate, drill headers, SVG <title>, gbrjob) differ per run;
+# the project id attribute carries the board revision, which is metadata rather than layer content.
+_VOLATILE = re.compile(rb"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?|"
+                       rb"TF\.ProjectId[^*\n]*")
 
 
 def same_content(a: str | None, b: str | None) -> bool | None:

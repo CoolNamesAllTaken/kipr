@@ -220,8 +220,9 @@ def _pad_box(pad: Node, tf, fprot: float):
 def _pad_key(pad: Node, fprot: float) -> str:
     """Pad canonical text, footprint-relative (pad angles in files include the footprint's)."""
     at = pad.child("at")
-    parts = [dumps(c, drop=("uuid", "tstamp", "net", "pinfunction", "pintype"))
-             for c in pad[1:] if not (isinstance(c, Node) and c.name == "at")]
+    drop = ("uuid", "tstamp", "net", "pinfunction", "pintype")
+    parts = [dumps(c, drop=drop) for c in pad[1:]
+             if not (isinstance(c, Node) and (c.name == "at" or c.name in drop))]
     if at is not None:
         n = at.nums() + [0, 0, 0]
         parts.insert(0, f"(at {rnd(n[0])} {rnd(n[1])} {rnd((n[2] - fprot) % 360)})")
