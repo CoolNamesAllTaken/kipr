@@ -198,7 +198,7 @@ class ProjectReview:
                 if same is False:
                     sh["status"] = "modified"
                     sh["changes"].append({"kind": "other", "what": "modified", "bbox_mm": None,
-                                          "detail": "rendering differs (e.g. title block / text variables)"})
+                                          "detail": "rendered page differs (e.g. page count or text variables in the title block)"})
         return {"sheets": sheets}
 
     def pcb_section(self, changes):

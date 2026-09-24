@@ -124,3 +124,27 @@ def test_bom_netlist_checks_3d(doc):
     assert p["pcba3d"]["head"]["glb"].endswith("3d/head.glb")
     s = p["summary"]
     assert s["components"]["added"] == 1 and s["components"]["removed"] == 1 and s["erc"] == {"new": 0, "fixed": 1}
+
+
+def test_complex_hierarchy_new_sheet_outline_and_drc(doc):
+    if "complex_hierarchy" not in [p["slug"] for p in doc["projects"]]:
+        pytest.skip("fixtures head predates the complex_hierarchy changes")
+    p = proj(doc, "complex_hierarchy")
+    assert p["errors"] == []
+    sheets = {s["id"]: s for s in p["schematic"]["sheets"]}
+    new = sheets["root/status_led"]
+    assert new["status"] == "added" and new["base"] is None and new["head"].endswith("sch/head/root/status_led.svg")
+    assert {c["ref"] for c in new["changes"]} == {"R401", "D401"}
+    assert any(c["kind"] == "sheet" and c["what"] == "added" for c in sheets["root"]["changes"])
+    fps = {c["ref"]: c["what"] for c in p["pcb"]["changes"] if c["kind"] == "footprint"}
+    assert fps == {"R401": "added", "D401": "added"}
+    assert {c["net"] for c in p["pcb"]["changes"] if c["kind"] == "track"} >= {"VCC", "GND", "/status_led/LED_A"}
+    assert any(c["kind"] == "outline" for c in p["pcb"]["changes"])
+    layers = {ly["id"]: ly["status"] for ly in p["pcb"]["layers"]}
+    assert layers["Edge.Cuts"] == "modified"
+    b = p["pcb"]["board"]
+    assert round(b["head"]["size_mm"][0] - b["base"]["size_mm"][0], 2) == 10.16
+    nets = {c["net"]: c["status"] for c in p["netlist"]["changes"]}
+    assert nets["/status_led/LED_A"] == "added"
+    assert [v["type"] for v in p["checks"]["drc"]["new"]] == ["track_width"]
+    assert p["checks"]["drc"]["fixed"] == []
