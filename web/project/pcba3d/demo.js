@@ -6,7 +6,7 @@
 //   http://localhost:8000/web/project/pcba3d/demo.html?out=../../../tests/web-3d/out/mock/&project=demo
 //
 // Query: out (OUT dir URL, relative to this page), project (slug), mode (side|overlay|highlight),
-// focus (a ref), theme (light|dark), explode (0..1).
+// focus (a ref), theme (light|dark), explode (0..1), fab=0 (keep the GLB's own board).
 
 import { mountPcba3d } from './index.js';
 
@@ -42,6 +42,7 @@ async function show(slug) {
     baseLabel: `Base · ${review.base?.short || 'base'}`,
     headLabel: `Head · ${review.head?.short || 'head'}`,
     mode: params.get('mode') || 'side',
+    fabBoard: params.get('fab') !== '0',
   });
   window.kipr3d = handle;           // for tests and the console
   await handle.ready;
@@ -51,6 +52,11 @@ async function show(slug) {
     input.dispatchEvent(new Event('input'));
   }
   if (params.get('focus')) handle.focus(params.get('focus'));
+  // The overlays paint the copper diff after the rest; wait for it so screenshots include it.
+  if (handle.view?.gerber && handle.view.mode !== 'side') {
+    await handle.view.gerber.diffTextures().catch(() => {});
+    await new Promise((r) => setTimeout(r, 50));
+  }
   document.body.dataset.ready = '1';
 }
 

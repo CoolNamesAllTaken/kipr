@@ -14,31 +14,7 @@ import { GLTFLoader } from './vendor/three/addons/GLTFLoader.js';
 import { mergeGeometries } from './vendor/three/utils/BufferGeometryUtils.js';
 import { mapNodesToRefs, refFromName } from './match.js';
 
-/** Fetch with byte progress: onProgress(loaded, total|0). */
-export async function fetchBytes(url, onProgress = () => {}, signal) {
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-  const total = Number(response.headers.get('content-length')) || 0;
-  if (!response.body || !response.body.getReader) {
-    const buf = await response.arrayBuffer();
-    onProgress(buf.byteLength, buf.byteLength);
-    return buf;
-  }
-  const reader = response.body.getReader();
-  const chunks = [];
-  let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.byteLength;
-    onProgress(loaded, total);
-  }
-  const out = new Uint8Array(loaded);
-  let at = 0;
-  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
-  return out.buffer;
-}
+export { fetchBytes } from './assets.js';
 
 export function parseGlb(buffer) {
   return new Promise((resolve, reject) => {

@@ -37,6 +37,8 @@ CASES = {
     "no-board": {"mode": "highlight", "toggle": "board"},
     "narrow": {"mode": "side", "viewport": (640, 900)},
     "cycle": {"mode": "overlay", "cycle": True},
+    "copper-diff": {"mode": "overlay", "view": "Top", "toggle": ["components", "markers"]},
+    "glb-board": {"mode": "side", "toggle_board": "glb"},
 }
 
 
@@ -98,7 +100,9 @@ def main():
         return 2
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+        # kipr-tools/bin/pw-env sets PW_CHROMIUM_ARGS (and the libraries chromium needs).
+        chromium_args = os.environ.get("PW_CHROMIUM_ARGS", "--use-angle=swiftshader --enable-unsafe-swiftshader").split()
+        browser = p.chromium.launch(args=chromium_args)
         for name, spec, slug in cases:
             viewport = spec.pop("viewport", (1400, 820))
             page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
@@ -116,6 +120,7 @@ def main():
             view = spec.pop("view", None)
             toggle = spec.pop("toggle", None)
             cycle = spec.pop("cycle", False)
+            board_source = spec.pop("toggle_board", None)
             if spec.get("focus") == "@first-change":
                 spec["focus"] = first_change(slug)
             query = {"out": out_rel, "project": slug, **spec}
@@ -131,8 +136,10 @@ def main():
             problems.extend(f"viewer: {e}" for e in viewer_errors)
             if view:
                 page.evaluate(f"kipr3d.view.fit('{view.lower()}')")
-            if toggle:
-                page.click(f"input[data-toggle={toggle}]")
+            for t in ([toggle] if isinstance(toggle, str) else toggle or []):
+                page.click(f"input[data-toggle={t}]")
+            if board_source:
+                page.click(f"button[data-board={board_source}]")
             if cycle:
                 # Mount/dispose through every project twice (what the shell does on tab changes):
                 # nothing may throw and WebGL contexts must not pile up.

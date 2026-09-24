@@ -41,10 +41,11 @@ export class Pcba3dView {
    * host: element the canvas goes into (sized by the caller).
    * callbacks: onHover({ref, side, x, y} | null), onPick(ref | null)
    */
-  constructor(host, { onHover = () => {}, onPick = () => {} } = {}) {
+  constructor(host, { onHover = () => {}, onPick = () => {}, onError = () => {} } = {}) {
     this.host = host;
     this.onHover = onHover;
     this.onPick = onPick;
+    this.onError = onError;
     this.sides = { base: null, head: null };
     this.statusOf = new Map();
     this.mode = 'side';
@@ -74,6 +75,14 @@ export class Pcba3dView {
     this.scene.add(this.camera);
     this.helpers = new THREE.Group();
     this.scene.add(this.helpers);
+    // One holder per side: side-by-side shows one holder per viewport. Each holds the side's GLB
+    // root and, when there is one, the board built from its fab outputs (gerberboard.js).
+    this.holders = { base: new THREE.Group(), head: new THREE.Group() };
+    this.fab = { base: new THREE.Group(), head: new THREE.Group() };
+    for (const k of ['base', 'head']) { this.holders[k].add(this.fab[k]); this.scene.add(this.holders[k]); }
+    this.gerber = null;              // buildGerberBoards() result
+    this.boardSource = 'gerber';     // 'gerber' (fab outputs) | 'glb' (the GLB's own board bodies)
+    this.diffMaterials = null;       // {top, bottom} once the copper diff is rendered
 
     this.materials = {
       baseGhost: ghost(STATUS_COLORS.removed, 0.45),
@@ -125,14 +134,52 @@ export class Pcba3dView {
   setSides(sides, statusOf) {
     for (const k of ['base', 'head']) {
       const old = this.sides[k];
-      if (old && old !== sides[k]) { this.scene.remove(old.root); disposeObject(old.root); }
+      if (old && old !== sides[k]) { this.holders[k].remove(old.root); disposeObject(old.root); }
       this.sides[k] = sides[k] || null;
-      if (this.sides[k]) this.scene.add(this.sides[k].root);
+      if (this.sides[k]) this.holders[k].add(this.sides[k].root);
     }
     this.statusOf = statusOf || new Map();
     this._computeExplodeDirs();
     this.applyMode();
     this.fit('iso');
+  }
+
+  /** Boards built from the fab outputs (gerberboard.js), or null to go back to the GLB's. */
+  setGerberBoards(gerber) {
+    if (this.gerber && this.gerber !== gerber) {
+      for (const k of ['base', 'head']) this.fab[k].clear();
+      this.gerber.dispose();
+      for (const m of Object.values(this.diffMaterials || {})) m.dispose();
+      this.diffMaterials = null;
+    }
+    this.gerber = gerber || null;
+    if (gerber) {
+      for (const k of ['base', 'head']) if (gerber.sides[k]) this.fab[k].add(gerber.sides[k].group);
+      if (gerber.ghost) this.fab.head.add(gerber.ghost);
+    }
+    this.applyMode();
+  }
+
+  /** 'gerber' (the board from the fab outputs) or 'glb' (the board bodies in the GLB). */
+  setBoardSource(source) {
+    this.boardSource = source === 'glb' ? 'glb' : 'gerber';
+    this.applyMode();
+  }
+
+  get usingFabBoard() {
+    return !!this.gerber && this.boardSource === 'gerber';
+  }
+
+  _loadDiff() {
+    if (this.diffMaterials || this._diffLoading || !this.gerber) return;
+    this._diffLoading = true;
+    this.gerber.diffTextures().then((t) => {
+      this.diffMaterials = {
+        top: new THREE.MeshStandardMaterial({ map: t.top, roughness: 0.7 }),
+        bottom: new THREE.MeshStandardMaterial({ map: t.bottom, roughness: 0.7 }),
+      };
+      this.applyMode();
+    }).catch((e) => this.onError(`copper diff: ${e.message || e}`)).finally(() => { this._diffLoading = false; });
   }
 
   setMode(mode) {
@@ -190,7 +237,7 @@ export class Pcba3dView {
         });
       }
       for (const [kind, list] of Object.entries(side.parts)) {
-        const on = kind === 'silk' ? show.silk : show.board;
+        const on = (kind === 'silk' ? show.silk : show.board) && !this.usingFabBoard;
         for (const p of list) {
           p.traverse((m) => {
             if (!m.isMesh) return;
@@ -204,8 +251,27 @@ export class Pcba3dView {
         }
       }
     }
+    this._applyFab();
     this._updateHelpers();
     this.dirty = true;
+  }
+
+  /** The fab board: normal faces side by side; the copper diff on the head's in the overlays. */
+  _applyFab() {
+    const g = this.gerber;
+    const overlaid = this.mode !== 'side';
+    for (const k of ['base', 'head']) {
+      const s = g?.sides[k];
+      this.fab[k].visible = !!s && this.usingFabBoard && this.show.board && !(overlaid && k === 'base');
+      if (!s) continue;
+      let faces = [s.materials.top, s.materials.bottom];
+      if (overlaid && k === 'head') {
+        if (this.diffMaterials) faces = [this.diffMaterials.top, this.diffMaterials.bottom];
+        else this._loadDiff();
+      }
+      s.body.material = [faces[0], faces[1], s.materials.walls];
+    }
+    if (g?.ghost) g.ghost.visible = overlaid;
   }
 
   /** The mesh's own material with an emissive glow in the status colour (cached per mesh). */
@@ -299,6 +365,7 @@ export class Pcba3dView {
       if (!side) continue;
       box.union(side.boardBox.isEmpty() ? side.bounds : side.boardBox);
     }
+    for (const s of Object.values(this.gerber?.sides || {})) if (s) box.union(new THREE.Box3().setFromObject(s.body));
     if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(50, 50, 2));
     return box;
   }
@@ -408,7 +475,7 @@ export class Pcba3dView {
   /* ─── Drawing ──────────────────────────────────────────────────────────────── */
 
   _showOnly(which) {
-    for (const k of ['base', 'head']) if (this.sides[k]) this.sides[k].root.visible = !which || k === which;
+    for (const k of ['base', 'head']) this.holders[k].visible = !which || k === which;
     for (const h of this.helpers.children) h.visible = !which || h.userData.side === which;
   }
 
@@ -424,7 +491,7 @@ export class Pcba3dView {
         renderer.setViewport(x, 0, vw, h);
         renderer.setScissor(x, 0, vw, h);
         this._showOnly(k);
-        if (this.sides[k]) renderer.render(this.scene, this.camera);
+        if (this.sides[k] || this.gerber?.sides[k]) renderer.render(this.scene, this.camera);
         else { renderer.setClearColor(this.scene.background || 0x000000); renderer.clear(); }
       }
       renderer.setScissorTest(false);
@@ -521,6 +588,8 @@ export class Pcba3dView {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     for (const k of ['base', 'head']) if (this.sides[k]) disposeObject(this.sides[k].root);
+    this.gerber?.dispose();
+    for (const m of Object.values(this.diffMaterials || {})) m.dispose();
     for (const m of Object.values(this.materials)) m.dispose();
     for (const m of this._tintList || []) m.dispose();
     for (const h of this.helpers.children) { h.geometry?.dispose(); h.material?.dispose(); }

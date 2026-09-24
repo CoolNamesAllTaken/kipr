@@ -65,8 +65,23 @@
   font-size: 12px; pointer-events: none;
 }
 .kp3d[data-mode="overlay"] .kp3d-legend.overlay, .kp3d[data-mode="highlight"] .kp3d-legend.highlight { display: flex; }
+.kp3d-swatch.added { background: var(--kp3d-added); }
+.kp3d-swatch.removed { background: var(--kp3d-removed); }
+.kp3d-swatch.moved { background: var(--kp3d-moved); }
+.kp3d-swatch.rotated { background: var(--kp3d-rotated); }
+.kp3d-swatch.changed { background: var(--kp3d-changed); }
+.kp3d-swatch.unchanged { background: #b8bcc4; }
+.kp3d-muted { color: var(--kp3d-muted); }
+.kp3d-stage-note { position: absolute; left: 16px; right: 16px; bottom: 16px; background: var(--kp3d-panel); }
 .kp3d-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 
+.kp3d-board-note {
+  position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 6px; font-size: 12px;
+  background: color-mix(in srgb, var(--kp3d-panel) 90%, transparent); border: 1px solid var(--kp3d-border);
+  color: var(--kp3d-muted); pointer-events: none;
+}
+.kp3d-board-note[hidden], .kp3d-seg[hidden] { display: none; }
+.kp3d-seg button:disabled { opacity: .5; cursor: default; }
 .kp3d-progress {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; background: color-mix(in srgb, var(--kp3d-bg) 70%, transparent); z-index: 2;

@@ -14,7 +14,9 @@
 // and listed in `h.errors`).
 
 import { normalizeComponents, countByStatus, describe, summary, tagsOf, STATUSES } from './diff.js';
-import { fetchBytes, parseGlb, prepareSide } from './scene.js';
+import { parseGlb, prepareSide } from './scene.js';
+import { assetLoader } from './assets.js';
+import { buildGerberBoards } from './gerberboard.js';
 import { Pcba3dView, MODES } from './viewer.js';
 
 const MODE_LABELS = { side: 'Side by side', overlay: 'Overlay', highlight: 'Changes' };
@@ -66,6 +68,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     return noop;
   }
   const base = baseUrl ? new URL(baseUrl, document.baseURI) : new URL('.', document.baseURI);
+  const assets = assetLoader(base, project.slug);
   const components = normalizeComponents(pcba.components);
   const byRef = new Map(components.map((c) => [c.ref, c]));
   const counts = countByStatus(components);
@@ -83,10 +86,18 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   }), label);
   const explode = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: 0, 'aria-label': 'Explode',
     oninput: (e) => view.setExplode(e.target.value) });
+  // Which board: the one built from the fab outputs (gerbers + drills), or the GLB's own bodies.
+  const sourceButtons = [['gerber', 'Fab'], ['glb', 'GLB']].map(([src, label]) => h('button', {
+    type: 'button', 'data-board': src, 'aria-pressed': String(src === 'gerber'), disabled: true,
+    title: src === 'gerber' ? 'Board built from the gerbers and drill files' : 'Board bodies from the kicad-cli GLB',
+    onclick: () => setBoardSource(src),
+  }, label));
+  const sourceSeg = h('div', { class: 'kp3d-seg kp3d-board-source', role: 'group', 'aria-label': 'Board source', hidden: true }, sourceButtons);
+  const boardNote = h('div', { class: 'kp3d-board-note', hidden: true });
   const toolbar = h('div', { class: 'kp3d-toolbar' },
     h('div', { class: 'kp3d-seg', role: 'group', 'aria-label': 'Mode' }, modeButtons),
     h('div', { class: 'kp3d-seg', role: 'group', 'aria-label': 'View' }, viewButtons),
-    toggle('components', 'Components'), toggle('board', 'Board'), toggle('silk', 'Silk'),
+    toggle('components', 'Components'), toggle('board', 'Board'), sourceSeg, toggle('silk', 'Silk'),
     toggle('markers', 'Markers'),
     h('label', { title: 'Lift components off the board' }, 'Explode', explode));
 
@@ -97,17 +108,18 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       return h('div', { class: 'row' }, h('span', {}, k), bars[k]);
     }),
     h('div', { class: 'msg' }, 'Loading 3D models…'));
-  const swatch = (color) => h('span', { class: 'kp3d-swatch', style: `background:${color}` });
+  // Classes, not style attributes: the project viewer's CSP is style-src 'self'.
+  const swatch = (kind) => h('span', { class: `kp3d-swatch ${kind}` });
   const stage = h('div', { class: 'kp3d-stage' },
     h('div', { class: 'kp3d-divider' }),
     h('div', { class: 'kp3d-label base' }, options.baseLabel || 'Base'),
     h('div', { class: 'kp3d-label head' }, options.headLabel || 'Head'),
     h('div', { class: 'kp3d-legend overlay' },
-      h('span', {}, swatch('var(--kp3d-removed)'), 'base'), h('span', {}, swatch('var(--kp3d-added)'), 'head'),
-      h('span', {}, swatch('#b8bcc4'), 'unchanged')),
+      h('span', {}, swatch('removed'), 'base'), h('span', {}, swatch('added'), 'head'),
+      h('span', {}, swatch('unchanged'), 'unchanged')),
     h('div', { class: 'kp3d-legend highlight' },
-      STATUSES.filter((s) => s !== 'unchanged').map((s) => h('span', {}, swatch(`var(--kp3d-${s})`), s))),
-    progress);
+      STATUSES.filter((s) => s !== 'unchanged').map((s) => h('span', {}, swatch(s), s))),
+    progress, boardNote);
   const tip = h('div', { class: 'kp3d-tip', hidden: true });
 
   const filters = new Set(STATUSES.filter((s) => s !== 'unchanged'));
@@ -130,6 +142,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   /* ── View ── */
   let selected = null;
   const view = new Pcba3dView(stage, {
+    onError: (e) => { errors.push(e); statusLine(); },
     onHover: (hit) => showTip(hit),
     onPick: (ref) => { if (ref) api.focus(ref, { frame: false }); else select(null); },
   });
@@ -191,7 +204,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     }) : [];
     tip.replaceChildren(h('div', {}, h('strong', {}, hit.ref), ' ',
       h('span', { class: `kp3d-badge ${c?.status || ''}` }, c?.status || 'unknown'),
-      h('span', { style: 'color:var(--kp3d-muted)' }, `  ${hit.side}`)), h('table', {}, trs));
+      h('span', { class: 'kp3d-muted' }, `  ${hit.side}`)), h('table', {}, trs));
     tip.hidden = false;
     const pad = 14;
     const w = tip.offsetWidth, ht = tip.offsetHeight;
@@ -218,8 +231,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       return null;
     }
     try {
-      const url = new URL(spec.glb, base).href;
-      const bytes = await fetchBytes(url, (loaded, total) => {
+      const bytes = await assets.bytes(spec.glb, (loaded, total) => {
         bars[k].value = total ? loaded / total : 0.5;
       }, controller.signal);
       bars[k].value = 1;
@@ -252,11 +264,21 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       if (r.loose) t += `, ${r.loose} unassigned bodies`;
       parts.push(t);
     }
+    const fab = boardState.fab;
+    if (fab) {
+      const h0 = fab.sides.head || fab.sides.base;
+      let t = `board from gerbers: ${h0.holes.kept.length} holes drilled`;
+      if (h0.holes.leftOut) t += `, ${h0.holes.leftOut.count} smallest painted only`;
+      if (Object.values(fab.sides).some((x) => x?.approximate)) t += ', outline approximated by its bounding box';
+      if (fab.outlineChanged) t += ', outline changed (base outline shown as a red edge)';
+      parts.push(t);
+    }
     status.replaceChildren(parts.join(' · '),
       ...[...(project?.errors || []).filter((e) => /3d|glb|pcba/i.test(e)), ...errors].map((e) => h('div', { class: 'err' }, e)));
   }
 
   let pendingFocus = null;
+  const boardState = { fab: null };
   let disposed = false;
   const ready = (async () => {
     const [b, hd] = await Promise.all([loadSide('base'), loadSide('head')]);
@@ -273,21 +295,49 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     statusLine();
     progress.hidden = true;
     if (!b && !hd) {
-      stage.append(h('div', { class: 'kp3d-note', style: 'position:absolute;inset:auto 16px 16px 16px' },
+      stage.append(h('div', { class: 'kp3d-note kp3d-stage-note' },
         'No 3D model could be loaded for either side.'));
     }
     if (pendingFocus) api.focus(pendingFocus);
+    if (options.fabBoard !== false) await loadFabBoard();
   })().catch((e) => {
     errors.push(`3D viewer: ${e.message || e}`);
     progress.hidden = true;
     statusLine();
   });
 
+  function setBoardSource(src) {
+    for (const b of sourceButtons) b.setAttribute('aria-pressed', String(b.dataset.board === src));
+    view.setBoardSource(src);
+  }
+
+  /** The board from the fab outputs, painted with the gerbers; the GLB's board until it is in. */
+  async function loadFabBoard() {
+    if (!project.pcb?.layers?.length) return;
+    boardNote.hidden = false;
+    boardNote.textContent = 'Painting the board from the gerbers…';
+    try {
+      const gb = await buildGerberBoards(project, assets, { onStatus: (t) => { boardNote.textContent = t; } });
+      if (disposed) { gb?.dispose(); return; }
+      if (!gb) { boardNote.hidden = true; return; }
+      view.setGerberBoards(gb);
+      sourceSeg.hidden = false;
+      for (const b of sourceButtons) b.disabled = false;
+      boardState.fab = gb;
+      statusLine();
+    } catch (e) {
+      errors.push(`board from gerbers: ${e.message || e} (showing the GLB's board)`);
+      statusLine();
+    }
+    boardNote.hidden = true;
+  }
+
   /* ── API ── */
   const api = {
     ready,
     errors,
     view,
+    setBoardSource,
     setMode(mode) {
       if (!MODES.includes(mode)) return;
       root.dataset.mode = mode;
