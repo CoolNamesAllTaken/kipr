@@ -1,0 +1,286 @@
+# kipr library review (unprivileged, artifacts only). Reusable: call it from a KiCad library repo.
+#
+# Runs on pull requests (including PRs from forks) that touch footprints, symbols or 3D models.
+# The job checks out the PR head, so treat it as untrusted: callers give it `contents: read`
+# and no secrets. It renders the changed parts, runs the deterministic checks (KLC-style rules
+# + the official KLC checker) and uploads:
+#   component-review.html   one self-contained HTML report, NOT zipped: click it on the run page
+#                           and it opens in the browser (no JavaScript inside)
+#   component-review-site   the interactive viewer (zip; unzip and open index.html)
+#   component-review-data   manifest.json + review.json + review.md
+#   pr-meta                 pr.json, read by library-review-publish.yml
+# Findings with a file/line also show up as annotations in the PR's "Files changed" tab.
+#
+# Caller (see docs/library.md):
+#   on: pull_request: paths: [lib_fp/**, lib_sch/**, lib_3d/**]
+#   permissions: { contents: read }
+#   jobs:
+#     review:
+#       uses: CoolNamesAllTaken/kipr/.github/workflows/library-review.yml@<ref>
+#       with: { kipr-ref: <same ref> }
+name: kipr library review
+
+on:
+  workflow_call:
+    inputs:
+      kipr-ref:
+        description: kipr git ref (tag/sha/branch) to install; use the ref of the `uses:` line
+        type: string
+        default: main
+      kipr-repository:
+        description: where kipr is installed from (owner/repo on github.com)
+        type: string
+        default: CoolNamesAllTaken/kipr
+      lib-fp:
+        description: footprint libraries dir (<Lib>.pretty/*.kicad_mod)
+        type: string
+        default: lib_fp
+      lib-sch:
+        description: symbol libraries dir (*.kicad_sym)
+        type: string
+        default: lib_sch
+      lib-3d:
+        description: 3D models dir (referenced as ${KICAD_LIBS_DIR}/<lib-3d>/...)
+        type: string
+        default: lib_3d
+      datasheets:
+        description: datasheet PDFs dir
+        type: string
+        default: datasheets
+      kicad-image:
+        description: container for the job; "none" runs on the plain runner (no kicad-cli)
+        type: string
+        default: kicad/kicad:10.0
+      fetch-stock-models:
+        description: download KiCad stock 3D models (${KICADn_3DMODEL_DIR}/...) at a pinned tag (cached)
+        type: boolean
+        default: true
+      klc:
+        description: also run the official KLC checker (kicad-library-utils at a pinned commit, cached)
+        type: boolean
+        default: true
+      use-kicad-cli:
+        description: also export reference SVGs with kicad-cli (items/<slug>/kicad_cli_<side>.svg)
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # (The image's default user is `kicad`; root is needed for apt and the runner's workspace.
+    # An empty container value makes the job run on the host.)
+    container: ${{ inputs.kicad-image != 'none' && fromJSON(format('{{"image":"{0}","options":"--user root"}}', inputs.kicad-image)) || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}   # empty on push
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      OUT: cr-out
+      KIPR_SPEC: kipr[3d] @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+      LIB_FP: ${{ inputs.lib-fp }}
+      LIB_SCH: ${{ inputs.lib-sch }}
+      LIB_3D: ${{ inputs.lib-3d }}
+      DATASHEETS: ${{ inputs.datasheets }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Prepare tools
+        run: |
+          # The KiCad image may lack git (needed for a real clone and pip's git install) and venv/pip.
+          # The renderer needs libcairo2 + fonts-dejavu-core (PNG output).
+          need=""
+          command -v git >/dev/null || need="$need git"
+          python3 -c 'import venv, ensurepip' 2>/dev/null || need="$need python3-venv python3-pip"
+          ldconfig -p 2>/dev/null | grep -q 'libcairo\.so\.2' || need="$need libcairo2"
+          [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ] || need="$need fonts-dejavu-core"
+          if [ -n "$need" ]; then
+            sudo=""; [ "$(id -u)" = 0 ] || sudo="sudo"
+            $sudo apt-get update -qq
+            # shellcheck disable=SC2086  # $need is a word list
+            $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates $need
+          fi
+          git --version; python3 --version; command -v kicad-cli && kicad-cli version || echo "kicad-cli not available"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find merge base
+        id: base
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ -z "$BASE_SHA" ]; then   # no PR base (e.g. a push): compare with the default branch
+            BASE_SHA=$(git rev-parse "origin/$DEFAULT_BRANCH")
+          fi
+          mb=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          echo "merge_base=$mb" >> "$GITHUB_OUTPUT"
+          echo "base $BASE_SHA, head $HEAD_SHA, merge-base $mb"
+
+      - name: Install kipr
+        id: kipr
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"
+          # cache keys: the pinned stock-model tags and kicad-library-utils commit of this kipr
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib, pathlib, kipr.library as L
+          d = pathlib.Path(L.__file__).parent
+          for key, f in (("stock_key", "render/stock_models_tag.txt"), ("klc_key", "ci/klc_utils.ref")):
+              print(f"{key}={hashlib.sha256((d / f).read_bytes()).hexdigest()[:16]}")
+          PY
+          "$RUNNER_TEMP/venv/bin/kipr" library --help > /dev/null
+
+      # Grows over time: each run saves a new entry and restores the newest one for the tags.
+      # Caches saved by PR runs are only visible to that PR (and can't poison main's).
+      - name: Restore stock 3D model cache
+        if: inputs.fetch-stock-models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kicad-3d
+          key: kicad-stock-3d-${{ steps.kipr.outputs.stock_key }}-${{ github.run_id }}
+          restore-keys: |
+            kicad-stock-3d-${{ steps.kipr.outputs.stock_key }}-
+
+      - name: Render changed components
+        env:
+          MERGE_BASE: ${{ steps.base.outputs.merge_base }}
+          FETCH_STOCK: ${{ inputs.fetch-stock-models }}
+          USE_KICAD_CLI: ${{ inputs.use-kicad-cli }}
+        run: |
+          extra=()
+          if [ "$FETCH_STOCK" = "true" ]; then
+            # layout DIR/<tag>/<Lib>.3dshapes/...; https-only from gitlab.com, 25 MB/file, 300 MB total
+            extra+=(--fetch-stock-models --stock-models-dir "$RUNNER_TEMP/kicad-3d")
+          fi
+          if [ "$USE_KICAD_CLI" = "true" ]; then extra+=(--use-kicad-cli); fi
+          if [ -n "$PR_NUMBER" ]; then extra+=(--pr "$PR_NUMBER"); fi
+          kipr library render --repo . --base "$MERGE_BASE" --head "$HEAD_SHA" --out "$OUT" \
+            --lib-fp "$LIB_FP" --lib-sch "$LIB_SCH" --lib-3d "$LIB_3D" --datasheets "$DATASHEETS" "${extra[@]}"
+
+      - name: Restore KLC checker cache
+        if: inputs.klc
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/klc-utils
+          key: klc-utils-${{ steps.kipr.outputs.klc_key }}
+
+      - name: Deterministic checks
+        continue-on-error: true
+        env:
+          KLC: ${{ inputs.klc }}
+        run: |
+          extra=()
+          if [ "$KLC" = "true" ]; then
+            if klc=$(kipr library ci fetch-klc-utils "$RUNNER_TEMP/klc-utils"); then
+              extra+=(--klc-utils "$klc")
+            else
+              echo "::warning::could not fetch kicad-library-utils; KLC checker skipped"
+            fi
+          fi
+          kipr library checks --out "$OUT" --lib-3d "$LIB_3D" "${extra[@]}"
+
+      - name: Bundle viewer
+        continue-on-error: true
+        run: kipr library site --out "$OUT"
+
+      - name: Build HTML report
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/report"
+          kipr library report --out "$OUT" --output "$RUNNER_TEMP/report/component-review.html"
+
+      - name: Annotate findings
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$OUT/manifest.json" ]; then
+            kipr library ci job-summary --out "$OUT" --annotate
+          fi
+
+      - name: Collect review data
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/data"
+          for f in manifest.json review.json review.md; do
+            if [ -f "$OUT/$f" ]; then cp "$OUT/$f" "$RUNNER_TEMP/data/"; fi
+          done
+
+      # Opens directly in the browser from the run page (non-zipped artifact).
+      - name: Upload HTML report
+        id: report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ runner.temp }}/report/component-review.html
+          archive: false
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn
+
+      - name: Upload interactive viewer
+        id: site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-review-site
+          path: ${{ env.OUT }}
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error
+
+      - name: Upload review data
+        id: data
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-review-data
+          path: ${{ runner.temp }}/data
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: warn
+
+      - name: Write PR metadata
+        if: github.event_name == 'pull_request'
+        env:
+          MERGE_BASE: ${{ steps.base.outputs.merge_base }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-meta"
+          python3 - <<'PY'
+          import json, os
+          json.dump({"pr": int(os.environ["PR_NUMBER"]), "head_sha": os.environ["HEAD_SHA"],
+                     "base_sha": os.environ["BASE_SHA"], "merge_base": os.environ["MERGE_BASE"]},
+                    open(os.path.join(os.environ["RUNNER_TEMP"], "pr-meta", "pr.json"), "w"))
+          PY
+
+      # Read by library-review-publish.yml (Pages preview + sticky comment).
+      - name: Upload PR metadata
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-meta
+          path: ${{ runner.temp }}/pr-meta/pr.json
+          retention-days: ${{ inputs.retention-days }}
+
+      - name: Job summary
+        if: always()
+        env:
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+          SITE_URL: ${{ steps.site.outputs.artifact-url }}
+          DATA_URL: ${{ steps.data.outputs.artifact-url }}
+        run: |
+          if [ -f "$OUT/manifest.json" ] && command -v kipr >/dev/null; then
+            kipr library ci job-summary --out "$OUT" --summary "$GITHUB_STEP_SUMMARY" \
+              --link "component-review.html (report)=$REPORT_URL" \
+              --link "component-review-site (viewer zip)=$SITE_URL" \
+              --link "component-review-data (JSON)=$DATA_URL"
+          else
+            echo "### Component review: rendering failed, see the log." >> "$GITHUB_STEP_SUMMARY"
+          fi

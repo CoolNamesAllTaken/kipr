@@ -9,10 +9,28 @@ description = "KiCad review: visual and semantic diffs of symbols, footprints, s
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    # library review: 2D renders -> PNG, diff.png, KiCad 10 embedded models
+    "cairosvg>=2.7",   # needs the system cairo library (libcairo2)
+    "pillow>=10",
+    "numpy>=1.24",
+    "zstandard>=0.22",
+]
+
+[project.optional-dependencies]
+# library review: server-side GLB + 3D preview PNGs (skipped with a warning when missing)
+3d = ["trimesh>=4.0", "shapely>=2.0", "mapbox_earcut>=1.0", "cascadio>=0.1"]
+test = ["pytest>=7", "playwright>=1.45"]
 
 [project.scripts]
 kipr = "kipr.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["kipr*"]
+
+[tool.setuptools.package-data]
+# kipr/library/web is a symlink to web/library (the static viewer)
+"kipr.library" = ["web/**/*", "render/stock_models_tag.txt", "ci/fetch_klc_utils.sh", "ci/klc_utils.ref"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

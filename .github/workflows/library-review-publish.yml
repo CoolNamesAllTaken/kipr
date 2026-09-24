@@ -1,0 +1,195 @@
+# kipr library review: Pages preview + sticky PR comment (privileged). Reusable.
+#
+# Call it from a `workflow_run` workflow of the library repo (triggered when its library-review
+# caller finishes). workflow_run workflows always run from the caller's DEFAULT BRANCH, so the
+# `uses: ...@<ref>` line and `kipr-ref` come from trusted, merged code. This workflow never
+# checks out or executes anything from the pull request: the only code it runs is kipr, installed
+# from `kipr-repository` at `kipr-ref`. The artifact produced by the PR run is untrusted data:
+# the PR number is verified against the API, the files are filtered by `kipr library ci
+# sanitize-site` (no HTML/JS, no scripted SVG), review.json is regenerated here with trusted code,
+# the viewer is re-bundled from trusted code, and all text is escaped before it reaches the PR.
+#
+# Caller (see docs/library.md):
+#   on: workflow_run: { workflows: ["Component review"], types: [completed] }
+#   permissions: {}
+#   jobs:
+#     publish:
+#       if: vars.CR_PUBLISH != 'false'
+#       permissions: { contents: write, pull-requests: write, checks: write, actions: read }
+#       uses: CoolNamesAllTaken/kipr/.github/workflows/library-review-publish.yml@<ref>
+#       with: { kipr-ref: <same ref> }
+name: kipr library review (publish)
+
+on:
+  workflow_call:
+    inputs:
+      kipr-ref:
+        description: kipr git ref (tag/sha/branch) to install; use the ref of the `uses:` line
+        type: string
+        default: main
+      kipr-repository:
+        description: where kipr is installed from (owner/repo on github.com)
+        type: string
+        default: CoolNamesAllTaken/kipr
+      lib-3d:
+        description: 3D models dir (only used in finding messages)
+        type: string
+        default: lib_3d
+      klc:
+        description: re-run the official KLC checker (fetched fresh at the pinned commit, ~1 s)
+        type: boolean
+        default: true
+      pages-url:
+        description: viewer base URL (default https://<owner>.github.io/<repo>/)
+        type: string
+        default: ""
+      fail-conclusion:
+        description: "check-run conclusion for verdict fail: neutral (never blocks), failure or success"
+        type: string
+        default: neutral
+
+permissions: {}
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write        # push the preview to gh-pages
+      pull-requests: write   # sticky comment + inline review
+      checks: write          # "Component review" check run
+      actions: read          # download the artifacts of the triggering run
+    # One publish at a time per PR branch; different PRs publish in parallel and
+    # deploy-pages retries on push races to gh-pages.
+    concurrency:
+      group: component-review-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    env:
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      KIPR_SPEC: kipr @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+    steps:
+      - name: Set paths
+        run: |
+          # Untrusted downloads live in their own directory, away from the tools.
+          { echo "UNTRUSTED=$RUNNER_TEMP/untrusted"; echo "SITE=$RUNNER_TEMP/site"; } >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Trusted code: kipr at the ref pinned by the caller's default-branch workflow file.
+      - name: Install kipr (trusted)
+        run: |
+          python3 -m pip install -q "$KIPR_SPEC"
+          kipr library --help > /dev/null
+
+      - name: Download PR metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-meta
+          path: ${{ runner.temp }}/untrusted/meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve and verify PR
+        id: pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          kipr library ci resolve-pr --meta "$UNTRUSTED/meta/pr.json" \
+            --repo "$GITHUB_REPOSITORY" --run-head-sha "$RUN_HEAD_SHA"
+
+      - name: Download review bundle
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: component-review-site
+          path: ${{ runner.temp }}/untrusted/site
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Sanitize review bundle
+        if: steps.pr.outputs.skip == 'false'
+        run: kipr library ci sanitize-site --src "$UNTRUSTED/site" --dst "$SITE"
+
+      # review.json from the PR run is untrusted and was dropped by sanitize-site: the
+      # deterministic checks are re-run here with trusted code on the sanitized data.
+      - name: Deterministic checks (trusted)
+        id: checks
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          KLC: ${{ inputs.klc }}
+          LIB_3D: ${{ inputs.lib-3d }}
+          CR_PAGES_URL: ${{ inputs.pages-url }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+        run: |
+          pages="${CR_PAGES_URL:-https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/}"
+          site_url="${pages%/}/pr/$PR_NUMBER/"   # linked from review.md
+          extra=()
+          # KLC checker: a trusted external repo at a pinned commit, fetched fresh (about 1 s)
+          # rather than from a cache, so nothing restored here needs to be trusted.
+          if [ "$KLC" = "true" ]; then
+            if klc=$(kipr library ci fetch-klc-utils "$RUNNER_TEMP/klc-utils"); then
+              extra+=(--klc-utils "$klc")
+            else
+              echo "::warning::could not fetch kicad-library-utils; KLC checker skipped"
+            fi
+          fi
+          if ! kipr library checks --out "$SITE" --site-url "$site_url" --lib-3d "$LIB_3D" "${extra[@]}"; then
+            echo "note=Deterministic checks failed; see the workflow log." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bundle viewer (trusted)
+        if: steps.pr.outputs.skip == 'false'
+        continue-on-error: true   # the comment and images are still useful without the viewer
+        run: kipr library site --out "$SITE" --no-offline
+
+      - name: Deploy preview to gh-pages
+        id: deploy
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+        run: kipr library ci deploy-pages --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --site "$SITE" --push
+
+      - name: Comment, review and check
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PAGES_SHA: ${{ steps.deploy.outputs.sha }}
+          NOTE: ${{ steps.checks.outputs.note }}
+          CR_PAGES_URL: ${{ inputs.pages-url }}
+          CR_FAIL_CONCLUSION: ${{ inputs.fail-conclusion }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          # Artifacts of the triggering run: the viewer zip and the non-zipped HTML report.
+          artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" || echo '{}')
+          id_of() { jq -r --arg n "$1" '[.artifacts[]? | select(.name == $n) | .id][0] // empty' <<< "$artifacts"; }
+          site_id=$(id_of component-review-site)
+          report_id=$(id_of component-review.html)
+          artifact_url="$run_url"
+          if [ -n "$site_id" ]; then artifact_url="$run_url/artifacts/$site_id"; fi
+          report_url=""
+          if [ -n "$report_id" ]; then report_url="$run_url/artifacts/$report_id"; fi
+          kipr library ci post-review --site "$SITE" --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
+            --head-sha "$HEAD_SHA" ${PAGES_SHA:+--pages-sha "$PAGES_SHA"} \
+            ${CR_PAGES_URL:+--pages-url "$CR_PAGES_URL"} \
+            --artifact-url "$artifact_url" ${report_url:+--report-url "$report_url"} \
+            --run-url "$run_url" ${NOTE:+--note "$NOTE"} \
+            --comment-out "$RUNNER_TEMP/comment.md"
+          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Skipped
+        if: steps.pr.outputs.skip == 'true'
+        env:
+          REASON: ${{ steps.pr.outputs.reason }}
+        run: |
+          echo "::notice::Component review not published: $REASON"
