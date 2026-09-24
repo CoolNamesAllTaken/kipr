@@ -96,7 +96,7 @@ export const shortSha = (s) => (typeof s === 'string' && s ? s.slice(0, 8) : '?'
 
 // --- offline (file://) mode ----------------------------------------------------------------------------
 // Opened from a downloaded artifact, browsers refuse fetch() of file:// URLs. site.py then provides
-// data.js (window.KIPR_DATA = {review}) and one offline/<slug>.js per project with the SVG texts the
+// data.js (window.KIPR_DATA = {review, pcba3d}) and one offline/<slug>.js per project with the SVG texts the
 // pixel diffs need (window.KIPR_PACKS[slug] = {files: {<asset url>: {text}}}), loaded on demand with <script>.
 
 export const OFFLINE = typeof location !== 'undefined' && location.protocol === 'file:';

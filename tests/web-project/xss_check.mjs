@@ -87,7 +87,7 @@ async function checkPages(base, list, tag) {
     const r = await page.evaluate(() => ({
       pwned: !!window.__pwned,
       injected: [...document.querySelectorAll('[onerror], [onload], img[src="x"], iframe, object, embed')].map((e) => e.outerHTML.slice(0, 80)),
-      scripts: [...document.scripts].map((s) => s.getAttribute('src')).filter((s) => !/^(js\/(boot|app|bundle)\.js|data\.js|offline\/[a-z0-9_-]+\.js)$/.test(s || '')),
+      scripts: [...document.scripts].map((s) => s.getAttribute('src')).filter((s) => !/^(js\/(boot|app|bundle)\.js|data\.js|offline\/[a-z0-9_-]+\.js|pcba3d\/pcba3d\.bundle\.js)$/.test(s || '')),
       links: [...document.querySelectorAll('a[href], img[src], [href]:not(link[rel=icon]), [src]')].map((e) => e.getAttribute('href') || e.getAttribute('src'))
         .filter((u) => /^\s*(javascript|data|vbscript):/i.test(u || '') || /\.\.\/|secret\.txt|^\/etc/.test(u || '')),
       title: document.title,

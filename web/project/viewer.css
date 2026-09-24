@@ -10,6 +10,7 @@
   --border: #d9dde3;
   --accent: #2463d6;
   --accent-soft: #e3ecfb;
+  --on-accent: #ffffff;
   --add: #1a7f37;
   --add-bg: #dafbe1;
   --del: #cf222e;
@@ -26,14 +27,14 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #111418; --panel: #191d23; --panel-2: #22272e; --text: #e3e7ec; --muted: #8b949e; --border: #30363d;
-    --accent: #6ea8fe; --accent-soft: #1d2b44; --add: #56d364; --add-bg: #12301b; --del: #ff7b72; --del-bg: #3d1618;
+    --accent: #6ea8fe; --accent-soft: #1d2b44; --on-accent: #0b1220; --add: #56d364; --add-bg: #12301b; --del: #ff7b72; --del-bg: #3d1618;
     --chg-bg: #3a3212; --warn: #e3b341; --paper: #e9e7df; --board-real: #1b1f24;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #111418; --panel: #191d23; --panel-2: #22272e; --text: #e3e7ec; --muted: #8b949e; --border: #30363d;
-  --accent: #6ea8fe; --accent-soft: #1d2b44; --add: #56d364; --add-bg: #12301b; --del: #ff7b72; --del-bg: #3d1618;
+  --accent: #6ea8fe; --accent-soft: #1d2b44; --on-accent: #0b1220; --add: #56d364; --add-bg: #12301b; --del: #ff7b72; --del-bg: #3d1618;
   --chg-bg: #3a3212; --warn: #e3b341; --paper: #e9e7df; --board-real: #1b1f24;
 }
 
@@ -97,12 +98,12 @@ input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--bo
 .btn:hover, .seg-btn:hover, .tab:hover { background: var(--panel-2); }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.small { font-size: 12px; padding: 2px 8px; }
-.btn[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .seg { display: inline-flex; flex-wrap: wrap; }
 .seg-btn { border-radius: 0; margin-left: -1px; }
 .seg-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
 .seg-btn:last-child { border-radius: 0 6px 6px 0; }
-.seg-btn[aria-selected="true"], .tab[aria-selected="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+.seg-btn[aria-selected="true"], .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 /* project page */
 h1 { font-size: 20px; margin: 4px 0 12px; }
