@@ -18,8 +18,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 repo_root=$(cd "$here/../.." && pwd)
 fork=${1:-${WGV:-$repo_root/../wasm-gerber-viewer}}
-# pinned: fork main after PR #1 (board compositing + layer diff, outline.js) was merged
-PINNED_REF=b8d2d78
+# pinned: fork main after PR #1 (board compositing + layer diff, outline.js) and PR #2 (empty layers) were merged
+PINNED_REF=9b7ade3
 ref=${2:-$PINNED_REF}
 target="$here/vendor/wasm-gerber-renderer"
 pkg=packages/wasm-gerber-renderer
