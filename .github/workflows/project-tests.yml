@@ -105,6 +105,8 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q ".[test]"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Build the fixture repo from KiCad's demos
+        env:
+          KICAD_PYTHON: /usr/bin/python3   # the image's python with pcbnew, not the venv's
         run: bash tests/project/fixtures/build.sh "$RUNNER_TEMP/fixtures"
       - name: Integration tests
         env:
