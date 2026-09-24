@@ -115,6 +115,10 @@ export function summary(c) {
   if (c.what.includes('rotation')) parts.push(`${+num(b.rot).toFixed(1)}° → ${+num(h.rot).toFixed(1)}°`);
   if (c.what.includes('model')) parts.push('3D model');
   if (c.what.includes('dnp')) parts.push(h.dnp ? 'now DNP' : 'no longer DNP');
+  // The backend may name other footprint changes (pads, fields, …); list them as they come.
+  const known = new Set(['value', 'footprint', 'side', 'position', 'rotation', 'model', 'dnp']);
+  const other = c.what.filter((w) => !known.has(w));
+  if (other.length) parts.push(other.join(', '));
   return parts.join(' · ');
 }
 
