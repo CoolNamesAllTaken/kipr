@@ -1,4 +1,4 @@
-"""Tests for build_site.py's file:// support.   python3 -m unittest tools/component-review/viewer/testdata/build_site_test.py"""
+"""Tests for the viewer site builder's file:// support (kipr.library.site): python -m pytest tests/library"""
 import json
 import shutil
 import subprocess
@@ -7,9 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-VIEWER = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(VIEWER))
-import build_site  # noqa: E402
+from kipr.library import WEB_DIR as VIEWER
+from kipr.library import site as build_site
 
 
 class BundleTests(unittest.TestCase):

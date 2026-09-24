@@ -1,4 +1,4 @@
-"""Tests for make_report.py: python3 -m unittest discover -s tools/component-review/report/tests"""
+"""Tests for the self-contained HTML report (kipr.library.report): python -m pytest tests/library"""
 import json
 import sys
 import tempfile
@@ -7,11 +7,11 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
-sys.path.insert(0, str(HERE.parent.parent / "ci" / "tests"))
+sys.path.insert(0, str(HERE))
 
-import make_mock  # noqa: E402
-import make_report  # noqa: E402
+import lib_mock_site as make_mock  # noqa: E402
+
+from kipr.library import report as make_report  # noqa: E402
 
 XSS = '<script>alert(1)</script><img src=x onerror=alert(2)>"\'><svg onload=alert(3)>javascript:alert(4)'
 ALLOWED_TAGS = {"html", "head", "meta", "title", "style", "body", "main", "header", "h1", "h2", "h3", "h4", "p",

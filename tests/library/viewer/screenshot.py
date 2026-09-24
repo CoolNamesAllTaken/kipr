@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Headless smoke test + screenshots of the viewer (dev tool, needs `playwright`).
 
     python3 screenshot.py --site <OUT with viewer copied in> --shots <dir> [--dark] [--mode http|file|serve]
@@ -35,7 +34,7 @@ def serve(root):
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}/"
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--site", required=True, type=Path)
     ap.add_argument("--shots", required=True, type=Path)
@@ -43,7 +42,7 @@ def main():
     ap.add_argument("--prefix", default="")
     ap.add_argument("--mode", choices=("http", "file", "serve"), default="http")
     ap.add_argument("--no-3d", action="store_true", help="skip the 3D tab")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     a.shots.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((a.site / "manifest.json").read_text())
     httpd = proc = None
@@ -55,6 +54,17 @@ def main():
         proc = subprocess.Popen([sys.executable, str(a.site / "serve.py"), "--no-browser"], stdout=subprocess.PIPE, text=True)
         base = proc.stdout.readline().split(" at ")[1].split()[0]
         print("serve.py:", base)
+    try:
+        return shoot(a, manifest, base)
+    finally:  # never leave the server running (it would also keep a caller's output pipe open)
+        if httpd:
+            httpd.shutdown()
+        if proc:
+            proc.terminate()
+            proc.wait(10)
+
+
+def shoot(a, manifest, base):
     problems = []
     shots = []
     placement = {}
@@ -141,10 +151,6 @@ def main():
             shot(f"{slug}--full")
             page.set_viewport_size({"width": 1440, "height": 900})
         browser.close()
-    if httpd:
-        httpd.shutdown()
-    if proc:
-        proc.terminate()
     print(f"{len(shots)} screenshots in {a.shots}")
     (a.shots / f"{a.prefix}placement.json").write_text(json.dumps(placement, indent=1))
     for slug, pl in placement.items():

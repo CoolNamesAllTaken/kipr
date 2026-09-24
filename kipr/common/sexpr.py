@@ -34,10 +34,9 @@ class Node(list):
         return str(self[0]) if self and isinstance(self[0], str) else ""
 
     # --- navigation helpers -------------------------------------------------
-    def children(self, name: str | None = None):
-        for c in self[1:]:
-            if isinstance(c, Node) and (name is None or c.name == name):
-                yield c
+    def children(self, name: str | None = None) -> list["Node"]:
+        """Child nodes (named ``name``, if given), in order."""
+        return [c for c in self[1:] if isinstance(c, Node) and (name is None or c.name == name)]
 
     def child(self, name: str):
         for c in self.children(name):

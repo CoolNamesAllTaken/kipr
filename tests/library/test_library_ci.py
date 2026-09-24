@@ -1,4 +1,4 @@
-"""Tests for the component-review CI scripts: python3 -m unittest discover -s tools/component-review/ci/tests"""
+"""Tests for the library review's CI glue (kipr.library.ci): python -m pytest tests/library"""
 import json
 import re
 import os
@@ -9,17 +9,12 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-import common  # noqa: E402
-import deploy_pages  # noqa: E402
-import job_summary  # noqa: E402
-import make_mock  # noqa: E402
-import post_review  # noqa: E402
-import resolve_pr  # noqa: E402
-import sanitize_site  # noqa: E402
-from make_comment import Ctx, build_comment, finding_key  # noqa: E402
+import lib_mock_site as make_mock  # noqa: E402
+
+from kipr.library.ci import common, deploy_pages, job_summary, post_review, resolve_pr, sanitize_site  # noqa: E402
+from kipr.library.ci.make_comment import Ctx, build_comment, finding_key  # noqa: E402
 
 HEAD = "1627ad2136c15edddf09c6034d03ee3de04acf9b"
 PAGES = "0123456789abcdef0123456789abcdef01234567"
@@ -281,7 +276,7 @@ class TestReview(Tmp):
         self.assertEqual(post_review.check_payload(HEAD, manifest, None, "u", "failure")["conclusion"], "neutral")
 
     def test_cli_dry_run(self):
-        out = subprocess.run([sys.executable, str(HERE.parent / "post_review.py"), "--site", str(self.site),
+        out = subprocess.run([sys.executable, "-m", "kipr.cli", "library", "ci", "post-review", "--site", str(self.site),
                               "--repo", REPO, "--pr", "8", "--head-sha", HEAD, "--pages-sha", PAGES,
                               "--files-json", str(self.tmp / "mock" / "pr_files.json"), "--dry-run"],
                              capture_output=True, text=True, env={**os.environ, "GITHUB_TOKEN": ""})
