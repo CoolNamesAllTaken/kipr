@@ -96,7 +96,7 @@ export function createLayoutView(project, container, ctx) {
   if (!hasGerbers) { note.hidden = false; note.textContent = 'No gerbers in this export; showing the per-layer SVGs.'; }
 
   // --- changes
-  const changeItems = arr(pcb.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), layer: typeof c.layer === 'string' ? c.layer : null }));
+  const changeItems = arr(pcb.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null, layer: typeof c.layer === 'string' ? c.layer : null }));
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: 'No itemised layout changes.',
@@ -109,7 +109,7 @@ export function createLayoutView(project, container, ctx) {
         else if (l && mode === 'diff') setMode('diff');
       }
       pushRoute(i);
-      if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box); }
+      if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box, it.sides); }
     },
   });
   changes.set(changeItems);
@@ -142,7 +142,8 @@ export function createLayoutView(project, container, ctx) {
 
   // --- world box
   function worldBox() {
-    const b = boardRect(pcb);
+    // base and head outlines can differ (a board that grew): frame both
+    const b = union([boardRect(pcb), boardRect({ board: obj(obj(pcb.board)?.base) }), boardRect({ board: obj(obj(pcb.board)?.head) })]);
     if (b) return grow(b, Math.max(2, Math.max(b.w, b.h) * 0.03));
     const u = union([...svgBoxes.values()]) || union(changeItems.map((c) => c.box));
     return u ? grow(u, 2) : { x: 0, y: 0, w: 100, h: 80 };

@@ -173,6 +173,11 @@ function renderOverview(unknownSlug) {
   document.title = 'Project review · kipr';
   if (unknownSlug) main.append(el('div', { class: 'notice' }, `No project "${unknownSlug}" in this review; showing the overview.`));
   main.append(el('h1', {}, 'Projects'));
+  const runErrors = arr(state.review?.errors).filter((x) => typeof x === 'string');
+  if (runErrors.length) {
+    main.append(el('details', { class: 'notice' }, el('summary', {}, `${runErrors.length} problem${runErrors.length > 1 ? 's' : ''} while generating this review`),
+      el('ul', {}, runErrors.map((e) => el('li', {}, e)))));
+  }
   if (!state.projects.length) { main.append(el('p', { class: 'muted' }, 'No KiCad projects changed between these commits.')); return; }
   const cols = ['Project', 'Status', 'Sheets', 'Layers', 'Comp. +', 'Comp. −', 'Moved', 'Changed', 'Nets', 'ERC new', 'DRC new', 'Problems'];
   const n = (v) => (typeof v === 'number' ? String(v) : '');

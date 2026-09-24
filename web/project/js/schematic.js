@@ -106,13 +106,13 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
   mainBox.append(title, toolbar, stageWrap, legendBox);
 
   // --- change list: contract changes; if there are none, the pixel diff's regions
-  const contractChanges = arr(sheet.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm) }));
+  const contractChanges = arr(sheet.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null }));
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: sheet.status === 'unchanged' ? 'Sheet unchanged.' : 'No itemised changes for this sheet.',
     onSelect: (i, it) => {
       ctx.setRoute({ params: { mode, c: i } }, true);
-      if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box); }
+      if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box, it.sides); }
     },
   });
   changes.set(contractChanges);

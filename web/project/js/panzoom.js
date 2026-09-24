@@ -27,6 +27,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   let fitted = false;
   let marks = [];
   let hl = null;
+  let hlSides = null; // {base, head}: per-pane highlight for things that moved
   let measuring = false;
   let measure = [];
   const listeners = new Set();
@@ -46,6 +47,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     world.append(overlay);
     const p = el('div', { class: 'pane' }, world, label ? el('div', { class: 'pane-label' }, label) : null);
     p._world = world;
+    p._side = label === 'base' || label === 'head' ? label : null;
     p._overlay = overlay;
     attach(p);
     return p;
@@ -119,7 +121,9 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
       for (const m of marks) {
         o.append(svgEl('rect', { x: m.box.x, y: m.box.y, width: Math.max(m.box.w, 0.01), height: Math.max(m.box.h, 0.01), class: `mark ${m.cls || ''}` }));
       }
-      if (hl) {
+      const hb = (p._side && hlSides?.[p._side]) || hl;
+      if (hb) {
+        const hl = hb; // eslint-disable-line no-shadow
         const padMm = Math.max(0.6, Math.min(hl.w, hl.h) * 0.1);
         o.append(svgEl('rect', { x: hl.x - padMm, y: hl.y - padMm, width: hl.w + 2 * padMm, height: hl.h + 2 * padMm, class: 'hl' }));
       }
@@ -134,7 +138,8 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     }
   }
   function setMarks(list) { marks = list || []; drawOverlay(); }
-  function highlight(b) { hl = b || null; drawOverlay(); }
+  /** Highlight box b; `sides` {base, head} overrides it on the base / head pane of a side-by-side view. */
+  function highlight(b, sides = null) { hl = b || null; hlSides = sides; drawOverlay(); }
 
   function measureText() {
     if (measure.length < 2) return measuring ? 'click two points' : '';

@@ -141,6 +141,7 @@ export function renderFace(face, side, box, r, { origin = [0, 0], palette = {} }
 /**
  * The fork's GPU layer diff of one layer (base vs head gerber paths, either may be null) over KiCad mm
  * `box` at r px/mm: {canvas, regions: [{x, y, w, h} KiCad mm], counts: {removed, added, common}}.
+ * Two passes in one explicit frame: analyzeLayerDiff (counts + regions), then renderLayerDiff (the image).
  */
 export function renderLayerDiff(basePath, headPath, box, r, { origin = [0, 0], kind = 'gerber', colors = null } = {}) {
   const job = queue.then(async () => {
@@ -150,8 +151,13 @@ export function renderLayerDiff(basePath, headPath, box, r, { origin = [0, 0], k
     const side = (t) => (t && !isEmpty(t, kind) ? { source: t } : null);
     const view = mod.calculateFitView(kicadBoxToGerber(box, origin), W, H, 0);
     const rep = await diff.analyzeLayerDiff(renderer, { base: side(b), head: side(h) }, {
-      width: W, height: H, view, skipIdentical: false, showUnchanged: true, colors: colors || undefined,
+      width: W, height: H, view, skipIdentical: false, showUnchanged: true,
       mergeDistance: Math.max(2, Math.round(1.5 * r)), minRegionPixels: 3, maxRegions: 200,
+    });
+    // analyzeLayerDiff draws classification colours for counting; the picture is a second pass in the same frame
+    await diff.renderLayerDiff(renderer, { base: side(b), head: side(h) }, {
+      width: W, height: H, view, background: null, colors: colors || undefined,
+      style: { unchanged: { alpha: 0.45 } },
     });
     const regions = (rep.regions || []).filter((q) => q.world).map((q) => {
       const [x0, y1] = gerberPointToKicad(q.world.minX, q.world.minY, origin);
