@@ -106,14 +106,20 @@ def change_lines(p: dict, limit: int = 40) -> list[str]:
             if isinstance(c, dict) and not c.get("power"):
                 out.append(f"- sch {title}: {_change(c)}")
     minor: dict = {}
+    bulk: dict = {}
     for c in lst(d(p.get("pcb")).get("changes")):
         if isinstance(c, dict) and c.get("minor"):
             minor.setdefault(text(c.get("detail")) or text(c.get("what")) or "minor", []).append(text(c.get("ref")) or "?")
+        elif isinstance(c, dict) and c.get("group") in ("routing", "properties"):
+            key = f"{text(c.get('kind'))} {text(c.get('what'))}" if c.get("group") == "routing" else "footprint fields/attributes only"
+            bulk[key] = bulk.get(key, 0) + 1
         elif isinstance(c, dict):
             out.append(f"- pcb: {_change(c)}")
     if len(out) > limit:
         more = len(out) - limit
         out = out[:limit] + [f"- … and {more} more (see the viewer or report)"]
+    if bulk:  # routing and property-only changes: counts only (the viewer and report list them)
+        out.append("- pcb: " + ", ".join(f"{n}× {md_inline(k, 60)}" for k, n in sorted(bulk.items(), key=lambda kv: -kv[1])))
     # minor changes (3D model format / footprint library name only): one line per kind, refs folded
     for label, refs in sorted(minor.items(), key=lambda kv: -len(kv[1])):
         shown = ", ".join(md_inline(r, 20) for r in refs[:30]) + (", …" if len(refs) > 30 else "")

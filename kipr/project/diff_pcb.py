@@ -393,10 +393,51 @@ def diff_setup(base: Board, head: Board):
     return changes
 
 
+# Footprint differences that don't change the board's copper or placement: shown together in a
+# collapsed "properties" group (the BOM tab has the details).
+PROPERTY_WHATS = {"fields", "attributes", "locked", "reference"}
+IDENTITY_WHATS = {"footprint", "flipped", "pads", "value", "dnp"}
+
+
+def significance(c: dict) -> tuple[int, str | None]:
+    """(rank, group) of a change: lower ranks matter more to a reviewer. `group` names the
+    collapsed bucket a viewer may fold it into: "routing" (tracks, vias), "properties" (footprint
+    fields/attributes only) or "minor" (see MINOR_WHATS); None = list it individually."""
+    kind, whats = c.get("kind"), set(c.get("whats") or [c.get("what")])
+    if c.get("minor"):
+        return 9, "minor"
+    if kind == "footprint":
+        if c["what"] in ("added", "removed") or whats & IDENTITY_WHATS:
+            return 0, None
+        if whats & {"moved", "rotated"}:
+            return 2, None
+        if whats <= PROPERTY_WHATS | MINOR_WHATS:
+            return 8, "properties"
+        return 4, None  # graphics, 3D model
+    if kind in ("board", "outline"):
+        return 1, None
+    if kind == "zone":
+        return 5 if whats == {"fill"} else 3, None
+    if kind in ("track", "via"):
+        return 6, "routing"
+    return 7, None  # texts, graphics
+
+
 def diff_boards(base: Board, head: Board):
-    """-> (changes, components). Changes are sorted footprint-first, then by kind/layer."""
+    """-> (changes, components). Changes are sorted by significance (see `significance`): parts
+    added/removed/replaced, the outline and board setup, moves, zones, other footprint changes,
+    then routing, texts and graphics, property-only and minor changes; within a rank by kind, then
+    reference or net. Collapsible buckets carry a `group`."""
     fp_changes, components = diff_footprints(base, head)
     changes = fp_changes + diff_items(base, head) + diff_zones(base, head) + diff_setup(base, head)
+    for c in changes:
+        rank, group = significance(c)
+        if group:
+            c["group"] = group
+        c["_rank"] = rank
+    changes.sort(key=lambda c: (c["_rank"], c["kind"], natural_key(c.get("ref") or c.get("net") or ""), c.get("layer") or ""))
+    for c in changes:
+        del c["_rank"]
     return changes, components
 
 

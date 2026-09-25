@@ -186,8 +186,18 @@ falls back to "some semantic change touches this layer".
  "base_bbox_mm": […], "head_bbox_mm": […],   // footprints
  "count": {"added": 3, "removed": 1},    // clustered kinds
  "detail": "moved 0.200 mm (54.5, 53.2) -> (54.5, 53.4); 3D model a.wrl -> b.step",
- "minor": true}                          // only when every what is minor (below); omitted otherwise
+ "minor": true,                          // only when every what is minor (below); omitted otherwise
+ "group": "routing"}                     // routing | properties | minor: a collapsible bucket (below); omitted otherwise
 ```
+
+**Order and groups.** `changes` is sorted by significance: parts added, removed or replaced
+(footprint, side, pads, value, DNP), then the outline and board setup, moves/rotations, zone
+outlines, other footprint changes (graphics, 3D model), zone refills, routing (tracks, vias),
+texts and graphics, footprints whose fields/attributes changed and nothing else, then minor
+changes; within a rank by kind, then reference or net. `group` marks the bulky, low-signal ones
+that the viewer, report and PR comment fold into collapsed buckets: `routing` (tracks, vias),
+`properties` (fields/attributes only; the BOM tab has them) and `minor`. They are still changes;
+only `minor` ones are left out of the counts.
 
 **Minor changes.** Two footprint differences don't change the assembled board and are marked
 `minor: true` when they are all there is: `model_format` (every 3D model path differs only in its

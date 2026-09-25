@@ -295,3 +295,12 @@ def test_model_path_resolution(tmp_path, monkeypatch):
     text, subs, counts = models.substitute('(model "m/x.wrl") (model "m/y.wrl") (model "${NOPE}/z.wrl")', str(tmp_path), [])
     assert subs == {"m/x.wrl": "m/x.STEP"} and '(model "m/x.STEP")' in text
     assert counts == {"found": 0, "substituted": 1, "missing": 1, "unknown": 1}
+
+
+def test_routing_and_property_changes_are_counted_not_listed():
+    from kipr.project.ci.common import change_lines
+    ch = [{"kind": "via", "what": "added", "net": "GND", "group": "routing"}] * 3 + [
+        {"kind": "footprint", "what": "fields", "ref": "R1", "group": "properties"},
+        {"kind": "footprint", "what": "removed", "ref": "C5"}]
+    lines = change_lines({"pcb": {"changes": ch}})
+    assert lines[0].startswith("- pcb: footprint removed") and lines[1] == "- pcb: 3× via added, 1× footprint fields/attributes only"

@@ -159,16 +159,20 @@ class Images:
                 todo[(rel, width, crop)] = str(p)
         if not self.can_raster or jobs < 2 or len(todo) < 2:
             return
+        failed = []
+        workers = min(jobs, len(todo))
         try:
-            with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as pool:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
                 futs = {k: pool.submit(render_png, path, k[1], k[2]) for k, path in todo.items()}
                 for k, f in futs.items():
                     try:
                         self._png[k] = f.result()
-                    except Exception:  # noqa: BLE001 - raster() retries and records the failure
-                        pass
-        except (OSError, RuntimeError):  # no process pool here (sandbox, frozen app): render serially
-            pass
+                    except Exception as e:  # noqa: BLE001 - raster() retries and records the failure
+                        failed.append(f"{k[0]}: {type(e).__name__}: {e}"[:200])
+        except (OSError, RuntimeError) as e:  # no process pool here (sandbox, frozen app): render serially
+            failed.append(f"process pool: {type(e).__name__}: {e}"[:200])
+        print(f"kipr report: rasterised {len(self._png)}/{len(todo)} image(s) with {workers} worker processes"
+              + (f"; {len(failed)} left to render serially: {failed[0]}" if failed else ""), file=sys.stderr)
 
     def svg_path(self, rel, slug: str) -> Path | None:
         p = confined_file(self.out, rel, slug)
@@ -390,6 +394,9 @@ def model_note(p3d) -> str:
             + '</ul><p class="muted">Only the 3D export used the substituted paths; the diffs compare the files as committed.</p></details>')
 
 
+GROUPS = {"routing": "track / via changes", "properties": "footprints with field / attribute changes only (see the BOM)"}
+
+
 def minor_blocks(minor) -> list:
     """Minor footprint changes (3D model format / library name only), one collapsed <details> per kind."""
     groups: dict = {}
@@ -407,9 +414,14 @@ def pcb_section(imgs, slug, pcb, width) -> str:
     pcb = d(pcb)
     if not pcb:
         return ""
-    changes = [c for c in lst(pcb.get("changes")) if not d(c).get("minor")]
-    out = ['<h3>Layout</h3>', table(CHANGE_HEAD, change_rows(changes))]
-    out += minor_blocks([c for c in lst(pcb.get("changes")) if d(c).get("minor")])
+    allc = [d(c) for c in lst(pcb.get("changes"))]
+    out = ['<h3>Layout</h3>', table(CHANGE_HEAD, change_rows([c for c in allc if not c.get("minor") and c.get("group") not in GROUPS]))]
+    for group, title in GROUPS.items():  # bulky, low-signal changes: collapsed tables
+        rows = [c for c in allc if c.get("group") == group and not c.get("minor")]
+        if rows:
+            out.append(f'<details class="minor"><summary><span class="b s-minor">{esc(group)}</span> {len(rows)} {esc(title)}</summary>'
+                       + table(CHANGE_HEAD, change_rows(rows)) + "</details>")
+    out += minor_blocks([c for c in allc if c.get("minor")])
     crop = board_crop(pcb)
     changed = changed_layers(pcb)
     if changed and width > 0:

@@ -5,8 +5,9 @@ import { el, clear, badge } from './util.js';
 /**
  * items: [{title, detail, kind, status, box: {x,y,w,h} | null}]
  * onSelect(index, item) is called on click and on next()/prev().
- * setMinor(groups) adds collapsed groups of minor changes after the list ([{label, items}], e.g.
- * "105 parts: 3D model format .wrl -> .step"); n/p skip them, a click selects with index -1.
+ * setMinor(groups) adds collapsed groups after the list ([{label, badge, items}], e.g. routing
+ * "214 vias added" or minor "105 parts: 3D model format .wrl -> .step"); n/p skip them, a click
+ * selects with index -1.
  */
 export function createChangeList(container, { title = 'Changes', empty = 'No changes listed.', onSelect }) {
   let items = [];
@@ -30,7 +31,7 @@ export function createChangeList(container, { title = 'Changes', empty = 'No cha
         }, el('span', { class: 'change-title' }, it.title || ''))));
       }
       minorBox.append(el('details', { class: 'minor-group' },
-        el('summary', {}, badge('kind', 'minor'), ' ', g.label), ul));
+        el('summary', {}, badge('kind', g.badge || 'minor'), ' ', g.label), ul));
     }
   }
 
@@ -38,7 +39,7 @@ export function createChangeList(container, { title = 'Changes', empty = 'No cha
     clear(list);
     count.textContent = `(${items.length})`;
     prevBtn.disabled = nextBtn.disabled = !items.length;
-    if (!items.length) list.append(el('li', { class: 'muted empty-li' }, minor.length ? 'Only minor changes (below).' : empty));
+    if (!items.length) list.append(el('li', { class: 'muted empty-li' }, minor.length ? 'Only grouped changes (below).' : empty));
     items.forEach((it, i) => {
       list.append(el('li', {}, el('button', {
         class: `change${i === current ? ' active' : ''}${it.box ? '' : ' nobox'}`,

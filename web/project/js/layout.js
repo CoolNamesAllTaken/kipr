@@ -96,23 +96,40 @@ export function createLayoutView(project, container, ctx) {
   if (!hasGerbers) { note.hidden = false; note.textContent = 'No gerbers in this export; showing the per-layer SVGs.'; }
 
   // --- changes
-  const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null, layer: typeof c.layer === 'string' ? c.layer : null });
+  const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null, layer: typeof c.layer === 'string' ? c.layer : null, layers: arr(c.layers).concat(arr(c.holes)).filter((x) => typeof x === 'string') });
   const allChanges = arr(pcb.changes).filter(obj);
-  const changeItems = allChanges.filter((c) => !c.minor).map(toItem);
-  // minor changes (3D model format / footprint library name only), grouped like pcb.minor_groups
-  const minorGroups = [];
-  for (const c of allChanges.filter((x) => x.minor)) {
-    const label = typeof c.detail === 'string' && c.detail ? c.detail : String(c.what || 'minor');
-    let g = minorGroups.find((x) => x.key === label);
-    if (!g) minorGroups.push(g = { key: label, items: [] });
-    g.items.push({ ...toItem(c), title: typeof c.ref === 'string' ? c.ref : '?' });
+  // The backend orders changes by significance and marks the bulky, low-signal ones with a `group`
+  // (routing, properties, minor): those are folded into collapsed buckets after the list.
+  const GROUPED = new Set(['routing', 'properties', 'minor']);
+  const grouped = (c) => GROUPED.has(c.group) || !!c.minor;
+  const changeItems = allChanges.filter((c) => !grouped(c)).map(toItem);
+  const buckets = new Map();
+  for (const c of allChanges.filter(grouped)) {
+    const group = c.minor ? 'minor' : c.group;
+    let key;
+    if (group === 'minor') key = `minor|${typeof c.detail === 'string' && c.detail ? c.detail : String(c.what || 'minor')}`;
+    else if (group === 'routing') key = `routing|${c.kind} ${c.what}`;
+    else key = 'properties|';
+    if (!buckets.has(key)) buckets.set(key, { key, group, items: [] });
+    const who = typeof c.ref === 'string' ? c.ref : typeof c.net === 'string' ? c.net : '';
+    buckets.get(key).items.push({ ...toItem(c), title: group === 'routing' ? [who, c.layer].filter(Boolean).join(' · ') || c.kind : who || '?' });
   }
   const natural = new Intl.Collator(undefined, { numeric: true });
+  const minorGroups = [...buckets.values()];
   for (const g of minorGroups) {
-    g.items.sort((a, b) => natural.compare(a.title, b.title));
-    g.label = `${g.items.length} part${g.items.length === 1 ? '' : 's'}: ${g.key}`;
+    g.items.sort((x, y) => natural.compare(x.title, y.title));
+    const n = g.items.length;
+    const [, rest] = g.key.split('|');
+    if (g.group === 'minor') g.label = `${n} part${n === 1 ? '' : 's'}: ${rest}`;
+    else if (g.group === 'routing') {
+      const [kind, what] = rest.split(' ');
+      g.label = `${n} ${kind}${n === 1 ? '' : 's'} ${what}`; // "214 vias added", "55 tracks rerouted"
+    }
+    else g.label = `${n} part${n === 1 ? '' : 's'}: fields / attributes only (see BOM)`;
+    g.badge = g.group;
   }
-  minorGroups.sort((a, b) => b.items.length - a.items.length);
+  const ORDER = { routing: 0, properties: 1, minor: 2 };
+  minorGroups.sort((x, y) => (ORDER[x.group] - ORDER[y.group]) || (y.items.length - x.items.length));
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: 'No itemised layout changes.',
@@ -300,6 +317,8 @@ export function createLayoutView(project, container, ctx) {
       stage.place(holder, worldBox());
       panes = [stage.pane(`diff: ${layer ? layer.id : '—'}`, under, holder)];
       legendBox.append(...legend());
+      // only the listed changes that can alter this layer get a box: the diff itself has to pop
+      stage.setMarks(changeItems.filter((c) => c.box && layer && (c.layer === layer.id || c.layers.includes(layer.id))).map((c) => ({ box: c.box, cls: 'outline' })));
       if (layer) {
         computeDiff(layer).then((d) => {
           if (destroyed || token !== modeToken) return;
@@ -315,6 +334,7 @@ export function createLayoutView(project, container, ctx) {
         }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Diff failed: ${e.message}`)); });
       }
     } else {
+      stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
       const c = comparePanes(stage, m, makeSide, extra, { single: sides.head ? 'head' : 'base' });
       modeCleanups.push(c.cleanup);
       panes = c.panes;

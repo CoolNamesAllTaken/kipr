@@ -203,3 +203,13 @@ def test_empty_field_added_is_not_a_change():
     assert diff_pcb.field_diff({"MPN": "x"}, {"MPN": "x", "Sim.Library": "", "Sim.Name": ""}) == []
     assert diff_pcb.field_diff({"Sim.Name": ""}, {}) == []
     assert diff_pcb.field_diff({}, {"Sim.Name": "R"}) == ["Sim.Name added: 'R'"]
+
+
+def test_changes_ordered_by_significance_with_groups():
+    base = (fp("R1"), fp("R2", 20, 10, uuid="u-r2"), fp("R3", 30, 10, uuid="u-r3"))
+    head = (fp("R1", value="1k"), fp("R2", 21, 10, uuid="u-r2"),
+            fp("R3", 30, 10, uuid="u-r3").replace('"MPN" "RC0603"', '"MPN" "RC0603-X"'), seg(0, 0, 10, 0, uuid="t1"))
+    changes, _ = diff(base, head)
+    assert [(c["kind"], c.get("ref"), c.get("group")) for c in changes] == [
+        ("footprint", "R1", None), ("footprint", "R2", None), ("track", None, "routing"), ("footprint", "R3", "properties")]
+    assert [diff_pcb.significance(c)[0] for c in changes] == sorted(diff_pcb.significance(c)[0] for c in changes)
