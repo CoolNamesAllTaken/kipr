@@ -71,3 +71,13 @@ def test_actionlint():
     r = subprocess.run([exe, os.path.join(WF, "project-review.yml"), os.path.join(WF, "project-review-publish.yml")],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_extra_libraries_are_data_only():
+    wf = load("project-review.yml")
+    call = wf[True]["workflow_call"]
+    assert {"libraries-repository", "libraries-ref", "libraries-path-var"} <= set(call["inputs"])
+    lib = [s for s in steps(wf) if s.get("name") == "Checkout extra KiCad libraries"][0]
+    assert lib["with"]["persist-credentials"] is False and "token" not in lib["with"]
+    install = [s for s in steps(wf) if s.get("name") == "Install kipr"][0]
+    assert "kicad-libraries" in install["run"]  # the libraries' commit is part of the export cache key

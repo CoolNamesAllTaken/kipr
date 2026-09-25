@@ -58,6 +58,18 @@ on:
       retention-days:
         type: number
         default: 14
+      libraries-repository:
+        description: extra KiCad library repository (owner/repo) whose symbol (*.kicad_sym) and footprint (*.pretty) libraries are added to the global tables, e.g. the repository the boards' global libraries come from. Only read as data, nothing in it runs
+        type: string
+        default: ""
+      libraries-ref:
+        description: ref of libraries-repository (empty = its default branch)
+        type: string
+        default: ""
+      libraries-path-var:
+        description: environment variable set to the libraries checkout, for paths like ${KICAD_LIBS_DIR}/lib_3d/... in the boards (3D models)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -108,6 +120,52 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout extra KiCad libraries
+        if: inputs.libraries-repository != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.libraries-repository }}
+          ref: ${{ inputs.libraries-ref }}
+          path: .kipr-libraries
+          persist-credentials: false
+
+      - name: Register extra KiCad libraries
+        if: inputs.libraries-repository != ''
+        env:
+          PATH_VAR: ${{ inputs.libraries-path-var }}
+        run: |
+          # out of the PR checkout, so it can't be mistaken for part of the repository
+          libs="$RUNNER_TEMP/kicad-libraries"
+          rm -rf "$libs" && mv .kipr-libraries "$libs"
+          if [ -n "$PATH_VAR" ]; then
+            [[ "$PATH_VAR" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "::error::bad libraries-path-var"; exit 1; }
+            echo "$PATH_VAR=$libs" >> "$GITHUB_ENV"
+          fi
+          # every *.kicad_sym / *.pretty becomes a global library named after the file (existing names win)
+          python3 - "$libs" "$HOME/.config/kicad/10.0" <<'PY'
+          import os, re, sys
+          libs, cfg = sys.argv[1:]
+          found = {"sym-lib-table": {}, "fp-lib-table": {}}
+          for d, dirs, files in os.walk(libs):
+              dirs[:] = sorted(x for x in dirs if not x.startswith("."))
+              for x in dirs:
+                  if x.endswith(".pretty"):
+                      found["fp-lib-table"].setdefault(x[:-7], os.path.join(d, x))
+              for x in sorted(files):
+                  if x.endswith(".kicad_sym"):
+                      found["sym-lib-table"].setdefault(x[:-10], os.path.join(d, x))
+          for table, entries in found.items():
+              path = os.path.join(cfg, table)
+              text = open(path).read() if os.path.exists(path) else "(%s\n  (version 7)\n)\n" % table.replace("-", "_")
+              have = set(re.findall(r'\(name\s+"?([^")\s]+)', text))
+              rows = ['  (lib (name "%s")(type "KiCad")(uri "%s")(options "")(descr ""))' % (n, u.replace('"', '\\"'))
+                      for n, u in sorted(entries.items()) if n not in have]
+              text = text.rstrip()
+              assert text.endswith(")"), path
+              open(path, "w").write(text[:-1].rstrip() + "\n" + "".join(r + "\n" for r in rows) + ")\n")
+              print(f"{table}: {len(rows)} libraries added from {libs}")
+          PY
+
       - name: Find merge base
         id: base
         run: |
@@ -123,13 +181,19 @@ jobs:
         id: kipr
         env:
           KICAD_IMAGE: ${{ inputs.kicad-image }}
+          LIBS_PATH_VAR: ${{ inputs.libraries-path-var }}
         run: |
           python3 -m venv --system-site-packages "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"
           "$RUNNER_TEMP/venv/bin/kipr" project --help > /dev/null
-          # export cache key: kicad-cli version + image (exports are keyed by file blobs inside)
-          key=$( { kicad-cli version; echo "$KICAD_IMAGE"; } | sha256sum | cut -c1-16)
+          # export cache key: kicad-cli version + image + extra libraries (they change ERC/DRC and the
+          # 3D models, which kipr's per-export keys don't see); exports are keyed by file blobs inside
+          libs=""
+          if [ -d "$RUNNER_TEMP/kicad-libraries" ]; then
+            libs="$(git -c safe.directory="*" -C "$RUNNER_TEMP/kicad-libraries" rev-parse HEAD) $LIBS_PATH_VAR"
+          fi
+          key=$( { kicad-cli version; echo "$KICAD_IMAGE"; echo "$libs"; } | sha256sum | cut -c1-16)
           echo "cache_key=$key" >> "$GITHUB_OUTPUT"
 
       # kicad-cli exports keyed by the git blobs they read: unchanged files (usually the whole base
