@@ -142,6 +142,9 @@ Security notes (same as the library review):
 | `jobs` | `4` | parallel kicad-cli processes |
 | `max-artifact-mb` | `250` | size budget of the viewer artifact and the report; optional exports are dropped to fit |
 | `retention-days` | `14` | artifact retention |
+| `libraries-repository` | – | extra KiCad library repo (`owner/repo`): every `*.kicad_sym` / `*.pretty` in it is added to the global symbol/footprint tables (named after the file), so ERC/DRC library checks see the same libraries as the designers. Checked out without credentials and only read as data |
+| `libraries-ref` | default branch | ref of `libraries-repository` |
+| `libraries-path-var` | – | environment variable set to that checkout, for board paths like `${KICAD_LIBS_DIR}/lib_3d/…` (3D models) |
 
 `project-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`.
 
@@ -192,6 +195,9 @@ jobs:
     with:
       kipr-ref: KIPR_SHA
       fast-checks: ${{ vars.KIPR_FAST_CHECKS == 'true' }}
+      # the boards use global libraries and 3D models (${KICAD_LIBS_DIR}/lib_3d/...) from kicad-libs
+      libraries-repository: PantsForBirds/kicad-libs
+      libraries-path-var: KICAD_LIBS_DIR
 ```
 
 `.github/workflows/kicad-review-publish.yml`:
@@ -217,6 +223,12 @@ jobs:
     with:
       kipr-ref: KIPR_SHA
 ```
+
+Without `libraries-repository`, parts from libraries that only exist in the designers' global
+tables show up as `lib_symbol_issues` / `lib_footprint_issues` warnings in the ERC/DRC delta
+(new whenever such a part is added) and their `${KICAD_LIBS_DIR}` 3D models are missing. The
+workflow adds the libraries' commit to the export cache key; for local runs with other global
+tables, use a separate `--cache-dir`.
 
 Notes for internal: the old workflow's sticky comment (header `kicad-diff`) is not touched; the
 new one is a separate comment with the hidden marker `<!-- kipr-project-review -->`. Set the
