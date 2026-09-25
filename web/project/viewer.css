@@ -162,11 +162,12 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 .layer-slot { position: absolute; }
 .layer-slot > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .layer-holder > .sheet-img { position: absolute; inset: 0; width: 100%; height: 100%; }
-.layer-holder.faint { opacity: .35; }
+.layer-holder.faint { opacity: .3; filter: grayscale(1); }   /* the board under a diff: context only, never coloured */
 .diff-canvas { image-rendering: auto; }
 svg.overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; transform-origin: 50% 50%; }
 svg.overlay { --px: 0.25; }
 svg.overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .6); stroke-width: calc(var(--px) * 1.5px); stroke-dasharray: calc(var(--px) * 5px) calc(var(--px) * 3px); }
+svg.overlay .mark.outline { fill: none; }
 svg.overlay .hl { fill: none; stroke: var(--hl); stroke-width: calc(var(--px) * 3px); animation: pulse 1.2s ease-in-out 3; }
 @keyframes pulse { 50% { stroke-width: calc(var(--px) * 7px); stroke-opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { svg.overlay .hl { animation: none; } }
@@ -193,6 +194,12 @@ svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .change.nobox { cursor: default; }
 .change-top { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .change-title { font-weight: 600; overflow-wrap: anywhere; }
+.minor-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.minor-group summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 3px 0; }
+.minor-group .change-list { margin: 4px 0 4px 10px; flex-direction: row; flex-wrap: wrap; }
+.minor-group .change-list li { flex: 0 0 auto; }
+.change.small { padding: 2px 6px; font-size: 12px; width: auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.minor-group .change-list li { max-width: 100%; }
 .change-detail { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; margin-top: 2px; }
 .empty-li { padding: 6px 2px; }
 

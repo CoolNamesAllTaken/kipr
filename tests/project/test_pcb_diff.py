@@ -163,3 +163,53 @@ def test_stackup_change_reported_as_board_change():
     changes, _ = diff_pcb.diff_boards(b, h)
     assert [(c["kind"], c["what"]) for c in changes] == [("board", "stackup")]
     assert "HAL SnPb" in changes[0]["detail"]
+
+
+def test_model_format_swap_is_minor():
+    wrl = fp().replace("R_0603.step", "R_0603.wrl")
+    changes, comps = diff((wrl, fp("R2", 20, 10, uuid="u-r2")),
+                          (fp(), fp("R2", 22, 10, uuid="u-r2").replace("R_0603.step", "R_0603.wrl")))
+    r1 = next(c for c in comps if c["ref"] == "R1")
+    assert r1["status"] == "changed" and r1["minor"] is True and r1["what"] == ["model_format"]
+    (c,) = [c for c in only(changes, "footprint") if c["ref"] == "R1"]
+    assert c["what"] == "model_format" and c["minor"] is True and c["layers"] == []
+    assert c["detail"] == "3D model format .step -> .wrl" or c["detail"] == "3D model format .wrl -> .step"
+    # a real change next to a format swap is not minor
+    r2 = next(c for c in comps if c["ref"] == "R2")
+    assert r2["status"] == "moved" and "minor" not in r2 and "model_format" in r2["what"]
+    (g,) = diff_pcb.minor_groups(changes)
+    assert (g["what"], g["count"], g["refs"]) == ("model_format", 1, ["R1"])
+
+
+def test_model_path_change_other_than_extension_is_not_minor():
+    other = fp().replace("R_0603.step", "R_0805.wrl")
+    _, comps = diff((other,), (fp(),))
+    assert comps[0]["status"] == "changed" and "minor" not in comps[0] and comps[0]["what"] == ["model"]
+    moved = fp().replace("${KICAD10_3DMODEL_DIR}/R.3dshapes", "models")
+    _, comps = diff((moved,), (fp(),))
+    assert "minor" not in comps[0]
+
+
+def test_footprint_library_rename_with_same_body_is_minor():
+    _, comps = diff((fp(lib="OldLib:R_0603"),), (fp(lib="NewLib:R_0603"),))
+    assert comps[0]["minor"] is True and comps[0]["what"] == ["footprint_library"]
+    # same name, different pads: a real footprint change
+    changes, comps = diff((fp(lib="OldLib:R_0603"),), (fp(lib="NewLib:R_0603").replace("(size 0.8 0.9)", "(size 1.0 0.9)"),))
+    assert "minor" not in comps[0] and "footprint" in comps[0]["what"]
+    assert "pads" in only(changes, "footprint")[0]["whats"]
+
+
+def test_empty_field_added_is_not_a_change():
+    assert diff_pcb.field_diff({"MPN": "x"}, {"MPN": "x", "Sim.Library": "", "Sim.Name": ""}) == []
+    assert diff_pcb.field_diff({"Sim.Name": ""}, {}) == []
+    assert diff_pcb.field_diff({}, {"Sim.Name": "R"}) == ["Sim.Name added: 'R'"]
+
+
+def test_changes_ordered_by_significance_with_groups():
+    base = (fp("R1"), fp("R2", 20, 10, uuid="u-r2"), fp("R3", 30, 10, uuid="u-r3"))
+    head = (fp("R1", value="1k"), fp("R2", 21, 10, uuid="u-r2"),
+            fp("R3", 30, 10, uuid="u-r3").replace('"MPN" "RC0603"', '"MPN" "RC0603-X"'), seg(0, 0, 10, 0, uuid="t1"))
+    changes, _ = diff(base, head)
+    assert [(c["kind"], c.get("ref"), c.get("group")) for c in changes] == [
+        ("footprint", "R1", None), ("footprint", "R2", None), ("track", None, "routing"), ("footprint", "R3", "properties")]
+    assert [diff_pcb.significance(c)[0] for c in changes] == sorted(diff_pcb.significance(c)[0] for c in changes)

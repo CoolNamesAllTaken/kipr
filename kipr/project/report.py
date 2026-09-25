@@ -159,16 +159,20 @@ class Images:
                 todo[(rel, width, crop)] = str(p)
         if not self.can_raster or jobs < 2 or len(todo) < 2:
             return
+        failed = []
+        workers = min(jobs, len(todo))
         try:
-            with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as pool:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
                 futs = {k: pool.submit(render_png, path, k[1], k[2]) for k, path in todo.items()}
                 for k, f in futs.items():
                     try:
                         self._png[k] = f.result()
-                    except Exception:  # noqa: BLE001 - raster() retries and records the failure
-                        pass
-        except (OSError, RuntimeError):  # no process pool here (sandbox, frozen app): render serially
-            pass
+                    except Exception as e:  # noqa: BLE001 - raster() retries and records the failure
+                        failed.append(f"{k[0]}: {type(e).__name__}: {e}"[:200])
+        except (OSError, RuntimeError) as e:  # no process pool here (sandbox, frozen app): render serially
+            failed.append(f"process pool: {type(e).__name__}: {e}"[:200])
+        print(f"kipr report: rasterised {len(self._png)}/{len(todo)} image(s) with {workers} worker processes"
+              + (f"; {len(failed)} left to render serially: {failed[0]}" if failed else ""), file=sys.stderr)
 
     def svg_path(self, rel, slug: str) -> Path | None:
         p = confined_file(self.out, rel, slug)
@@ -373,11 +377,51 @@ def wanted_images(projects, width_sheet: int, width_layer: int) -> list:
     return out
 
 
+def model_note(p3d) -> str:
+    """Which 3D model paths the export swapped for the other format (see kipr.project.models)."""
+    out = []
+    for side, m in d(d(p3d).get("models")).items():
+        subs = [d(x) for x in lst(d(m).get("substitutions"))]
+        if not subs:
+            continue
+        exts = sorted({f"{Path(str(x.get('from'))).suffix.lower()} → {Path(str(x.get('to'))).suffix.lower()}" for x in subs})
+        refs = sorted({str(r) for x in subs for r in lst(x.get("refs"))})
+        out.append(f"<li>{esc(side)}: {len(subs)} model path(s) not found, exported with the other format "
+                   f"({esc(', '.join(exts))}); parts: {esc(', '.join(refs[:40]))}{' …' if len(refs) > 40 else ''}</li>")
+    if not out:
+        return ""
+    return ('<details class="minor"><summary>3D export: model format fallbacks</summary><ul>' + "".join(out)
+            + '</ul><p class="muted">Only the 3D export used the substituted paths; the diffs compare the files as committed.</p></details>')
+
+
+GROUPS = {"routing": "track / via changes", "properties": "footprints with field / attribute changes only (see the BOM)"}
+
+
+def minor_blocks(minor) -> list:
+    """Minor footprint changes (3D model format / library name only), one collapsed <details> per kind."""
+    groups: dict = {}
+    for c in minor:
+        c = d(c)
+        groups.setdefault(str(c.get("detail") or c.get("what") or "minor"), []).append(str(c.get("ref") or "?"))
+    out = []
+    for label, refs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        out.append(f'<details class="minor"><summary><span class="b s-minor">minor</span> {len(refs)} part{"s" if len(refs) != 1 else ""}: '
+                   f'{esc(label)}</summary><p class="muted">{esc(", ".join(refs))}</p></details>')
+    return out
+
+
 def pcb_section(imgs, slug, pcb, width) -> str:
     pcb = d(pcb)
     if not pcb:
         return ""
-    out = ['<h3>Layout</h3>', table(CHANGE_HEAD, change_rows(pcb.get("changes")))]
+    allc = [d(c) for c in lst(pcb.get("changes"))]
+    out = ['<h3>Layout</h3>', table(CHANGE_HEAD, change_rows([c for c in allc if not c.get("minor") and c.get("group") not in GROUPS]))]
+    for group, title in GROUPS.items():  # bulky, low-signal changes: collapsed tables
+        rows = [c for c in allc if c.get("group") == group and not c.get("minor")]
+        if rows:
+            out.append(f'<details class="minor"><summary><span class="b s-minor">{esc(group)}</span> {len(rows)} {esc(title)}</summary>'
+                       + table(CHANGE_HEAD, change_rows(rows)) + "</details>")
+    out += minor_blocks([c for c in allc if c.get("minor")])
     crop = board_crop(pcb)
     changed = changed_layers(pcb)
     if changed and width > 0:
@@ -438,7 +482,8 @@ def summary_row(p) -> list:
     n = lambda v: esc(fmt(num(v))) if num(v) is not None else ""  # noqa: E731
     return [f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
             n(s.get("sheets_changed")), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
-            n(c.get("changed")), n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new"))]
+            n(c.get("changed")) + (f' <span class="muted">+{esc(fmt(num(c.get("minor"))))} minor</span>' if num(c.get("minor")) else ""),
+            n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new"))]
 
 
 CSS = """
@@ -454,7 +499,7 @@ h1{font-size:20px;margin:0 0 4px}h2{font-size:18px;margin:0 0 8px}h3{font-size:1
 table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--border);vertical-align:top}
 th{color:var(--muted);font-size:12px}.b{display:inline-block;padding:0 7px;border-radius:10px;font-size:11px;font-weight:600;line-height:18px}
 .s-added,.s-fixed{background:var(--add-bg);color:var(--add)}.s-removed,.s-deleted,.s-new{background:var(--del-bg);color:var(--del)}
-.s-modified,.s-changed,.s-moved,.s-rotated,.s-renamed{background:var(--chg-bg);color:var(--warn)}.s-unchanged{color:var(--muted);border:1px solid var(--border)}
+.s-modified,.s-changed,.s-moved,.s-rotated,.s-renamed{background:var(--chg-bg);color:var(--warn)}.s-unchanged,.s-minor{color:var(--muted);border:1px solid var(--border)}details.minor{margin:6px 0}details.minor summary{cursor:pointer}
 .trio{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px}figure{margin:0}figcaption{font-size:12px;font-weight:600;color:var(--muted)}
 .trio img{width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block}.noimg{padding:20px;border:1px dashed var(--border);color:var(--muted);text-align:center}
 .legend span{margin-right:14px;font-size:12px}.k{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
@@ -503,6 +548,7 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
                      + (f'<details class="note"><summary>Export problems</summary><ul>{errs}</ul></details>' if errs else ""))
         parts.append(schematic_section(imgs, slug, p.get("schematic"), width_sheet))
         parts.append(pcb_section(imgs, slug, p.get("pcb"), width_layer))
+        parts.append(model_note(p.get("pcba3d")))
         parts.append(bom_section(p.get("bom")))
         parts.append(netlist_section(p.get("netlist")))
         parts.append(checks_section(p.get("checks")))

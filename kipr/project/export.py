@@ -131,18 +131,21 @@ class Exporter:
     def close(self):
         self.pool.shutdown(wait=True)
 
-    def key(self, job: Job, root_rel: str, blobs: dict[str, str]) -> str:
-        """`blobs`: {path relative to the side root: git blob id} of the checked-out files."""
+    def key(self, job: Job, root_rel: str, blobs: dict[str, str], salt: str = "") -> str:
+        """`blobs`: {path relative to the side root: git blob id} of the checked-out files; `salt`:
+        anything else the export depends on (the 3D model fallbacks applied to the checkout)."""
         h = hashlib.sha256()
         h.update(f"{CACHE_VERSION}\0{self.cli.version}\0{job.cmd}\0{job.options}\0{job.target}\0{root_rel}\0"
                  f"{job.isolated_libs}\0".encode())
+        if salt:
+            h.update(f"salt\0{salt}\0".encode())
         for p in sorted(blobs):
             if p.endswith(job.inputs) or posixpath.basename(p) in job.inputs:
                 h.update(f"{p}\0{blobs[p]}\0".encode())
         return h.hexdigest()[:32]
 
-    def submit(self, job: Job, side_root: str, blobs: dict[str, str], project_dir: str) -> Future:
-        k = self.key(job, project_dir, blobs)
+    def submit(self, job: Job, side_root: str, blobs: dict[str, str], project_dir: str, salt: str = "") -> Future:
+        k = self.key(job, project_dir, blobs, salt)
         with self._lock:
             fut = self._inflight.get(k)
             if fut is None:

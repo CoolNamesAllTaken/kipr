@@ -360,19 +360,29 @@ def demo_board(out: Path) -> dict:
         {"kind": "zone", "what": "added", "layer": "B.Cu", "bbox_mm": [145, 74, 12, 10], "detail": "GND pour"},
         {"kind": "via", "what": "added", "layer": "B.Cu", "bbox_mm": [125.6, 94.6, 0.8, 0.8]},
         {"kind": "text", "what": "value changed", "ref": "R2", "detail": "no geometry change"},
+        {"kind": "footprint", "what": "model_format", "whats": ["model_format"], "ref": "J1", "layer": "F.Cu", "layers": [],
+         "bbox_mm": [138.7, 76.7, 2.6, 5.1], "minor": True, "detail": "3D model format .wrl -> .step"},
+        {"kind": "footprint", "what": "model_format", "whats": ["model_format"], "ref": "C1", "layer": "F.Cu", "layers": [],
+         "bbox_mm": [104.6, 86.3, 2.9, 1.4], "minor": True, "detail": "3D model format .wrl -> .step"},
     ]
+    pcb["minor_groups"] = [{"what": "model_format", "detail": "3D model format .wrl -> .step", "count": 2, "refs": ["C1", "J1"]}]
     comps = []
     for ref, st, what in (("U1", "moved", ["position"]), ("R2", "changed", ["value"]), ("C2", "added", []),
-                          ("R1", "unchanged", []), ("C1", "unchanged", []), ("J1", "unchanged", [])):
+                          ("R1", "unchanged", []), ("C1", "minor", ["model_format"]), ("J1", "minor", ["model_format"])):
         def pos(side):
             if st == "added" and side == "base":
                 return None
             c = next((c for c in board(side)["comps"] if c["ref"] == ref), None)
             return c and {"x": c["x"], "y": c["y"], "rot": c["rot"], "side": c["side"], "footprint": c["fp"], "value": c["value"], "model": None}
-        comps.append({"ref": ref, "status": st, "base": pos("base"), "head": pos("head"), "what": what})
+        c = {"ref": ref, "status": "changed" if st == "minor" else st, "base": pos("base"), "head": pos("head"), "what": what}
+        if st == "minor":
+            c["minor"] = True
+            c["base"] = c["base"] and {**c["base"], "model": f"${{KICAD6_3DMODEL_DIR}}/Mock.3dshapes/{ref}.wrl"}
+            c["head"] = c["head"] and {**c["head"], "model": f"${{KICAD6_3DMODEL_DIR}}/Mock.3dshapes/{ref}.step"}
+        comps.append(c)
     return {
         "slug": slug, "name": "demo_board", "path": "boards/demo_board", "status": "modified",
-        "summary": {"sheets_changed": 4, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1},
+        "summary": {"sheets_changed": 4, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1, "minor": 2},
                     "nets_changed": 3, "erc": {"new": 1, "fixed": 1}, "drc": {"new": 2, "fixed": 1}},
         "schematic": sch, "pcb": pcb,
         "pcba3d": {"base": {"glb": f"p/{slug}/3d/base.glb"}, "head": {"glb": f"p/{slug}/3d/head.glb"}, "components": comps},

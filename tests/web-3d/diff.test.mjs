@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  tagsOf, angleDelta, whatChanged, deriveStatus, normalizeComponents, countByStatus, describe, summary,
+  tagsOf, angleDelta, whatChanged, deriveStatus, normalizeComponents, countByStatus, describe, summary, isChange,
 } from '../../web/project/pcba3d/diff.js';
 
 const side = (o = {}) => ({ x: 10, y: 20, rot: 0, side: 'top', footprint: 'Lib:R_0603', value: '10k', model: 'r.step', dnp: false, ...o });
@@ -45,7 +45,7 @@ test('normalizeComponents keeps backend statuses, fills gaps, sorts changes firs
   assert.deepEqual(list.map((c) => [c.ref, c.status]), [
     ['U1', 'added'], ['R1', 'removed'], ['R2', 'moved'], ['C1', 'changed'], ['R10', 'unchanged']]);
   assert.deepEqual(list.find((c) => c.ref === 'R2').what, ['position']);
-  assert.deepEqual(countByStatus(list), { added: 1, removed: 1, moved: 1, rotated: 0, changed: 1, unchanged: 1 });
+  assert.deepEqual(countByStatus(list), { added: 1, removed: 1, moved: 1, rotated: 0, changed: 1, minor: 0, unchanged: 1 });
   assert.deepEqual(normalizeComponents(undefined), []);
 });
 
@@ -87,4 +87,26 @@ test('tagsOf: a part moved and turned counts under both, primary status first', 
   assert.deepEqual(tagsOf(a), ['added']);
   const counts = countByStatus([d12, c, a]);
   assert.deepEqual([counts.moved, counts.rotated, counts.changed, counts.added], [2, 1, 1, 1]);
+});
+
+test('minor changes (3D model format only) are listed but not changes', () => {
+  const side = (model) => ({ x: 1, y: 2, rot: 0, side: 'top', footprint: 'L:R_0603', value: '10k', model });
+  const list = normalizeComponents([
+    { ref: 'R1', status: 'changed', minor: true, what: ['model_format'], base: side('${KICAD6_3DMODEL_DIR}/R.3dshapes/R_0603.wrl'), head: side('${KICAD6_3DMODEL_DIR}/R.3dshapes/R_0603.step') },
+    { ref: 'R2', status: 'changed', what: ['value'], base: side('a.step'), head: { ...side('a.step'), value: '1k' } },
+  ]);
+  const r1 = list.find((c) => c.ref === 'R1');
+  assert.equal(r1.status, 'minor');
+  assert.equal(isChange(r1), false);
+  assert.deepEqual(tagsOf(r1), ['minor']);
+  assert.equal(summary(r1), '3D model .wrl → .step');
+  const counts = countByStatus(list);
+  assert.equal(counts.minor, 1);
+  assert.equal(counts.changed, 1);
+  assert.equal(list[0].ref, 'R2'); // real changes first
+});
+
+test('a moved part whose model only changed format is tagged moved, not changed', () => {
+  assert.deepEqual(tagsOf({ status: 'moved', what: ['position', 'model_format'] }), ['moved']);
+  assert.deepEqual(tagsOf({ status: 'moved', what: ['position', 'value'] }), ['moved', 'changed']);
 });

@@ -57,10 +57,13 @@ letting the browser re-rasterise a vector `<img>` on every pan and zoom.
 
 `index.html` loads `js/boot.js`, a classic script. Over http(s) it loads `js/app.js` as a module. From disk it
 loads `data.js` (`window.KIPR_DATA = {review}`) and `js/bundle.js` (the same modules as one classic script),
-and the pixel diffs read the SVGs from `offline/<slug>.js` packs, because file:// images would taint the
-canvas. The layout tab's gerber renderer (WebAssembly) can't load from disk, so it falls back to the SVG
-exports and says to run `serve.py`. The 3D tab works from disk: it loads the committed classic-script
-`pcba3d/pcba3d.bundle.js` and its data packs `offline/pcba3d-*.js` (see `pcba3d/README.md`).
+and the SVGs, gerbers and drill files come from `offline/<slug>.js` packs (file:// images would taint the
+canvas, and fetch() is blocked). The gerber renderer can't be imported as a module from disk, so the layout
+tab takes it from the committed classic-script 3D bundle `pcba3d/pcba3d.bundle.js`
+(`window.KIPR_GERBER = {index, board, diff, wasmGlue}`) with its WASM from `offline/pcba3d-vendor.js`: the
+layout tab renders gerbers from disk too. Without WebGL2 (or without the bundle) it shows the per-layer SVG
+exports. The 3D tab loads the same bundle and its GLB packs `offline/pcba3d-<slug>.js`; it reads the fab
+files from the project pack (see `pcba3d/README.md`).
 
 ## Security
 

@@ -43,6 +43,19 @@ export function assetLoader(base, slug = null) {
   const baseUrl = base instanceof URL ? base : new URL(base || '.', document.baseURI);
   const offline = baseUrl.protocol === 'file:';
 
+  // The project viewer's own pack (offline/<slug>.js, written by kipr/project/site.py) holds the
+  // gerbers and drill files as text, keyed by their URL-encoded path; site.py doesn't repeat them
+  // in the 3D pack.
+  async function shellPack(path) {
+    if (!offline || !slug) return null;
+    const key = path.split('/').map(encodeURIComponent).join('/');
+    const has = () => globalThis.KIPR_PACKS?.[slug]?.files?.[key];
+    if (!has()) {
+      try { await loadScript(new URL(`offline/${encodeURIComponent(slug)}.js`, baseUrl).href); } catch { /* reported below */ }
+    }
+    return has() || null;
+  }
+
   async function embedded(path) {
     let files = offlineFiles();
     if ((!files || !(path in files)) && offline) {
@@ -53,7 +66,8 @@ export function assetLoader(base, slug = null) {
         files = offlineFiles();
       }
     }
-    return files && path in files ? files[path] : null;
+    if (files && path in files) return files[path];
+    return shellPack(path);
   }
 
   return {

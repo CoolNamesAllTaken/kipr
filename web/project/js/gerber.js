@@ -4,7 +4,7 @@
 // (never `fit`), so a render of any layer set lands on exactly the same pixels, and the result is copied
 // into a plain 2D canvas that the view places in its world. Renders are queued: the renderer cannot run
 // two frames at once.
-import { fetchText, OFFLINE } from './util.js';
+import { fetchText, OFFLINE, loadOfflineBundle, offlineWasm } from './util.js';
 import { kicadBoxToGerber, gerberPointToKicad } from './board.js';
 
 let rendererPromise = null;
@@ -20,7 +20,9 @@ export function webgl2Available() {
 
 /** Why the gerber renderer can't be used here, or null if it can. */
 export function gerberUnavailableReason() {
-  if (OFFLINE) return 'Opened from disk (file://): browsers block the WebAssembly gerber renderer there. Showing the per-layer SVG exports; run `python3 serve.py` in this folder for the gerber view.';
+  // From disk the renderer comes from the prebuilt 3D bundle (pcba3d/pcba3d.bundle.js) and its WASM from
+  // offline/pcba3d-vendor.js; getRenderer() fails over to the SVGs if either is missing.
+  if (OFFLINE && !(typeof window !== 'undefined' && window.KIPR_DATA?.pcba3d)) return 'Opened from disk (file://) without the offline renderer. Showing the per-layer SVG exports; run `python3 serve.py` in this folder for the gerber view.';
   if (!webgl2Available()) return 'WebGL2 is not available in this browser. Showing the per-layer SVG exports instead of the gerber render.';
   return null;
 }
@@ -28,6 +30,7 @@ export function gerberUnavailableReason() {
 async function getRenderer() {
   if (!rendererPromise) {
     rendererPromise = (async () => {
+      if (OFFLINE) return offlineRenderer();
       const mod = await import('../vendor/wasm-gerber-renderer/index.js');
       glCanvas = document.createElement('canvas');
       glCanvas.width = 16; glCanvas.height = 16;
@@ -44,6 +47,21 @@ async function getRenderer() {
     rendererPromise.catch(() => { rendererPromise = null; });
   }
   return rendererPromise;
+}
+
+const WASM_KEY = 'vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm';
+
+/** file://: ES modules and fetch() are blocked, so take the renderer from the classic 3D bundle
+ * (window.KIPR_GERBER = {index, board, diff, wasmGlue}) and the WASM from its data pack. */
+async function offlineRenderer() {
+  await loadOfflineBundle();
+  const g = window.KIPR_GERBER;
+  const bytes = g ? await offlineWasm(WASM_KEY) : null;
+  if (!g || !bytes) throw new Error('offline gerber renderer not available (no pcba3d bundle or WASM pack)');
+  glCanvas = document.createElement('canvas');
+  glCanvas.width = 16; glCanvas.height = 16;
+  const renderer = await g.index.createGerberRenderer(glCanvas, { wasmModule: g.wasmGlue, wasmInitInput: { module_or_path: bytes } });
+  return { mod: g.index, renderer, board: g.board, diff: g.diff };
 }
 
 /**

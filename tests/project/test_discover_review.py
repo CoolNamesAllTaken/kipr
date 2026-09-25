@@ -130,3 +130,55 @@ def test_review_missing_kicad_cli_is_reported_not_fatal(repo, tmp_path, monkeypa
     assert "kicad-cli not found" in doc["errors"][0]
     (p,) = doc["projects"]
     assert p["slug"] == "b" and any("cannot parse head board" in e for e in p["errors"])
+
+
+FAKE_CLI = r"""#!/bin/sh
+# kicad-cli stand-in: `pcb export glb` copies the board it was given to --output (so the test can see
+# which model paths the export read); everything else fails.
+case "$*" in
+  version) echo 10.0.6; exit 0 ;;
+  *--help*) echo "--output --subst-models --user-origin --force"; exit 0 ;;
+esac
+if [ "$1 $2 $3" = "pcb export glb" ]; then
+  out=""; prev=""
+  for a in "$@"; do [ "$prev" = "--output" ] && out="$a"; prev="$a"; done
+  for a in "$@"; do last="$a"; done
+  cp "$last" "$out"; exit 0
+fi
+exit 1
+"""
+
+
+def test_model_fallback_only_in_the_export_checkout(repo, tmp_path, monkeypatch):
+    r, base = repo
+    stock = tmp_path / "stock"
+    (stock / "R.3dshapes").mkdir(parents=True)
+    (stock / "R.3dshapes" / "R_0603.step").write_text("step")  # the stock library has STEP only
+    (r / "boards/a/models").mkdir()
+    (r / "boards/a/models/local.wrl").write_text("vrml")          # a project model that exists as .wrl
+    monkeypatch.setenv("KIPR_KICAD_3DMODEL_DIR", str(stock))
+    wrl = fp(x=12).replace("R_0603.step", "R_0603.wrl")
+    local = fp("R2", 20, 10, uuid="u-r2").replace('${KICAD10_3DMODEL_DIR}/R.3dshapes/R_0603.step', "${KIPRJMOD}/models/local.step")
+    write(r, "boards/a/a.kicad_pcb", HEADER + wrl + local + ")")
+    head = commit(r, "wrl models")
+    cli = tmp_path / "kicad-cli"
+    cli.write_text(FAKE_CLI)
+    cli.chmod(0o755)
+    out = tmp_path / "out"
+    doc = review.run(str(r), base, head, str(out), kicad_cli=str(cli), cache_dir=str(tmp_path / "cache"),
+                     patterns=["a"], log=lambda *_: None)
+    (p,) = doc["projects"]
+    assert doc["tool"]["stock_3d_models"] is True
+    models = p["pcba3d"]["models"]["head"]
+    assert {(s["from"], s["to"], tuple(s["refs"])) for s in models["substitutions"]} == {
+        ("${KICAD10_3DMODEL_DIR}/R.3dshapes/R_0603.wrl", "${KICAD10_3DMODEL_DIR}/R.3dshapes/R_0603.step", ("R1",)),
+        ("${KIPRJMOD}/models/local.step", "${KIPRJMOD}/models/local.wrl", ("R2",))}
+    assert (models["substituted"], models["missing"], models["unknown"]) == (2, 0, 0)
+    exported = (out / p["pcba3d"]["head"]["glb"]).read_text()
+    assert "R_0603.step" in exported and "R_0603.wrl" not in exported and "models/local.wrl" in exported
+    # the diffs read the committed board: R1's model is .step -> .wrl, a minor format swap
+    r1 = next(c for c in p["pcba3d"]["components"] if c["ref"] == "R1")
+    assert r1["head"]["model"].endswith("R_0603.wrl") and "model_format" in r1["what"]
+    # the committed files are untouched
+    assert "R_0603.wrl" in subprocess.run(["git", "-C", str(r), "show", f"{head}:boards/a/a.kicad_pcb"],
+                                          capture_output=True, text=True).stdout

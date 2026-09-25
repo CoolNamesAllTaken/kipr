@@ -71,6 +71,7 @@
 .kp3d-swatch.rotated { background: var(--kp3d-rotated); }
 .kp3d-swatch.changed { background: var(--kp3d-changed); }
 .kp3d-swatch.unchanged { background: #b8bcc4; }
+.kp3d-swatch.minor { background: #8b949e; }
 .kp3d-muted { color: var(--kp3d-muted); }
 .kp3d-stage-note { position: absolute; left: 16px; right: 16px; bottom: 16px; background: var(--kp3d-panel); }
 .kp3d-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
@@ -114,6 +115,7 @@
 .kp3d-badge.moved, .kp3d-dot.moved { background: var(--kp3d-moved); }
 .kp3d-badge.rotated, .kp3d-dot.rotated { background: var(--kp3d-rotated); }
 .kp3d-badge.changed, .kp3d-dot.changed { background: var(--kp3d-changed); }
+.kp3d-badge.minor, .kp3d-dot.minor { background: #8b949e; }
 
 .kp3d-list {
   width: 280px; display: flex; flex-direction: column; border-left: 1px solid var(--kp3d-border);

@@ -13,14 +13,14 @@
 // and `ready` resolves when they are in (it never rejects: problems are shown in the viewer
 // and listed in `h.errors`).
 
-import { normalizeComponents, countByStatus, describe, summary, tagsOf, STATUSES } from './diff.js';
+import { normalizeComponents, countByStatus, describe, summary, tagsOf, isChange, STATUSES } from './diff.js';
 import { parseGlb, prepareSide } from './scene.js';
 import { assetLoader } from './assets.js';
 import { buildGerberBoards } from './gerberboard.js';
 import { Pcba3dView, MODES } from './viewer.js';
 
 const MODE_LABELS = { side: 'Side by side', overlay: 'Overlay', highlight: 'Changes' };
-const STATUS_LABELS = { added: 'Added', removed: 'Removed', moved: 'Moved', rotated: 'Rotated', changed: 'Changed', unchanged: 'Unchanged' };
+const STATUS_LABELS = { added: 'Added', removed: 'Removed', moved: 'Moved', rotated: 'Rotated', changed: 'Changed', minor: 'Minor', unchanged: 'Unchanged' };
 
 let cssLoaded = null;
 /** Add pcba3d.css once; resolves when it applies (the scene background is read from it). */
@@ -118,11 +118,11 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       h('span', {}, swatch('removed'), 'base'), h('span', {}, swatch('added'), 'head'),
       h('span', {}, swatch('unchanged'), 'unchanged')),
     h('div', { class: 'kp3d-legend highlight' },
-      STATUSES.filter((s) => s !== 'unchanged').map((s) => h('span', {}, swatch(s), s))),
+      STATUSES.filter((s) => s !== 'unchanged' && s !== 'minor').map((s) => h('span', {}, swatch(s), s))),
     progress, boardNote);
   const tip = h('div', { class: 'kp3d-tip', hidden: true });
 
-  const filters = new Set(STATUSES.filter((s) => s !== 'unchanged'));
+  const filters = new Set(STATUSES.filter((s) => s !== 'unchanged' && s !== 'minor'));
   const search = h('input', { type: 'search', placeholder: 'Filter ref, value, footprint…', oninput: () => renderList() });
   const chips = STATUSES.map((s) => h('button', {
     type: 'button', class: 'kp3d-chip', 'data-status': s, 'aria-pressed': String(filters.has(s)),
@@ -246,11 +246,17 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     }
   }
 
+  function fallbackKinds(subs) {
+    const ext = (p) => (String(p).match(/\.[A-Za-z0-9]+$/) || [''])[0].toLowerCase();
+    return [...new Set(subs.map((s) => `${ext(s.from)} → ${ext(s.to)}`))].join(', ');
+  }
+
   function statusLine() {
     const parts = [];
     const total = components.length;
-    const changed = components.filter((c) => c.status !== 'unchanged').length;
-    parts.push(`${total} components, ${changed} changed`);
+    const changed = components.filter(isChange).length;
+    const minor = components.filter((c) => c.status === 'minor').length;
+    parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: 3D model format / library name only)` : ''));
     for (const k of ['base', 'head']) {
       const s = sideState[k];
       if (!s) continue;
@@ -262,6 +268,8 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       if (noModel) t += `, ${noModel} without a 3D model`;
       if (missing > 0) t += `, ${missing} not found`;
       if (r.loose) t += `, ${r.loose} unassigned bodies`;
+      const subs = project?.pcba3d?.models?.[k]?.substitutions;
+      if (Array.isArray(subs) && subs.length) t += `, ${subs.length} missing model path(s) exported with the other format (${fallbackKinds(subs)})`;
       parts.push(t);
     }
     const fab = boardState.fab;

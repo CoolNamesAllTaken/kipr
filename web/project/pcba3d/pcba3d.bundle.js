@@ -224,7 +224,7 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
   }
 
   // pcba3d/diff.js
-  var STATUSES = ["added", "removed", "moved", "rotated", "changed", "unchanged"];
+  var STATUSES = ["added", "removed", "moved", "rotated", "changed", "minor", "unchanged"];
   var CHANGE_ORDER = Object.fromEntries(STATUSES.map((s, i) => [s, i]));
   var POSITION_EPS_MM = 1e-3;
   var ROTATION_EPS_DEG = 0.01;
@@ -266,19 +266,23 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
     const out = (Array.isArray(list) ? list : []).filter((c) => c && c.ref).map((c) => {
       const base = c.base || null, head = c.head || null;
       const what = Array.isArray(c.what) ? c.what : whatChanged(base, head);
-      const status = STATUSES.includes(c.status) ? c.status : deriveStatus(base, head, what);
+      let status = STATUSES.includes(c.status) ? c.status : deriveStatus(base, head, what);
+      if (c.minor && status !== "added" && status !== "removed") status = "minor";
       return { ...c, base, head, what, status };
     });
     out.sort((a, b) => CHANGE_ORDER[a.status] - CHANGE_ORDER[b.status] || naturalCompare(a.ref, b.ref));
     return out;
   }
+  function isChange(c) {
+    return c.status !== "unchanged" && c.status !== "minor";
+  }
   function tagsOf(c) {
     const tags = [c.status];
     const what = c.what || [];
-    if (c.status === "unchanged" || c.status === "added" || c.status === "removed") return tags;
+    if (["unchanged", "minor", "added", "removed"].includes(c.status)) return tags;
     if (what.includes("position") && !tags.includes("moved")) tags.push("moved");
     if (what.includes("rotation") && !tags.includes("rotated")) tags.push("rotated");
-    if (what.some((w) => !["position", "rotation"].includes(w)) && !tags.includes("changed")) tags.push("changed");
+    if (what.some((w) => !["position", "rotation", "model_format", "footprint_library"].includes(w)) && !tags.includes("changed")) tags.push("changed");
     return tags;
   }
   function countByStatus(list) {
@@ -315,8 +319,16 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
     if (c.what.includes("position")) parts.push(`moved ${Math.hypot(num(h2.x) - num(b.x), num(h2.y) - num(b.y)).toFixed(2)} mm`);
     if (c.what.includes("rotation")) parts.push(`${+num(b.rot).toFixed(1)}\xB0 \u2192 ${+num(h2.rot).toFixed(1)}\xB0`);
     if (c.what.includes("model")) parts.push("3D model");
+    if (c.what.includes("model_format")) {
+      const ext = (m) => (String(m || "").match(/\.[A-Za-z0-9]+$/) || ["?"])[0].toLowerCase();
+      parts.push(`3D model ${ext(b.model)} \u2192 ${ext(h2.model)}`);
+    }
+    if (c.what.includes("footprint_library")) {
+      const nick = (f) => String(f || "").includes(":") ? String(f).split(":")[0] : "\u2205";
+      parts.push(`library ${nick(b.footprint)} \u2192 ${nick(h2.footprint)}`);
+    }
     if (c.what.includes("dnp")) parts.push(h2.dnp ? "now DNP" : "no longer DNP");
-    const known = /* @__PURE__ */ new Set(["value", "footprint", "side", "position", "rotation", "model", "dnp"]);
+    const known = /* @__PURE__ */ new Set(["value", "footprint", "side", "position", "rotation", "model", "dnp", "model_format", "footprint_library"]);
     const other = c.what.filter((w) => !known.has(w));
     if (other.length) parts.push(other.join(", "));
     return parts.join(" \xB7 ");
@@ -35636,6 +35648,18 @@ void main() {
   function assetLoader(base, slug = null) {
     const baseUrl = base instanceof URL ? base : new URL(base || ".", document.baseURI);
     const offline = baseUrl.protocol === "file:";
+    async function shellPack(path) {
+      if (!offline || !slug) return null;
+      const key = path.split("/").map(encodeURIComponent).join("/");
+      const has = () => globalThis.KIPR_PACKS?.[slug]?.files?.[key];
+      if (!has()) {
+        try {
+          await loadScript(new URL(`offline/${encodeURIComponent(slug)}.js`, baseUrl).href);
+        } catch {
+        }
+      }
+      return has() || null;
+    }
     async function embedded(path) {
       let files = offlineFiles();
       if ((!files || !(path in files)) && offline) {
@@ -35648,7 +35672,8 @@ void main() {
           files = offlineFiles();
         }
       }
-      return files && path in files ? files[path] : null;
+      if (files && path in files) return files[path];
+      return shellPack(path);
     }
     return {
       offline,
@@ -35997,6 +36022,20 @@ void main() {
       }
     });
   }
+
+  // vendor/wasm-gerber-renderer/index.js
+  var wasm_gerber_renderer_exports = {};
+  __export(wasm_gerber_renderer_exports, {
+    GerberRenderer: () => GerberRenderer,
+    calculateFitView: () => calculateFitView,
+    createGerberRenderer: () => createGerberRenderer,
+    projectToCanvas: () => projectToCanvas,
+    renderGerberToCanvas: () => renderGerberToCanvas,
+    renderGerberToPng: () => renderGerberToPng,
+    renderGerberToPngStream: () => renderGerberToPngStream,
+    unprojectFromCanvas: () => unprojectFromCanvas,
+    viewExtent: () => viewExtent
+  });
 
   // vendor/wasm-gerber-renderer/shared.js
   var DEV_WASM_MODULE_PATH = "../../wasm/pkg/wasm_gerber_processor.js";
@@ -36653,6 +36692,40 @@ void main() {
       viewHeight: aspect2 > 1 ? 2 : 2 / aspect2
     };
   }
+  function projectToCanvas(view, x, y, width, height) {
+    const resolved = normalizeView(view);
+    const { viewWidth, viewHeight } = viewExtent(width, height);
+    const viewX = finiteOrThrow(x, "x") * resolved.zoomX + resolved.offsetX;
+    const viewY = finiteOrThrow(y, "y") * resolved.zoomY + resolved.offsetY;
+    return {
+      x: (viewX + viewWidth / 2) / viewWidth * width,
+      y: height - (viewY + viewHeight / 2) / viewHeight * height
+    };
+  }
+  function unprojectFromCanvas(view, pixelX, pixelY, width, height) {
+    const resolved = normalizeView(view);
+    if (resolved.zoomX === 0 || resolved.zoomY === 0) {
+      throw new Error("Cannot unproject through a view with zero zoom.");
+    }
+    const { viewWidth, viewHeight } = viewExtent(width, height);
+    const viewX = finiteOrThrow(pixelX, "pixelX") / width * viewWidth - viewWidth / 2;
+    const viewY = (height - finiteOrThrow(pixelY, "pixelY")) / height * viewHeight - viewHeight / 2;
+    return {
+      x: (viewX - resolved.offsetX) / resolved.zoomX,
+      y: (viewY - resolved.offsetY) / resolved.zoomY
+    };
+  }
+  function normalizeView(view) {
+    if (!view || typeof view !== "object") {
+      throw new TypeError("view must be an object with zoomX, zoomY, offsetX and offsetY.");
+    }
+    return {
+      zoomX: finiteOrThrow(view.zoomX, "view.zoomX"),
+      zoomY: finiteOrThrow(view.zoomY, "view.zoomY"),
+      offsetX: finiteOrThrow(view.offsetX, "view.offsetX"),
+      offsetY: finiteOrThrow(view.offsetY, "view.offsetY")
+    };
+  }
   function positiveFiniteOrThrow(value, name) {
     const number = finiteOrThrow(value, name);
     if (number <= 0) {
@@ -37121,6 +37194,67 @@ void main() {
   var DEFAULT_STREAM_EXPORT_BAND_BYTES = 128 * 1024 * 1024;
   async function createGerberRenderer(canvas, rendererOptions = {}) {
     return GerberRenderer.create(canvas, rendererOptions);
+  }
+  async function renderGerberToCanvas(canvas, layers, frameOptions = {}) {
+    const renderer = await createGerberRenderer(canvas, {
+      releaseContext: false,
+      ...frameOptions.rendererOptions || {}
+    });
+    try {
+      await renderer.withFrame(frameOptions, async () => {
+        await renderer.renderLayers(layers, frameOptions);
+      });
+    } finally {
+      renderer.dispose();
+    }
+  }
+  async function renderGerberToPng(canvas, layers, frameOptions = {}, exportOptions = {}) {
+    const renderFrameOptions = {
+      ...frameOptions,
+      ..."background" in exportOptions ? { background: exportOptions.background } : {}
+    };
+    const renderer = await createGerberRenderer(
+      canvas,
+      {
+        releaseContext: false,
+        ...renderFrameOptions.rendererOptions || {}
+      }
+    );
+    try {
+      await renderer.withFrame(renderFrameOptions, async () => {
+        await renderer.renderLayers(layers, renderFrameOptions);
+      });
+      return await renderer.exportPng({
+        background: renderFrameOptions.background,
+        ...exportOptions
+      });
+    } finally {
+      renderer.dispose();
+    }
+  }
+  async function renderGerberToPngStream(canvas, writable, layers, frameOptions = {}, exportOptions = {}) {
+    const renderFrameOptions = {
+      ...frameOptions,
+      ..."background" in exportOptions ? { background: exportOptions.background } : {}
+    };
+    const renderer = await createGerberRenderer(
+      canvas,
+      {
+        releaseContext: false,
+        ...renderFrameOptions.rendererOptions || {}
+      }
+    );
+    try {
+      await renderer.withFrame(renderFrameOptions, async () => {
+        await renderer.renderLayers(layers, renderFrameOptions);
+      });
+      await renderer.exportPngStream(writable, {
+        background: renderFrameOptions.background,
+        ...exportOptions
+      });
+    } finally {
+      renderer.dispose();
+    }
   }
   var GerberRenderer = class _GerberRenderer {
     static async create(canvas, rendererOptions = {}) {
@@ -40251,6 +40385,17 @@ void main() {
   }
   var wasm_gerber_processor_default = __wbg_init;
 
+  // vendor/wasm-gerber-renderer/board.js
+  var board_exports = {};
+  __export(board_exports, {
+    FACE_ROLES: () => FACE_ROLES,
+    addBoardLayers: () => addBoardLayers,
+    faceRasterSize: () => faceRasterSize,
+    renderBoard: () => renderBoard,
+    renderFaceRaster: () => renderFaceRaster,
+    selectFace: () => selectFace
+  });
+
   // vendor/wasm-gerber-renderer/palette.js
   var SUBSTRATE_COLOR = "#c9b27c";
   var COPPER_COLOR = "#cc9933";
@@ -40371,7 +40516,40 @@ void main() {
     return Math.min(1, Math.max(0, number));
   }
 
+  // vendor/wasm-gerber-renderer/contour.js
+  function flipRows(pixels, width, height) {
+    const stride = width * 4;
+    const row = new Uint8ClampedArray(stride);
+    for (let top = 0, bottom = height - 1; top < bottom; top += 1, bottom -= 1) {
+      const a = top * stride;
+      const b = bottom * stride;
+      row.set(pixels.subarray(a, a + stride));
+      pixels.copyWithin(a, b, b + stride);
+      pixels.set(row, b);
+    }
+    return pixels;
+  }
+
   // vendor/wasm-gerber-renderer/raster.js
+  function readRendererPixels(renderer, { rect = null, bottomUp = false, into = null } = {}) {
+    const gl = renderer.getContext();
+    const canvas = renderer.canvas;
+    const x = rect ? rect.x : 0;
+    const width = rect ? rect.width : canvas.width;
+    const height = rect ? rect.height : canvas.height;
+    const y = rect ? canvas.height - rect.y - rect.height : 0;
+    const pixels = into ?? new Uint8Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const previous = gl.getParameter(gl.PACK_ALIGNMENT);
+    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    try {
+      gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    } finally {
+      gl.pixelStorei(gl.PACK_ALIGNMENT, previous);
+    }
+    if (!bottomUp) flipRows(pixels, width, height);
+    return { pixels, width, height };
+  }
   function makeCanvas(width, height) {
     if (typeof document !== "undefined") {
       const canvas = document.createElement("canvas");
@@ -41009,6 +41187,22 @@ void main() {
     return result;
   }
 
+  // vendor/wasm-gerber-renderer/diff.js
+  var diff_exports = {};
+  __export(diff_exports, {
+    DIFF_STYLE: () => DIFF_STYLE,
+    MAX_DIFF_SOURCES: () => MAX_DIFF_SOURCES,
+    addLayerDiff: () => addLayerDiff,
+    analyzeBoardDiff: () => analyzeBoardDiff,
+    analyzeLayerDiff: () => analyzeLayerDiff,
+    diffPatterns: () => diffPatterns,
+    geometryText: () => geometryText,
+    measureLayers: () => measureLayers,
+    prepareDiffSources: () => prepareDiffSources,
+    renderLayerDiff: () => renderLayerDiff,
+    summarizeDiffPixels: () => summarizeDiffPixels
+  });
+
   // vendor/wasm-gerber-renderer/view.js
   function withFrameSize(view, width, height) {
     const { viewWidth, viewHeight } = viewExtent(width, height);
@@ -41021,6 +41215,26 @@ void main() {
       viewHeight,
       W: width,
       H: height
+    };
+  }
+  function pixelsPerUnit(view) {
+    const { viewWidth } = viewExtent(view.W, view.H);
+    return Math.abs(view.zoomX) / viewWidth * view.W;
+  }
+  function pixelRectToWorld(view, rect) {
+    const a = unprojectFromCanvas(view, rect.x, rect.y, view.W, view.H);
+    const b = unprojectFromCanvas(
+      view,
+      rect.x + rect.width,
+      rect.y + rect.height,
+      view.W,
+      view.H
+    );
+    return {
+      minX: Math.min(a.x, b.x),
+      maxX: Math.max(a.x, b.x),
+      minY: Math.min(a.y, b.y),
+      maxY: Math.max(a.y, b.y)
     };
   }
 
@@ -41088,6 +41302,15 @@ void main() {
       });
     }
     return prepared;
+  }
+  function geometryText(text) {
+    return String(text).split(/\r?\n/).filter((line) => {
+      const trimmed = line.trim();
+      return trimmed !== "" && !/^G04[^*]*\*$/.test(trimmed) && !/^%T[FAOD][^%]*\*%$/.test(trimmed);
+    }).join("\n");
+  }
+  function sameGeometry(base, head) {
+    return base.length === head.length && base.every((entry, index) => geometryText(entry.source) === geometryText(head[index].source));
   }
   function styleOf(options, key) {
     const base = DIFF_STYLE[key];
@@ -41194,6 +41417,234 @@ void main() {
       frame,
       view: frame.view ? withFrameSize(frame.view, frame.width, frame.height) : null,
       ids
+    };
+  }
+  var CLASS_STYLE = {
+    removed: { color: [1, 0, 0], alpha: 1 },
+    added: { color: [0, 1, 0], alpha: 1 },
+    unchanged: { color: [0, 0, 1], alpha: 1 }
+  };
+  async function analyzeLayerDiff(renderer, pair, options = {}) {
+    const { frame: frameOptions, diff } = splitOptions(options);
+    const base = await prepareDiffSources(pair.base, diff);
+    const head = await prepareDiffSources(pair.head, diff);
+    if (diff.skipIdentical !== false && sameGeometry(base, head)) {
+      return {
+        changed: false,
+        identical: true,
+        addedPixels: 0,
+        removedPixels: 0,
+        unchangedPixels: null,
+        regions: [],
+        truncated: false,
+        width: frameOptions.width ?? null,
+        height: frameOptions.height ?? null,
+        view: frameOptions.view && frameOptions.width && frameOptions.height ? withFrameSize(frameOptions.view, frameOptions.width, frameOptions.height) : null,
+        pixelSizeMm: null
+      };
+    }
+    await renderer.withFrame(
+      {
+        ...frameOptions,
+        background: null,
+        compositeMode: "stack"
+        // Coverage is what is being measured; no feature may be widened differently.
+      },
+      async () => {
+        await addUnderlay(renderer, diff.underlay, 0);
+        await addLayerDiff(renderer, { base, head }, {
+          prepared: true,
+          style: CLASS_STYLE,
+          showUnchanged: true
+        });
+      }
+    );
+    const frame = renderer.lastFrame;
+    const { pixels, width, height } = readRendererPixels(renderer, { bottomUp: true });
+    const summary2 = summarizeDiffPixels(pixels, width, height, { ...diff, bottomUp: true });
+    const view = frame.view ? withFrameSize(frame.view, width, height) : null;
+    for (const region of summary2.regions) {
+      region.world = view ? pixelRectToWorld(view, region.pixels) : null;
+    }
+    return {
+      ...summary2,
+      identical: false,
+      width,
+      height,
+      view,
+      pixelSizeMm: view ? 1 / pixelsPerUnit(view) : null
+    };
+  }
+  function summarizeDiffPixels(pixels, width, height, options = {}) {
+    const cellSize = Math.max(1, Math.round(options.cellSize ?? 8));
+    const mergeDistance = Math.max(0, options.mergeDistance ?? 16);
+    const minRegionPixels = Math.max(1, options.minRegionPixels ?? 1);
+    const maxRegions = Math.max(1, options.maxRegions ?? 500);
+    const bottomUp = options.bottomUp === true;
+    const cols = Math.ceil(width / cellSize);
+    const rows = Math.ceil(height / cellSize);
+    const cellCount = cols * rows;
+    const cellAdded = new Uint32Array(cellCount);
+    const cellRemoved = new Uint32Array(cellCount);
+    const cellMinX = new Int32Array(cellCount).fill(2147483647);
+    const cellMinY = new Int32Array(cellCount).fill(2147483647);
+    const cellMaxX = new Int32Array(cellCount).fill(-1);
+    const cellMaxY = new Int32Array(cellCount).fill(-1);
+    let addedPixels = 0;
+    let removedPixels = 0;
+    let unchangedPixels = 0;
+    const stride = width * 4;
+    for (let row = 0; row < height; row += 1) {
+      const y = bottomUp ? height - 1 - row : row;
+      const cellRow = (y / cellSize | 0) * cols;
+      let at = row * stride;
+      for (let x = 0; x < width; x += 1, at += 4) {
+        const alpha = pixels[at + 3];
+        if (alpha < 128) continue;
+        const red = pixels[at];
+        const green = pixels[at + 1];
+        let kind = 0;
+        if (red >= 128 && red > green) kind = 1;
+        else if (green >= 128) kind = 2;
+        else {
+          if (pixels[at + 2] >= 128) unchangedPixels += 1;
+          continue;
+        }
+        const cell = cellRow + (x / cellSize | 0);
+        if (kind === 1) {
+          removedPixels += 1;
+          cellRemoved[cell] += 1;
+        } else {
+          addedPixels += 1;
+          cellAdded[cell] += 1;
+        }
+        if (x < cellMinX[cell]) cellMinX[cell] = x;
+        if (x > cellMaxX[cell]) cellMaxX[cell] = x;
+        if (y < cellMinY[cell]) cellMinY[cell] = y;
+        if (y > cellMaxY[cell]) cellMaxY[cell] = y;
+      }
+    }
+    const reach = Math.ceil(mergeDistance / cellSize);
+    const visited = new Uint8Array(cellCount);
+    const regions = [];
+    const stack = [];
+    for (let start = 0; start < cellCount; start += 1) {
+      if (visited[start] || cellAdded[start] === 0 && cellRemoved[start] === 0) continue;
+      visited[start] = 1;
+      stack.push(start);
+      let added = 0;
+      let removed = 0;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      while (stack.length) {
+        const cell = stack.pop();
+        added += cellAdded[cell];
+        removed += cellRemoved[cell];
+        if (cellMinX[cell] < minX) minX = cellMinX[cell];
+        if (cellMinY[cell] < minY) minY = cellMinY[cell];
+        if (cellMaxX[cell] > maxX) maxX = cellMaxX[cell];
+        if (cellMaxY[cell] > maxY) maxY = cellMaxY[cell];
+        const cx = cell % cols;
+        const cy = (cell - cx) / cols;
+        for (let ny = Math.max(0, cy - reach); ny <= Math.min(rows - 1, cy + reach); ny += 1) {
+          for (let nx = Math.max(0, cx - reach); nx <= Math.min(cols - 1, cx + reach); nx += 1) {
+            const next = ny * cols + nx;
+            if (visited[next] || cellAdded[next] === 0 && cellRemoved[next] === 0) continue;
+            visited[next] = 1;
+            stack.push(next);
+          }
+        }
+      }
+      if (added + removed < minRegionPixels) continue;
+      regions.push({
+        kind: added && removed ? "mixed" : added ? "added" : "removed",
+        addedPixels: added,
+        removedPixels: removed,
+        pixels: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
+      });
+    }
+    regions.sort(
+      (a, b) => b.addedPixels + b.removedPixels - (a.addedPixels + a.removedPixels)
+    );
+    const truncated = regions.length > maxRegions;
+    if (truncated) regions.length = maxRegions;
+    return {
+      changed: regions.length > 0,
+      addedPixels,
+      removedPixels,
+      unchangedPixels,
+      regions,
+      truncated
+    };
+  }
+  async function measureLayers(renderer, sources, options = {}) {
+    const prepared = await prepareDiffSources(sources, options);
+    const live = prepared.filter((entry) => !entry.empty);
+    await renderer.withFrame(
+      { width: 1, height: 1, fit: false, background: null, compositeMode: "stack" },
+      async () => {
+        for (const entry of live) {
+          await renderer.renderLayer(entry, { visible: false });
+        }
+      }
+    );
+    const layers = [];
+    let bounds = null;
+    let index = 0;
+    for (const entry of prepared) {
+      if (entry.empty) {
+        layers.push({ name: entry.name ?? null, bounds: null });
+        continue;
+      }
+      const record = renderer.lastFrame.layers[index];
+      index += 1;
+      layers.push({ name: entry.name ?? record?.name ?? null, bounds: record?.bounds ?? null });
+      if (record?.bounds) {
+        bounds = bounds ? {
+          minX: Math.min(bounds.minX, record.bounds.minX),
+          maxX: Math.max(bounds.maxX, record.bounds.maxX),
+          minY: Math.min(bounds.minY, record.bounds.minY),
+          maxY: Math.max(bounds.maxY, record.bounds.maxY)
+        } : { ...record.bounds };
+      }
+    }
+    return { bounds, layers };
+  }
+  async function analyzeBoardDiff(renderer, layers, options = {}) {
+    const { width = 2048, height = 2048, padding = 0 } = options;
+    let view = options.view;
+    let bounds = null;
+    if (!view) {
+      const all = layers.flatMap((layer) => [...toList(layer.base), ...toList(layer.head)]);
+      const measured = await measureLayers(renderer, all, options);
+      bounds = measured.bounds;
+      if (!bounds) throw new Error("No layer of either revision has any geometry.");
+      view = calculateFitView(bounds, width, height, padding);
+    }
+    const frameView = {
+      zoomX: view.zoomX,
+      zoomY: view.zoomY,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY
+    };
+    const reports = [];
+    for (const layer of layers) {
+      const report = await analyzeLayerDiff(
+        renderer,
+        { base: layer.base, head: layer.head },
+        { ...options, width, height, view: frameView }
+      );
+      reports.push({ name: layer.name, ...report });
+    }
+    return {
+      view: withFrameSize(frameView, width, height),
+      bounds,
+      width,
+      height,
+      changed: reports.some((report) => report.changed),
+      layers: reports
     };
   }
 
@@ -42605,7 +43056,7 @@ void main() {
         const isBase = k === "base";
         for (const [ref, entry] of side.comps) {
           const status = this.statusFor(ref);
-          const changed = status !== "unchanged";
+          const changed = status !== "unchanged" && status !== "minor";
           let visible = show.components;
           let material = null;
           if (mode === "overlay") {
@@ -42848,7 +43299,7 @@ void main() {
       };
       if (this.show.markers) {
         for (const [ref, c] of this.statusOf) {
-          if (c.status === "unchanged" || ref === this.selected || ref === this.hovered) continue;
+          if (c.status === "unchanged" || c.status === "minor" || ref === this.selected || ref === this.hovered) continue;
           add(ref, STATUS_COLORS[c.status], 0.25, 0.8);
         }
       }
@@ -42993,7 +43444,7 @@ void main() {
 
   // pcba3d/index.js
   var MODE_LABELS = { side: "Side by side", overlay: "Overlay", highlight: "Changes" };
-  var STATUS_LABELS = { added: "Added", removed: "Removed", moved: "Moved", rotated: "Rotated", changed: "Changed", unchanged: "Unchanged" };
+  var STATUS_LABELS = { added: "Added", removed: "Removed", moved: "Moved", rotated: "Rotated", changed: "Changed", minor: "Minor", unchanged: "Unchanged" };
   var cssLoaded = null;
   function ensureCss() {
     if (cssLoaded) return cssLoaded;
@@ -43117,13 +43568,13 @@ void main() {
       h(
         "div",
         { class: "kp3d-legend highlight" },
-        STATUSES.filter((s) => s !== "unchanged").map((s) => h("span", {}, swatch(s), s))
+        STATUSES.filter((s) => s !== "unchanged" && s !== "minor").map((s) => h("span", {}, swatch(s), s))
       ),
       progress,
       boardNote
     );
     const tip = h("div", { class: "kp3d-tip", hidden: true });
-    const filters = new Set(STATUSES.filter((s) => s !== "unchanged"));
+    const filters = new Set(STATUSES.filter((s) => s !== "unchanged" && s !== "minor"));
     const search = h("input", { type: "search", placeholder: "Filter ref, value, footprint\u2026", oninput: () => renderList() });
     const chips = STATUSES.map((s) => h("button", {
       type: "button",
@@ -43259,11 +43710,16 @@ void main() {
         return null;
       }
     }
+    function fallbackKinds(subs) {
+      const ext = (p) => (String(p).match(/\.[A-Za-z0-9]+$/) || [""])[0].toLowerCase();
+      return [...new Set(subs.map((s) => `${ext(s.from)} \u2192 ${ext(s.to)}`))].join(", ");
+    }
     function statusLine() {
       const parts = [];
       const total = components.length;
-      const changed = components.filter((c) => c.status !== "unchanged").length;
-      parts.push(`${total} components, ${changed} changed`);
+      const changed = components.filter(isChange).length;
+      const minor = components.filter((c) => c.status === "minor").length;
+      parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: 3D model format / library name only)` : ""));
       for (const k of ["base", "head"]) {
         const s = sideState[k];
         if (!s) continue;
@@ -43274,6 +43730,8 @@ void main() {
         if (noModel) t += `, ${noModel} without a 3D model`;
         if (missing > 0) t += `, ${missing} not found`;
         if (r.loose) t += `, ${r.loose} unassigned bodies`;
+        const subs = project?.pcba3d?.models?.[k]?.substitutions;
+        if (Array.isArray(subs) && subs.length) t += `, ${subs.length} missing model path(s) exported with the other format (${fallbackKinds(subs)})`;
         parts.push(t);
       }
       const fab = boardState.fab;
@@ -43396,6 +43854,7 @@ void main() {
 
   // pcba3d/offline_entry.js
   window.KIPR_PCBA3D = { mountPcba3d };
+  window.KIPR_GERBER = { index: wasm_gerber_renderer_exports, board: board_exports, diff: diff_exports, wasmGlue: wasm_gerber_processor_exports };
 })();
 /**
  * @license

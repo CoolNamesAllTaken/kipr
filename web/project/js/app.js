@@ -96,6 +96,7 @@ export function summaryChips(summary) {
     ['−', n(c.removed), 'components removed'],
     ['mv', n(c.moved), 'components moved'],
     ['chg', n(c.changed), 'components changed'],
+    ['minor', n(c.minor), 'minor component changes (3D model format or footprint library name only)'],
     ['nets', n(s.nets_changed), 'nets changed'],
     ['ERC', n(obj(s.erc)?.new), 'new ERC violations'],
     ['DRC', n(obj(s.drc)?.new), 'new DRC violations'],
