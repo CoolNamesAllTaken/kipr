@@ -55,7 +55,8 @@ p/<slug>/checks/{erc,drc}.{base,head}.json   raw kicad-cli ERC/DRC reports (--se
 {
   "version": 1,
   "tool": {"name": "kipr", "version": "0.1.0", "kicad": "10.0.6",    // kicad: null without kicad-cli
-           "stock_3d_models": true},    // KiCad's stock 3D library was found (for the model fallback); null without kicad-cli
+           "stock_3d_models": true,     // KiCad's stock 3D library was found (for the model fallback); null without kicad-cli
+           "significant_fields": ["mpn", "lcsc*", …]},   // the field patterns in effect (see "Change classification")
   "base": {"sha": "…", "ref": "main", "short": "abc1234"},
   "head": {"sha": "…", "ref": "feature", "short": "def5678"},
   "repo": {"url": "https://github.com/o/r", "blob": "https://github.com/o/r/blob/{sha}/{path}"},  // nulls if not GitHub
@@ -233,7 +234,8 @@ to a real change (a moved part whose model also went `.wrl -> .step`) is just li
              "models": [{"path": "…", "offset": [0, 0, 0], "scale": [1, 1, 1], "rotate": [0, 0, 0], "hide": true}],
              "dnp": false, "bbox_mm": [x, y, w, h], "uuid": "…"},
     "head": {…},
-    "what": ["position", "rotation", "footprint", "value", "model", "side", "dnp", "footprint_library", "model_format"],   // subset; other footprint whats (pads, fields, …) when none of these apply
+    "what": ["position", "rotation", "footprint", "value", "model", "side", "dnp", "pads", "graphics", "fields",
+             "footprint_library", "model_format", "fields_minor"],   // subset; other footprint whats (attributes, …) when none of these apply
     "minor": true                       // status "changed" but only minor whats (see PcbChange); omitted otherwise
   }],
   "models": {                           // 3D model fallback of the export (null without kicad-cli / board)
@@ -256,6 +258,26 @@ read the files as committed. `found` / `missing` count paths that resolve / don'
 other extension), `unknown` those that depend on an unknown variable (set it in the environment,
 e.g. `KICAD_LIBS_DIR`).
 
+### Change classification
+
+One classifier (`kipr/project/classify.py`) decides for schematic symbols, footprints, BOM rows,
+3D components, the summary counts, the report and the PR comment whether something changed:
+
+- **noise**, never reported: fields that appear or disappear empty, `Sim.*` fields, `ki_*`
+  keywords, whitespace-only edits, field order, field text position / visibility / font, uuids.
+  A sheet whose file differs only in such things gets one `{"kind": "other", "minor": true}`.
+- **minor** (`minor: true`, a `*_minor` / minor what): listed, collapsed, not counted as changed,
+  never highlighted. Fields that don't name the part (cost, description, datasheet URL, notes,
+  generator tags, …: `fields_minor`), `exclude_from_sim`, the symbol's lib id (`lib_id`) or cached
+  library graphics (`library`), `model_format`, `footprint_library`.
+- **significant**: value, footprint, DNP, in BOM / on board, reference, placement, pads,
+  and the fields that name the part to buy (`fields`). Those fields are matched by
+  `tool.significant_fields`: case-insensitive globs over the field name with spaces, `_`, `-`,
+  `.` and `/` removed. Defaults: MPN, manufacturer / mfr / mfg, part number / PN, LCSC, JLC,
+  Digi-Key, Mouser, Farnell, Newark, Arrow, TME, RS, Octopart, supplier, vendor, SKU. Part-number
+  fields compare case-insensitively. `kipr project --significant-fields "mpn,lcsc*"` replaces
+  the list, `--significant-fields "+tolerance,voltage"` extends it.
+
 ### Bom
 
 From the schematic symbols (`in_bom` only; power symbols and `#` refs excluded; units merged).
@@ -264,7 +286,9 @@ From the schematic symbols (`in_bom` only; power symbols and `#` refs excluded; 
 {"rows": [{"key": "R5", "refs": ["R5"], "status": "changed",        // added | removed | changed | unchanged
            "base": {"value": "10k", "footprint": "…", "fields": {"MPN": "…"}, "dnp": false, "in_bom": true,
                     "lib_id": "Device:R", "sheet": "root/power", "mpn": "…"},
-           "head": {…}, "what": ["value", "footprint", "dnp", "lib_id", "fields"]}],
+           "head": {…}, "what": ["value", "footprint", "dnp", "lib_id", "fields", "fields_minor"],
+           "fields_changed": {"significant": ["MPN"], "minor": ["Standard Cost"]},   // only rows with field changes
+           "minor": true}],                                         // only minor whats (below); omitted otherwise
  "groups": [{"value": "10k", "footprint": "R:R_0402", "mpn": "RC0402…", "dnp": false,
              "status": "changed",                                   // added | removed | changed (refs differ) | unchanged
              "base": {"qty": 7, "refs": ["R1", …]}, "head": {"qty": 6, "refs": […]},

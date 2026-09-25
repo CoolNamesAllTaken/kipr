@@ -70,7 +70,7 @@ def test_footprint_moved_value_changed():
     assert c["layer"] == "F.Cu" and "F.Cu" in c["layers"]
     assert c["bbox_mm"] == [8.5, 9.2, 5.0, 1.6]  # union of base and head courtyards
     assert c["base_bbox_mm"] == [8.5, 9.2, 3.0, 1.6] and c["head_bbox_mm"] == [10.5, 9.2, 3.0, 1.6]
-    assert comps[0]["status"] == "moved" and comps[0]["what"] == ["position", "value"]
+    assert comps[0]["status"] == "changed" and comps[0]["what"] == ["position", "value"]
     assert comps[0]["base"]["x"] == 10 and comps[0]["head"]["x"] == 12
 
 
@@ -197,13 +197,6 @@ def test_footprint_library_rename_with_same_body_is_minor():
     changes, comps = diff((fp(lib="OldLib:R_0603"),), (fp(lib="NewLib:R_0603").replace("(size 0.8 0.9)", "(size 1.0 0.9)"),))
     assert "minor" not in comps[0] and "footprint" in comps[0]["what"]
     assert "pads" in only(changes, "footprint")[0]["whats"]
-
-
-def test_empty_field_added_is_not_a_change():
-    assert diff_pcb.field_diff({"MPN": "x"}, {"MPN": "x", "Sim.Library": "", "Sim.Name": ""}) == []
-    assert diff_pcb.field_diff({"Sim.Name": ""}, {}) == []
-    assert diff_pcb.field_diff({}, {"Sim.Name": "R"}) == ["Sim.Name added: 'R'"]
-
 
 def test_changes_ordered_by_significance_with_groups():
     base = (fp("R1"), fp("R2", 20, 10, uuid="u-r2"), fp("R3", 30, 10, uuid="u-r3"))

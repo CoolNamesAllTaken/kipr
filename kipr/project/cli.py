@@ -40,13 +40,19 @@ def add_review_arguments(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--jobs", type=int, default=4, help="parallel kicad-cli processes (default: 4)")
     ap.add_argument("--cache-dir", help="export cache (default: $KIPR_CACHE_DIR or ~/.cache/kipr)")
     ap.add_argument("--repo-url", help="https URL of the repo for source links (default: origin if GitHub)")
+    ap.add_argument("--significant-fields", metavar="PATTERNS",
+                    help="symbol/footprint fields whose changes count as real changes: comma-separated, "
+                         "case-insensitive globs over the field name without spaces/_/-/. (default: part "
+                         "numbers: MPN, manufacturer, LCSC, Digi-Key, Mouser, ... see docs/project.md); a "
+                         "leading + adds to the defaults. Other field changes are listed as minor.")
 
 
 def run_review(args) -> int:
     from .review import run
     doc = run(args.repo, args.base, args.head, str(args.out), patterns=args.projects, kicad_cli=args.kicad_cli,
               jobs=args.jobs, cache_dir=args.cache_dir, step=args.step, glb=not args.no_glb,
-              repo_url=args.repo_url, no_export=args.no_export, fast_checks=args.fast_checks)
+              repo_url=args.repo_url, no_export=args.no_export, fast_checks=args.fast_checks,
+              significant_fields=args.significant_fields)
     n_err = sum(len(p.get("errors") or []) for p in doc["projects"]) + len(doc["errors"])
     print(f"wrote {args.out}/project-review.json: {len(doc['projects'])} project(s), {n_err} error(s)")
     return 0

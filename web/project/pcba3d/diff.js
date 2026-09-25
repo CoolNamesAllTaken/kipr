@@ -138,13 +138,16 @@ export function summary(c) {
     const ext = (m) => (String(m || '').match(/\.[A-Za-z0-9]+$/) || ['?'])[0].toLowerCase();
     parts.push(`3D model ${ext(b.model)} → ${ext(h.model)}`);
   }
+  if (c.what.includes('pads')) parts.push('pads');
+  if (c.what.includes('graphics')) parts.push('footprint graphics');
+  if (c.what.includes('fields')) parts.push('part fields');
   if (c.what.includes('footprint_library')) {
     const nick = (f) => (String(f || '').includes(':') ? String(f).split(':')[0] : '∅');
     parts.push(`library ${nick(b.footprint)} → ${nick(h.footprint)}`);
   }
   if (c.what.includes('dnp')) parts.push(h.dnp ? 'now DNP' : 'no longer DNP');
   // The backend may name other footprint changes (pads, fields, …); list them as they come.
-  const known = new Set(['value', 'footprint', 'side', 'position', 'rotation', 'model', 'dnp', 'model_format', 'footprint_library']);
+  const known = new Set(['value', 'footprint', 'side', 'position', 'rotation', 'model', 'dnp', 'model_format', 'footprint_library', 'pads', 'graphics', 'fields', 'fields_minor']);
   const other = c.what.filter((w) => !known.has(w));
   if (other.length) parts.push(other.join(', '));
   return parts.join(' · ');

@@ -323,12 +323,15 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
       const ext = (m) => (String(m || "").match(/\.[A-Za-z0-9]+$/) || ["?"])[0].toLowerCase();
       parts.push(`3D model ${ext(b.model)} \u2192 ${ext(h2.model)}`);
     }
+    if (c.what.includes("pads")) parts.push("pads");
+    if (c.what.includes("graphics")) parts.push("footprint graphics");
+    if (c.what.includes("fields")) parts.push("part fields");
     if (c.what.includes("footprint_library")) {
       const nick = (f) => String(f || "").includes(":") ? String(f).split(":")[0] : "\u2205";
       parts.push(`library ${nick(b.footprint)} \u2192 ${nick(h2.footprint)}`);
     }
     if (c.what.includes("dnp")) parts.push(h2.dnp ? "now DNP" : "no longer DNP");
-    const known = /* @__PURE__ */ new Set(["value", "footprint", "side", "position", "rotation", "model", "dnp", "model_format", "footprint_library"]);
+    const known = /* @__PURE__ */ new Set(["value", "footprint", "side", "position", "rotation", "model", "dnp", "model_format", "footprint_library", "pads", "graphics", "fields", "fields_minor"]);
     const other = c.what.filter((w) => !known.has(w));
     if (other.length) parts.push(other.join(", "));
     return parts.join(" \xB7 ");
@@ -42897,6 +42900,7 @@ void main() {
       this.statusOf = /* @__PURE__ */ new Map();
       this.mode = "side";
       this.show = { components: true, board: true, silk: true, markers: true };
+      this.emphasis = null;
       this.explode = 0;
       this.selected = null;
       this.hovered = null;
@@ -43044,6 +43048,18 @@ void main() {
       this.scene.background = new Color(color);
       this.dirty = true;
     }
+    /** Emphasise only components with one of these tags (added, removed, moved, rotated, changed, ...). */
+    setEmphasis(tags) {
+      this.emphasis = tags ? new Set(tags) : null;
+      this.applyMode();
+      this._updateHelpers();
+      this.dirty = true;
+    }
+    emphasised(ref) {
+      const c = this.statusOf.get(ref);
+      if (!c || c.status === "unchanged" || c.status === "minor") return false;
+      return !this.emphasis || tagsOf(c).some((t) => this.emphasis.has(t));
+    }
     statusFor(ref) {
       return this.statusOf.get(ref)?.status || "unchanged";
     }
@@ -43066,9 +43082,9 @@ void main() {
             } else material = changed ? this.materials.headGhost : this.materials.neutral;
           } else if (mode === "highlight") {
             if (isBase) {
-              visible = visible && changed && status !== "changed" && status !== "added";
+              visible = visible && changed && this.emphasised(ref) && status !== "changed" && status !== "added";
               material = status === "removed" ? this.materials.baseGhost : this.materials.baseFaint;
-            } else if (changed) material = "tint";
+            } else if (changed && this.emphasised(ref)) material = "tint";
           }
           for (const m of entry.meshes) {
             m.visible = visible;
@@ -43299,7 +43315,7 @@ void main() {
       };
       if (this.show.markers) {
         for (const [ref, c] of this.statusOf) {
-          if (c.status === "unchanged" || c.status === "minor" || ref === this.selected || ref === this.hovered) continue;
+          if (!this.emphasised(ref) || ref === this.selected || ref === this.hovered) continue;
           add(ref, STATUS_COLORS[c.status], 0.25, 0.8);
         }
       }
@@ -43574,7 +43590,8 @@ void main() {
       boardNote
     );
     const tip = h("div", { class: "kp3d-tip", hidden: true });
-    const filters = new Set(STATUSES.filter((s) => s !== "unchanged" && s !== "minor"));
+    const DEFAULT_CHIPS = ["added", "removed", "changed"];
+    const filters = new Set(options.chips || DEFAULT_CHIPS);
     const search = h("input", { type: "search", placeholder: "Filter ref, value, footprint\u2026", oninput: () => renderList() });
     const chips = STATUSES.map((s) => h("button", {
       type: "button",
@@ -43585,6 +43602,7 @@ void main() {
         if (filters.has(s)) filters.delete(s);
         else filters.add(s);
         e.currentTarget.setAttribute("aria-pressed", String(filters.has(s)));
+        view?.setEmphasis(filters);
         renderList();
       }
     }, h("span", { class: `kp3d-dot ${s}` }), `${STATUS_LABELS[s]} ${counts[s]}`));
@@ -43719,7 +43737,7 @@ void main() {
       const total = components.length;
       const changed = components.filter(isChange).length;
       const minor = components.filter((c) => c.status === "minor").length;
-      parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: 3D model format / library name only)` : ""));
+      parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: model format, library name or non-part fields only)` : ""));
       for (const k of ["base", "head"]) {
         const s = sideState[k];
         if (!s) continue;
@@ -43759,6 +43777,7 @@ void main() {
       sideState.head = hd;
       meshless = new Set(components.filter((c) => ["base", "head"].some((k) => c[k] && c[k].model !== null && sideState[k] && !sideState[k].comps.has(c.ref))).map((c) => c.ref));
       view.setSides({ base: b, head: hd }, byRef);
+      view.setEmphasis(filters);
       view.setMode(root.dataset.mode);
       view.fit("iso");
       renderList();

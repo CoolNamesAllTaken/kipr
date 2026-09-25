@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, field
 
 from .. import __version__
-from . import diff_net, diff_pcb, diff_sch, discover, export, models, pcb, sch
+from . import classify, diff_net, diff_pcb, diff_sch, discover, export, models, pcb, sch
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
 from ..common.kicad_cli import KicadCli
@@ -547,7 +547,20 @@ def unique_slug(name: str, used: set) -> str:
 
 def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str | None = None,
         jobs: int = 4, cache_dir: str | None = None, step: bool = False, glb: bool = True,
-        repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print) -> dict:
+        repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print,
+        significant_fields: str | None = None) -> dict:
+    """`significant_fields`: see kipr.project.classify (None = the defaults)."""
+    cfg = classify.Config.from_option(significant_fields)
+    prev = classify.set_active(cfg)
+    try:
+        return _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url,
+                    no_export, fast_checks, log, cfg)
+    finally:
+        classify.set_active(prev)
+
+
+def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url, no_export,
+         fast_checks, log, cfg) -> dict:
     git = Git(repo)
     shas = {"base": git.rev(base), "head": git.rev(head)}
     os.makedirs(out, exist_ok=True)
@@ -567,7 +580,8 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
     doc = {
         "version": 1,
         "tool": {"name": "kipr", "version": __version__, "kicad": cli.version if cli else None,
-                 "stock_3d_models": bool(model_dirs) if cli else None},
+                 "stock_3d_models": bool(model_dirs) if cli else None,
+                 "significant_fields": list(cfg.significant)},
         "base": {"sha": shas["base"], "ref": base, "short": shas["base"][:7]},
         "head": {"sha": shas["head"], "ref": head, "short": shas["head"][:7]},
         "repo": {"url": url, "blob": f"{url}/blob/{{sha}}/{{path}}" if url else None},

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 
-from . import geom
+from . import classify, geom
 from .pcb import Board, Footprint, Zone
 
 MOVE_EPS = 0.001  # mm
@@ -13,12 +13,14 @@ ROT_EPS = 0.01  # degrees
 
 # Order in which a footprint's differences are named when one "what" has to be picked.
 FP_WHAT_ORDER = ("footprint", "flipped", "moved", "rotated", "pads", "graphics", "value", "reference",
-                 "model", "dnp", "attributes", "fields", "locked", "footprint_library", "model_format")
+                 "model", "dnp", "attributes", "fields", "locked", "footprint_library", "model_format",
+                 "fields_minor")
 FP_GEOMETRIC = {"footprint", "flipped", "moved", "rotated", "pads", "graphics"}
-# Changes that don't change the assembled board: a 3D model path that only swaps the file format
-# (same dir and stem, e.g. .wrl -> .step) and a footprint whose library nickname changed while the
-# footprint itself is identical. They are listed with minor: true but not counted as "changed".
-MINOR_WHATS = {"model_format", "footprint_library"}
+# Changes that don't change the assembled board (kipr.project.classify): a 3D model path that only
+# swaps the file format (same dir and stem, e.g. .wrl -> .step), a footprint whose library nickname
+# changed while the footprint itself is identical, fields that don't name the part. They are listed
+# with minor: true but not counted as "changed".
+MINOR_WHATS = classify.MINOR_WHATS
 MODEL_EXTS = (".wrl", ".wrz", ".step", ".stp", ".stpz", ".igs", ".iges")
 
 
@@ -140,35 +142,18 @@ def fp_whats(b: Footprint, h: Footprint) -> tuple[list[str], list[str]]:
     if ba != ha:
         whats.append("attributes")
         details.append(f"attributes {' '.join(ba) or '-'} -> {' '.join(ha) or '-'}")
-    fd = field_diff(b.fields, h.fields)
-    if fd:
+    fd = classify.field_diff(b.fields, h.fields)
+    if fd.significant:
         whats.append("fields")
-        details.append("; ".join(fd))
+        details.append("; ".join(fd.significant))
+    if fd.minor:
+        whats.append("fields_minor")
+        details.append("minor: " + "; ".join(fd.minor))
     if b.locked != h.locked:
         whats.append("locked")
         details.append("locked" if h.locked else "unlocked")
     whats.sort(key=FP_WHAT_ORDER.index)
     return whats, details
-
-
-def field_diff(a: dict, b: dict) -> list[str]:
-    out = []
-    for k in sorted(set(a) | set(b)):
-        if k.startswith("ki_"):
-            continue
-        va, vb = a.get(k), b.get(k)
-        # a field that appears or disappears empty is not a change: KiCad upgrades add empty
-        # fields such as Sim.Library / Sim.Name to every symbol
-        if (va or None) is None and (vb or None) is None:
-            continue
-        if va != vb:
-            if va is None:
-                out.append(f"{k} added: {vb!r}")
-            elif vb is None:
-                out.append(f"{k} removed (was {va!r})")
-            else:
-                out.append(f"{k} {va!r} -> {vb!r}")
-    return out
 
 
 def _change(kind, what, layers, box, layer=None, **kw):
@@ -195,10 +180,10 @@ def diff_footprints(base: Board, head: Board):
         components.append(component("added", None, f, []))
     for b, h in pairs:
         whats, details = fp_whats(b, h)
-        comp_what = [w for w in ("position", "rotation", "footprint", "value", "model", "side", "dnp",
-                                 "footprint_library", "model_format")
+        comp_what = [w for w in ("position", "rotation", "footprint", "value", "model", "side", "dnp", "pads",
+                                 "graphics", "fields", "footprint_library", "model_format", "fields_minor")
                      if {"position": "moved", "rotation": "rotated", "side": "flipped"}.get(w, w) in whats]
-        minor = all(w in MINOR_WHATS for w in whats)
+        minor = classify.is_minor(whats)
         if not whats:
             components.append(component("unchanged", b, h, []))
             continue
@@ -211,12 +196,17 @@ def diff_footprints(base: Board, head: Board):
                                ref=h.ref or b.ref,
                                whats=whats, detail="; ".join(details), holes=holes, minor=minor or None,
                                base_bbox_mm=geom.to_xywh(b.box), head_bbox_mm=geom.to_xywh(h.box)))
-        if "moved" in whats:
+        # a different part (value, footprint, part number, pads, ...) is the bigger news than where
+        # it sits: "changed" wins over "moved"/"rotated"; minor whats never make a part changed
+        real = [w for w in whats if w not in ("moved", "rotated") and w not in classify.MINOR_WHATS]
+        if real:
+            st = "changed"
+        elif "moved" in whats:
             st = "moved"
         elif "rotated" in whats:
             st = "rotated"
-        elif comp_what or whats:
-            st = "changed"
+        else:
+            st = "changed"  # minor only (marked below)
         c = component(st, b, h, comp_what or whats)
         if minor:
             c["minor"] = True
