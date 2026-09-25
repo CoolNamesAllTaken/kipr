@@ -39,6 +39,10 @@ on:
         description: run ERC/DRC without the global KiCad libraries (much faster; library mismatch checks are skipped)
         type: boolean
         default: false
+      significant-fields:
+        description: symbol/footprint fields whose changes count as real changes (comma-separated globs; a leading + extends the defaults; empty = part numbers such as MPN, LCSC, Digi-Key, Mouser)
+        type: string
+        default: ""
       step:
         description: also export STEP models of the boards
         type: boolean
@@ -211,6 +215,7 @@ jobs:
           MERGE_BASE: ${{ steps.base.outputs.merge_base }}
           PROJECTS: ${{ inputs.projects }}
           FAST: ${{ inputs.fast-checks }}
+          SIGNIFICANT_FIELDS: ${{ inputs.significant-fields }}
           STEP: ${{ inputs.step }}
           JOBS: ${{ inputs.jobs }}
         run: |
@@ -222,6 +227,7 @@ jobs:
           set +f
           if [ "$FAST" = "true" ]; then args+=(--fast-checks); fi
           if [ "$STEP" = "true" ]; then args+=(--step); fi
+          if [ -n "$SIGNIFICANT_FIELDS" ]; then args+=(--significant-fields "$SIGNIFICANT_FIELDS"); fi
           # site + report run after the size budget below
           kipr project "${args[@]}" --skip site --skip report
 

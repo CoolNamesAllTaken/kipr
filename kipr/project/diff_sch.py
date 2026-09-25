@@ -5,12 +5,12 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 
-from . import geom
-from .diff_pcb import field_diff, match
+from . import classify, geom
+from .diff_pcb import match
 from .sch import SchematicSet, Sheet, Symbol
 
 SYM_WHAT_ORDER = ("symbol", "reference", "value", "footprint", "fields", "dnp", "in_bom", "on_board",
-                  "exclude_from_sim", "moved", "rotated", "mirrored", "unit", "library")
+                  "exclude_from_sim", "moved", "rotated", "mirrored", "unit", "library", "fields_minor")
 
 
 def sym_whats(b: Symbol, h: Symbol):
@@ -28,13 +28,12 @@ def sym_whats(b: Symbol, h: Symbol):
         add("value", f"value {b.value} -> {h.value}")
     if b.footprint != h.footprint:
         add("footprint", f"footprint {b.footprint or '-'} -> {h.footprint or '-'}")
-    fd = field_diff(b.fields, h.fields)
-    if b.datasheet != h.datasheet:
-        fd.append(f"Datasheet {b.datasheet!r} -> {h.datasheet!r}")
-    if b.description != h.description:
-        fd.append(f"Description {b.description!r} -> {h.description!r}")
-    if fd:
-        add("fields", "; ".join(fd))
+    fd = classify.field_diff({**b.fields, "Datasheet": b.datasheet, "Description": b.description},
+                             {**h.fields, "Datasheet": h.datasheet, "Description": h.description})
+    if fd.significant:
+        add("fields", "; ".join(fd.significant))
+    if fd.minor:
+        add("fields_minor", "minor: " + "; ".join(fd.minor))
     for flag in ("dnp", "in_bom", "on_board", "exclude_from_sim"):
         if getattr(b, flag) != getattr(h, flag):
             add(flag, f"{flag} {'yes' if getattr(b, flag) else 'no'} -> {'yes' if getattr(h, flag) else 'no'}")
@@ -97,7 +96,7 @@ def diff_sheet(b: Sheet | None, h: Sheet | None) -> list[dict]:
         whats, det = sym_whats(bs, hs)
         if whats:
             c = _chg("symbol", whats[0], geom.union(bs.box, hs.box), ref=hs.ref, whats=whats,
-                     detail="; ".join(det), power=hs.power or None)
+                     detail="; ".join(det), power=hs.power or None, minor=classify.is_minor(whats) or None)
             for w, a, z in (("value", bs.value, hs.value), ("footprint", bs.footprint, hs.footprint),
                             ("reference", bs.ref, hs.ref)):
                 if whats[0] == w:
@@ -159,7 +158,8 @@ def diff_sheet(b: Sheet | None, h: Sheet | None) -> list[dict]:
             changes.append(_chg("sheet", "modified", geom.union(bs.box, hs.box), detail=f"sheet {hs.name}: " +
                                 "; ".join(det)))
     if not changes and b.digest != h.digest:
-        changes.append({"kind": "other", "what": "modified", "bbox_mm": None,
+        # the file differs but nothing semantic does (hidden fields, field positions, upgrade artefacts)
+        changes.append({"kind": "other", "what": "modified", "bbox_mm": None, "minor": True,
                         "detail": "other changes (properties, title block, positions of fields, ...)"})
     return changes
 
@@ -220,13 +220,17 @@ def diff_bom(base: dict | None, head: dict | None):
             status = "removed"
         else:
             for k in ("value", "footprint", "dnp", "lib_id"):
-                if b[k] != h[k]:
+                if classify.norm_value(b[k]) != classify.norm_value(h[k]):
                     what.append(k)
-            if b["fields"] != h["fields"]:
-                what.append("fields")
+            fdiff = classify.field_diff(b["fields"], h["fields"])
+            what += fdiff.whats()
             status = "changed" if what else "unchanged"
-        rows.append({"key": ref, "refs": [ref], "status": status, "base": _bom_side(b), "head": _bom_side(h),
-                     "what": what})
+        row = {"key": ref, "refs": [ref], "status": status, "base": _bom_side(b), "head": _bom_side(h), "what": what}
+        if b is not None and h is not None and (fdiff.significant_keys or fdiff.minor_keys):
+            row["fields_changed"] = {"significant": fdiff.significant_keys, "minor": fdiff.minor_keys}
+        if status == "changed" and classify.is_minor(what):
+            row["minor"] = True  # only fields that don't name the part, or the symbol's library
+        rows.append(row)
 
     def groups(side):
         g = defaultdict(list)

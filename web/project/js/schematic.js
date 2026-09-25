@@ -106,7 +106,12 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
   mainBox.append(title, toolbar, stageWrap, legendBox);
 
   // --- change list: contract changes; if there are none, the pixel diff's regions
-  const contractChanges = arr(sheet.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null }));
+  const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null });
+  // minor changes (fields that don't name the part, sim flags, hidden-field edits; kipr.project.classify)
+  // are folded into one collapsed bucket and get no box on the sheet
+  const allSheetChanges = arr(sheet.changes).filter(obj);
+  const contractChanges = allSheetChanges.filter((c) => !c.minor).map(toItem);
+  const minorItems = allSheetChanges.filter((c) => c.minor).map((c) => ({ ...toItem(c), title: typeof c.ref === 'string' ? c.ref : c.kind }));
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: sheet.status === 'unchanged' ? 'Sheet unchanged.' : 'No itemised changes for this sheet.',
@@ -116,6 +121,9 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
     },
   });
   changes.set(contractChanges);
+  if (minorItems.length) {
+    changes.setMinor([{ label: `${minorItems.length} minor change${minorItems.length === 1 ? '' : 's'} (fields that don't name the part, hidden fields, …)`, badge: 'minor', items: minorItems }]);
+  }
 
   function worldBox() {
     const vb = [vbs.base, vbs.head].filter(Boolean);

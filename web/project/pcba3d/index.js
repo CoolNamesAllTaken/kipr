@@ -122,13 +122,18 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     progress, boardNote);
   const tip = h('div', { class: 'kp3d-tip', hidden: true });
 
-  const filters = new Set(STATUSES.filter((s) => s !== 'unchanged' && s !== 'minor'));
+  // The active chips filter the list AND decide which parts get a marker / tint, so the default is
+  // what a reviewer must look at: parts added, removed or changed (value, footprint, part number,
+  // DNP, ...). Moved and rotated parts are one click away; minor ones are never emphasised.
+  const DEFAULT_CHIPS = ['added', 'removed', 'changed'];
+  const filters = new Set(options.chips || DEFAULT_CHIPS);
   const search = h('input', { type: 'search', placeholder: 'Filter ref, value, footprint…', oninput: () => renderList() });
   const chips = STATUSES.map((s) => h('button', {
     type: 'button', class: 'kp3d-chip', 'data-status': s, 'aria-pressed': String(filters.has(s)),
     onclick: (e) => {
       if (filters.has(s)) filters.delete(s); else filters.add(s);
       e.currentTarget.setAttribute('aria-pressed', String(filters.has(s)));
+      view?.setEmphasis(filters);
       renderList();
     },
   }, h('span', { class: `kp3d-dot ${s}` }), `${STATUS_LABELS[s]} ${counts[s]}`));
@@ -256,7 +261,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     const total = components.length;
     const changed = components.filter(isChange).length;
     const minor = components.filter((c) => c.status === 'minor').length;
-    parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: 3D model format / library name only)` : ''));
+    parts.push(`${total} components, ${changed} changed` + (minor ? ` (+${minor} minor: model format, library name or non-part fields only)` : ''));
     for (const k of ['base', 'head']) {
       const s = sideState[k];
       if (!s) continue;
@@ -297,6 +302,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     meshless = new Set(components.filter((c) =>
       ['base', 'head'].some((k) => c[k] && c[k].model !== null && sideState[k] && !sideState[k].comps.has(c.ref))).map((c) => c.ref));
     view.setSides({ base: b, head: hd }, byRef);
+    view.setEmphasis(filters);
     view.setMode(root.dataset.mode);
     view.fit('iso');
     renderList();

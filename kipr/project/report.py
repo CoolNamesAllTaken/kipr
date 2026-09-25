@@ -336,7 +336,11 @@ def schematic_section(imgs, slug, sch, width) -> str:
         if s.get("status") == "unchanged":
             continue
         out.append(f'<h4>{esc(s.get("title") or s.get("id"))} <span class="muted">{esc(s.get("file") or "")}</span> {status_badge(s.get("status"))}</h4>')
-        out.append(table(CHANGE_HEAD, change_rows(s.get("changes"))))
+        out.append(table(CHANGE_HEAD, change_rows([c for c in lst(s.get("changes")) if not d(c).get("minor")])))
+        smin = [d(c) for c in lst(s.get("changes")) if d(c).get("minor")]
+        if smin:  # fields that don't name the part, sim flags, hidden-field edits: one collapsed block
+            out.append(f'<details class="minor"><summary><span class="b s-minor">minor</span> {len(smin)} minor change(s)</summary>'
+                       + table(CHANGE_HEAD, change_rows(smin)) + "</details>")
         out.append(triple(imgs, slug, s.get("base"), s.get("head"), width, None, "ink", (245, 244, 239, 255), f"sheet {s.get('id')}"))
     if unchanged:
         out.append(f'<p class="muted">Unchanged sheets: {esc(", ".join(str(s.get("title") or s.get("id")) for s in unchanged))}</p>')
@@ -435,7 +439,9 @@ def pcb_section(imgs, slug, pcb, width) -> str:
 
 
 def bom_section(bom) -> str:
-    rows = [d(r) for r in lst(d(bom).get("rows")) if d(r).get("status") not in (None, "unchanged")]
+    allrows = [d(r) for r in lst(d(bom).get("rows")) if d(r).get("status") not in (None, "unchanged")]
+    rows = [r for r in allrows if not r.get("minor")]
+    minor = [r for r in allrows if r.get("minor")]
     if not bom:
         return ""
     def val(r, side, k):
@@ -446,7 +452,13 @@ def bom_section(bom) -> str:
         v = f"{esc(fmt(val(r, 'base', 'value')))} → {esc(fmt(val(r, 'head', 'value')))}"
         fp = f"{esc(fmt(val(r, 'base', 'footprint')))} → {esc(fmt(val(r, 'head', 'footprint')))}"
         trs.append([status_badge(r.get("status")), esc(refs), v, fp, esc(", ".join(str(x) for x in lst(r.get("what"))))])
-    return "<h3>BOM changes</h3>" + table(["Status", "Refs", "Value", "Footprint", "What"], trs)
+    out = "<h3>BOM changes</h3>" + table(["Status", "Refs", "Value", "Footprint", "What"], trs)
+    if minor:  # only fields that don't name the part (cost, description, ...): not counted
+        keys = sorted({k for r in minor for k in lst(d(r.get("fields_changed")).get("minor"))})
+        out += (f'<details class="minor"><summary><span class="b s-minor">minor</span> {len(minor)} row(s): '
+                f'{esc(", ".join(keys) or "other fields")} only</summary><p class="muted">'
+                f'{esc(", ".join(str(r.get("key")) for r in minor))}</p></details>')
+    return out
 
 
 def netlist_section(nl) -> str:

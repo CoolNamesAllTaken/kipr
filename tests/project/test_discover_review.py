@@ -108,13 +108,14 @@ def test_review_without_kicad_cli(repo, tmp_path):
     assert (p["slug"], p["path"], p["status"]) == ("a", "boards/a", "modified")
     assert p["errors"] == []
     s = p["summary"]
-    assert s["sheets_changed"] == 1 and s["components"]["moved"] == 1 and s["erc"] is None
+    assert s["sheets_changed"] == 1 and s["components"]["changed"] == 1 and s["components"]["moved"] == 0 and s["erc"] is None
     (sheet,) = p["schematic"]["sheets"]
     assert sheet["base"] is None and sheet["changes"][0]["what"] == "value"
     assert p["pcb"]["board"]["size_mm"] == [50, 40] and p["pcb"]["board"]["mask_color"] == "green"
     status = {ly["id"]: ly["status"] for ly in p["pcb"]["layers"]}
     assert status["F.Cu"] == "modified" and status["B.Cu"] == "unchanged" and status["Edge.Cuts"] == "unchanged"
-    assert p["pcba3d"]["components"][0]["what"] == ["position", "value"]
+    c = p["pcba3d"]["components"][0]
+    assert c["what"] == ["position", "value"] and c["status"] == "changed"  # a new value wins over the move
     assert [row["key"] for row in p["bom"]["rows"] if row["status"] == "changed"] == ["R1"]
     assert p["netlist"]["source"] == "board" and p["netlist"]["changes"] == []
     assert p["checks"] == {"erc": None, "drc": None}

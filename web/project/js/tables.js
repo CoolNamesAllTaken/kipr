@@ -20,12 +20,15 @@ export function statusCounts(rows, key = 'status') {
  * Generic filtered table. columns: [{title, get(row) -> Node|string, sort(row) -> string|number, cls}]
  * rows carry .status; hay(row) is the text searched by the filter box.
  */
-function filteredTable(container, { rows, columns, hay, statuses, ctx, emptyText, rowClass }) {
-  const state = { q: ctx.route.params.q || '', st: ctx.route.params.st || '', sort: null, dir: 1 };
+function filteredTable(container, { rows, columns, hay, statuses, ctx, emptyText, rowClass, changesFilter = false }) {
+  // changesFilter: a first "Changes" option (every status but unchanged and minor), the default
+  const state = { q: ctx.route.params.q || '', st: ctx.route.params.st || (changesFilter ? 'changes' : ''), sort: null, dir: 1 };
+  const isChange = (r) => r.status !== 'unchanged' && r.status !== 'minor';
   const input = el('input', { type: 'search', class: 'table-filter', placeholder: 'Filter…', 'aria-label': 'Filter rows', value: state.q });
   const seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Status filter' });
   const counts = statusCounts(rows);
-  const opts = [['', `All (${rows.length})`], ...statuses.filter((s) => counts[s]).map((s) => [s, `${s} (${counts[s]})`])];
+  const opts = [...(changesFilter ? [['changes', `Changes (${rows.filter(isChange).length})`]] : []),
+    [changesFilter ? 'all' : '', `All (${rows.length})`], ...statuses.filter((s) => counts[s]).map((s) => [s, `${s} (${counts[s]})`])];
   for (const [s, label] of opts) {
     seg.append(el('button', { class: 'seg-btn', 'aria-selected': String(state.st === s), dataset: { st: s }, onclick: () => { state.st = s; sync(); } }, label));
   }
@@ -36,7 +39,7 @@ function filteredTable(container, { rows, columns, hay, statuses, ctx, emptyText
 
   function sync() {
     for (const b of seg.children) b.setAttribute('aria-selected', String(b.dataset.st === state.st));
-    ctx.setRoute({ params: { q: state.q || null, st: state.st || null } }, true);
+    ctx.setRoute({ params: { q: state.q || null, st: state.st === (changesFilter ? 'changes' : '') ? null : state.st || null } }, true);
     render();
   }
 
@@ -45,7 +48,8 @@ function filteredTable(container, { rows, columns, hay, statuses, ctx, emptyText
     const head = el('tr', {}, columns.map((c, i) => el('th', { scope: 'col', class: c.cls || null },
       el('button', { class: 'th-sort', onclick: () => { state.dir = state.sort === i ? -state.dir : 1; state.sort = i; render(); } },
         c.title, state.sort === i ? (state.dir > 0 ? ' ▲' : ' ▼') : ''))));
-    let list = rows.filter((r) => (!state.st || r.status === state.st) && matchesQuery(hay(r), state.q));
+    const byStatus = (r) => !state.st || state.st === 'all' || (state.st === 'changes' ? isChange(r) : r.status === state.st);
+    let list = rows.filter((r) => byStatus(r) && matchesQuery(hay(r), state.q));
     if (state.sort !== null && columns[state.sort].sort) {
       const f = columns[state.sort].sort;
       list = [...list].sort((a, b) => {
@@ -74,17 +78,25 @@ function delta(b, h) {
 
 export function createBomView(project, container, ctx) {
   const bom = obj(project.bom);
-  const rows = arr(bom?.rows).filter(obj).map((r) => ({ ...r, status: typeof r.status === 'string' ? r.status : 'unknown' }));
+  // minor rows (only fields that don't name the part changed; see kipr.project.classify) get their own status
+  const rows = arr(bom?.rows).filter(obj).map((r) => ({ ...r, status: r.minor === true ? 'minor' : typeof r.status === 'string' ? r.status : 'unknown' }));
   if (!bom) { container.append(el('div', { class: 'empty' }, 'No BOM in this project.')); return { destroy() {} }; }
   const field = (r, side, k) => obj(r[side])?.[k];
   const fieldsDelta = (r) => {
     const b = obj(field(r, 'base', 'fields')) || {}; const h = obj(field(r, 'head', 'fields')) || {};
-    const keys = [...new Set([...Object.keys(b), ...Object.keys(h)])].filter((k) => cellText(b[k]) !== cellText(h[k]));
-    return keys.map((k) => el('div', { class: 'small' }, el('span', { class: 'muted' }, `${k}: `), delta(b[k], h[k])));
+    const fc = obj(r.fields_changed);
+    // the backend's classification when present (noise such as empty Sim.* fields is never listed);
+    // older data: every key that differs
+    // (added/removed rows and older data: every non-empty field that differs, minus Sim.* / ki_* noise)
+    const sig = fc ? arr(fc.significant).map(String) : [...new Set([...Object.keys(b), ...Object.keys(h)])]
+      .filter((k) => !/^(sim\.|ki_)/i.test(k) && cellText(b[k]).trim() !== cellText(h[k]).trim());
+    const minor = fc ? arr(fc.minor).map(String) : [];
+    return [...sig.map((k) => el('div', { class: 'small' }, el('span', { class: 'muted' }, `${k}: `), delta(b[k], h[k]))),
+      ...minor.map((k) => el('div', { class: 'small muted', title: 'minor: not counted as a change' }, `${k}: `, delta(b[k], h[k])))];
   };
   const t = filteredTable(container, {
-    rows, ctx, emptyText: 'The BOM is empty.', rowClass,
-    statuses: ['added', 'removed', 'changed', 'unchanged'],
+    rows, ctx, emptyText: 'The BOM is empty.', rowClass, changesFilter: true,
+    statuses: ['added', 'removed', 'changed', 'minor', 'unchanged'],
     hay: (r) => `${arr(r.refs).join(' ')} ${r.key} ${r.status} ${JSON.stringify(r.base || {})} ${JSON.stringify(r.head || {})}`,
     columns: [
       { title: 'Status', get: (r) => badge('status', r.status), sort: (r) => r.status },

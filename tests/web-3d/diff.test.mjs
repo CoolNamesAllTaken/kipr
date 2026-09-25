@@ -72,7 +72,7 @@ test('summary: one line per status', () => {
   const [f] = normalizeComponents([{ ref: 'R5', base: side(), head: side({ footprint: 'Lib:R_0805' }) }]);
   assert.equal(summary(f), 'R_0603 → R_0805');
   const [o] = normalizeComponents([{ ref: 'R5', status: 'changed', base: side(), head: side(), what: ['pads', 'fields'] }]);
-  assert.equal(summary(o), 'pads, fields');
+  assert.equal(summary(o), 'pads · part fields');
   const [a] = normalizeComponents([{ ref: 'R5', base: null, head: side() }]);
   assert.equal(summary(a), '10k · Lib:R_0603');
 });
@@ -109,4 +109,11 @@ test('minor changes (3D model format only) are listed but not changes', () => {
 test('a moved part whose model only changed format is tagged moved, not changed', () => {
   assert.deepEqual(tagsOf({ status: 'moved', what: ['position', 'model_format'] }), ['moved']);
   assert.deepEqual(tagsOf({ status: 'moved', what: ['position', 'value'] }), ['moved', 'changed']);
+});
+
+test('minor fields-only changes are minor, not changed', () => {
+  const s = { x: 1, y: 2, rot: 0, side: 'top', footprint: 'L:R', value: '1k', model: 'r.step' };
+  const [c] = normalizeComponents([{ ref: 'R9', status: 'changed', minor: true, what: ['fields_minor'], base: s, head: s }]);
+  assert.equal(c.status, 'minor');
+  assert.deepEqual(tagsOf(c), ['minor']);
 });

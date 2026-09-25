@@ -14,6 +14,7 @@ import * as THREE from './vendor/three/three.module.js';
 import { TrackballControls } from './vendor/three/addons/TrackballControls.js';
 import { ViewCube, FACES } from './viewcube.js';
 import { disposeObject } from './scene.js';
+import { tagsOf } from './diff.js';
 
 export const STATUS_COLORS = {
   added: 0x2ea043, removed: 0xe5534b, moved: 0xd29922, rotated: 0xa371f7, changed: 0x388bfd,
@@ -50,6 +51,9 @@ export class Pcba3dView {
     this.statusOf = new Map();
     this.mode = 'side';
     this.show = { components: true, board: true, silk: true, markers: true };
+    // the change kinds the reviewer asked for (the list's active chips): only these get a marker and,
+    // in the Changes view, a tint. null = every change (the module's API default).
+    this.emphasis = null;
     this.explode = 0;
     this.selected = null;
     this.hovered = null;
@@ -199,6 +203,20 @@ export class Pcba3dView {
     this.dirty = true;
   }
 
+  /** Emphasise only components with one of these tags (added, removed, moved, rotated, changed, ...). */
+  setEmphasis(tags) {
+    this.emphasis = tags ? new Set(tags) : null;
+    this.applyMode();
+    this._updateHelpers();
+    this.dirty = true;
+  }
+
+  emphasised(ref) {
+    const c = this.statusOf.get(ref);
+    if (!c || c.status === 'unchanged' || c.status === 'minor') return false;
+    return !this.emphasis || tagsOf(c).some((t) => this.emphasis.has(t));
+  }
+
   statusFor(ref) {
     return this.statusOf.get(ref)?.status || 'unchanged';
   }
@@ -220,9 +238,9 @@ export class Pcba3dView {
           else material = changed ? this.materials.headGhost : this.materials.neutral;
         } else if (mode === 'highlight') {
           if (isBase) {
-            visible = visible && changed && status !== 'changed' && status !== 'added';
+            visible = visible && changed && this.emphasised(ref) && status !== 'changed' && status !== 'added';
             material = status === 'removed' ? this.materials.baseGhost : this.materials.baseFaint;
-          } else if (changed) material = 'tint';
+          } else if (changed && this.emphasised(ref)) material = 'tint';
         }
         for (const m of entry.meshes) {
           m.visible = visible;
@@ -464,7 +482,7 @@ export class Pcba3dView {
     // drawn only where the base's part is (removed, and the old place of a moved one).
     if (this.show.markers) {
       for (const [ref, c] of this.statusOf) {
-        if (c.status === 'unchanged' || c.status === 'minor' || ref === this.selected || ref === this.hovered) continue;
+        if (!this.emphasised(ref) || ref === this.selected || ref === this.hovered) continue;
         add(ref, STATUS_COLORS[c.status], 0.25, 0.8);
       }
     }

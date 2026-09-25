@@ -103,7 +103,7 @@ def change_lines(p: dict, limit: int = 40) -> list[str]:
             continue
         title = md_inline(text(sh.get("title")) or text(sh.get("id")), 60)
         for c in lst(sh.get("changes")):
-            if isinstance(c, dict) and not c.get("power"):
+            if isinstance(c, dict) and not c.get("power") and not c.get("minor"):
                 out.append(f"- sch {title}: {_change(c)}")
     minor: dict = {}
     bulk: dict = {}

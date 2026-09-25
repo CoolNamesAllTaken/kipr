@@ -49,6 +49,7 @@ fits the data into its size budget, then runs `site` and `report`.
 | `--jobs N` | 4 | parallel kicad-cli processes |
 | `--cache-dir D` | `$KIPR_CACHE_DIR` or `~/.cache/kipr` | export cache |
 | `--repo-url URL` | `origin` if on GitHub | for source links |
+| `--significant-fields PATTERNS` | part numbers (MPN, manufacturer, LCSC, Digi-Key, Mouser, …) | which symbol/footprint fields count as real changes; other field changes are minor. Comma-separated globs, `+` extends the defaults. See [Change classification](CONTRACT-project.md#change-classification) |
 
 What counts as a changed project: a directory with a `.kicad_pro` in which a `.kicad_sch`,
 `.kicad_pcb`, `.kicad_pro`, `.kicad_dru`, lib table, project library or 3D model changed, or that
@@ -71,6 +72,15 @@ read, and `pcba3d.models` records every substitution (shown in the 3D tab and th
 behind your own path variables (e.g. `${KICAD_LIBS_DIR}`) resolve when the variable is set in the
 environment of `kipr project`; the stock library is found through `$KIPR_KICAD_3DMODEL_DIR`,
 `$KICADn_3DMODEL_DIR` or next to kicad-cli.
+
+What counts as changed is decided by one classifier for the BOM, the 3D view, the schematic and
+layout change lists, the counts, the report and the comment (see [Change
+classification](CONTRACT-project.md#change-classification)): empty fields that appear, `Sim.*`
+fields, whitespace, field positions and uuids are ignored; fields that don't name the part (cost,
+description, datasheet, notes) are minor; value, footprint, DNP and part-number fields are
+significant. The viewer's BOM tab opens on "Changes" (no unchanged or minor rows), and the 3D view
+marks and tints only the kinds whose chips are active (added, removed and changed by default;
+moved/rotated one click away).
 
 Minor changes: a footprint whose only difference is a 3D model path that swaps the file format
 (same directory and stem) or a library nickname rename of an identical footprint is marked
@@ -137,6 +147,7 @@ Security notes (same as the library review):
 | `kipr-repository` | `CoolNamesAllTaken/kipr` | where kipr is installed from |
 | `projects` | all | project globs (space/comma/newline separated), as `--projects` |
 | `fast-checks` | `false` | `--fast-checks` (skip global libraries in ERC/DRC) |
+| `significant-fields` | `""` | `--significant-fields` (which fields count as real changes; empty = part numbers) |
 | `step` | `false` | also export STEP models |
 | `kicad-image` | `kicad/kicad:10.0.6-amd64-full` | job container; pins the KiCad version (the `-full` images have the stock 3D models) |
 | `jobs` | `4` | parallel kicad-cli processes |

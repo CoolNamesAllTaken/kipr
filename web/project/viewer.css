@@ -82,7 +82,7 @@ input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--bo
 .status-added, .status-fixed { background: var(--add-bg); color: var(--add); }
 .status-modified, .status-changed, .status-moved, .status-rotated, .status-renamed { background: var(--chg-bg); color: var(--warn); }
 .status-removed, .status-deleted, .status-new { background: var(--del-bg); color: var(--del); }
-.status-unchanged { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
+.status-unchanged, .status-minor { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
 .badge.sev-error { background: var(--del); color: #fff; }
 .badge.sev-warning { background: #d4a72c; color: #1c1c1c; }
 .badge.sev-info, .badge.sev-exclusion { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
