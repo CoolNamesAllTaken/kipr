@@ -180,7 +180,7 @@ jobs:
       kipr-ref: KIPR_SHA
       fast-checks: ${{ vars.KIPR_FAST_CHECKS == 'true' }}
       # the boards use global libraries and 3D models (${KICAD_LIBS_DIR}/lib_3d/...) from kicad-libs
-      libraries-repository: CoolNamesAllTaken/kicad-libs
+      libraries-repository: PantsForBirds/kicad-libs
       libraries-path-var: KICAD_LIBS_DIR
 ```
 
