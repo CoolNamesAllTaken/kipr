@@ -63,6 +63,22 @@ exported twice. Failures of single exports end up in the project's `errors` inst
 the run. Layer status comes from comparing the gerbers (ignoring timestamps and the revision
 attribute); the semantic diffs come from parsing the s-expression files.
 
+3D models: KiCad 10's stock 3D library ships STEP only, so boards that name `….wrl` models used to
+export bare boards. When a model path doesn't resolve and the same path with the other extension
+does (`.wrl`/`.wrz` <-> `.step`/`.stp`, stock `${KICADn_3DMODEL_DIR}` and project-local paths alike),
+the export uses that one; only the temporary export checkout is rewritten, never the files the diffs
+read, and `pcba3d.models` records every substitution (shown in the 3D tab and the report). Models
+behind your own path variables (e.g. `${KICAD_LIBS_DIR}`) resolve when the variable is set in the
+environment of `kipr project`; the stock library is found through `$KIPR_KICAD_3DMODEL_DIR`,
+`$KICADn_3DMODEL_DIR` or next to kicad-cli.
+
+Minor changes: a footprint whose only difference is a 3D model path that swaps the file format
+(same directory and stem) or a library nickname rename of an identical footprint is marked
+`minor`. Such parts stay listed, but are not counted as changed, are grouped and collapsed in the
+viewer, report and PR comment ("105 parts: 3D model format .wrl -> .step") and aren't tinted in the
+3D Changes view. Fields that appear or disappear empty (KiCad upgrades add `Sim.Library ""` and
+the like) are not reported at all.
+
 Typical cost: the two public KiCad demo boards of the fixture repo take under a minute cold
 (mostly ERC/DRC) and ~3 s with a warm cache. A 4-layer, 160-component board with a 3.5 MB `.kicad_pcb` took 52 s cold
 (24 s with `--fast-checks`, 6 s warm) and produced 33 MB of output (0.6 MB JSON).
@@ -269,9 +285,11 @@ script by `site.py` itself (a small Python transform). The 3D module (three.js +
 renderer) is bundled with esbuild, and that bundle, `web/project/pcba3d/pcba3d.bundle.js`, is
 **committed** instead of built at review time: building a site then needs no node, npx or
 network (the KiCad CI image has none of them and a reviewer's machine may not either), and the
-wheel ships the exact file that was tested. `site.py` writes the 3D data packs
-(`offline/pcba3d-<slug>.js`, GLBs as base64 and fab files as text, and the renderer's WASM) in
-Python, byte-for-byte the same data as `build_offline.mjs`. After changing anything under
+wheel ships the exact file that was tested. The bundle also carries the gerber renderer, which the
+layout tab uses from disk, so gerbers render from `file://` as well. `site.py` writes the data
+packs in Python: `offline/<slug>.js` (the SVG, gerber and drill texts), `offline/pcba3d-<slug>.js`
+(GLBs as base64) and `offline/pcba3d-vendor.js` (the renderer's WASM); a test checks they hold the
+same bytes as `build_offline.mjs` writes. After changing anything under
 `web/project/pcba3d/` or `web/project/vendor/`, run `node web/project/pcba3d/build_offline.mjs
 --no-packs` and commit the bundle; CI fails with `--check` when it is stale (esbuild is pinned
 and runs from `web/project/`, so the build is reproducible). `tests/project/test_workflows.py` checks the workflows' security properties

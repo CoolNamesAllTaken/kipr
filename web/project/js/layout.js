@@ -96,7 +96,23 @@ export function createLayoutView(project, container, ctx) {
   if (!hasGerbers) { note.hidden = false; note.textContent = 'No gerbers in this export; showing the per-layer SVGs.'; }
 
   // --- changes
-  const changeItems = arr(pcb.changes).filter(obj).map((c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null, layer: typeof c.layer === 'string' ? c.layer : null }));
+  const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null, layer: typeof c.layer === 'string' ? c.layer : null });
+  const allChanges = arr(pcb.changes).filter(obj);
+  const changeItems = allChanges.filter((c) => !c.minor).map(toItem);
+  // minor changes (3D model format / footprint library name only), grouped like pcb.minor_groups
+  const minorGroups = [];
+  for (const c of allChanges.filter((x) => x.minor)) {
+    const label = typeof c.detail === 'string' && c.detail ? c.detail : String(c.what || 'minor');
+    let g = minorGroups.find((x) => x.key === label);
+    if (!g) minorGroups.push(g = { key: label, items: [] });
+    g.items.push({ ...toItem(c), title: typeof c.ref === 'string' ? c.ref : '?' });
+  }
+  const natural = new Intl.Collator(undefined, { numeric: true });
+  for (const g of minorGroups) {
+    g.items.sort((a, b) => natural.compare(a.title, b.title));
+    g.label = `${g.items.length} part${g.items.length === 1 ? '' : 's'}: ${g.key}`;
+  }
+  minorGroups.sort((a, b) => b.items.length - a.items.length);
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: 'No itemised layout changes.',
@@ -113,6 +129,7 @@ export function createLayoutView(project, container, ctx) {
     },
   });
   changes.set(changeItems);
+  changes.setMinor(minorGroups);
 
   function pushRoute(c = changes.current) {
     ctx.setRoute({ item: focus?.id || null, params: { view, mode, c: c >= 0 ? c : null } }, true);

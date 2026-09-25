@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, field
 
 from .. import __version__
-from . import diff_net, diff_pcb, diff_sch, discover, export, pcb, sch
+from . import diff_net, diff_pcb, diff_sch, discover, export, models, pcb, sch
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
 from ..common.kicad_cli import KicadCli
@@ -45,6 +45,9 @@ class Side:
     pro: str | None = None  # paths relative to root
     sch: str | None = None
     pcb: str | None = None
+    pcb_text: str | None = None  # the board as committed (the checkout's copy may get model fallbacks)
+    model_subs: dict = field(default_factory=dict)  # {path in the board: path used for the export}
+    model_counts: dict | None = None
     board: pcb.Board | None = None
     schem: sch.SchematicSet | None = None
     futures: dict = field(default_factory=dict)
@@ -53,10 +56,12 @@ class Side:
 
 class ProjectReview:
     def __init__(self, git: Git, proj: discover.Project, slug: str, out: str, tmp: str, shas: dict,
-                 exporter: export.Exporter | None, step: bool, glb: bool, log, fast_checks: bool = False):
+                 exporter: export.Exporter | None, step: bool, glb: bool, log, fast_checks: bool = False,
+                 model_dirs: list[str] | None = None):
         self.git, self.proj, self.slug, self.out = git, proj, slug, out
         self.tmp, self.exporter, self.step, self.glb, self.log = tmp, exporter, step, glb, log
         self.fast_checks = fast_checks
+        self.model_dirs = model_dirs or []
         self.errors: list[str] = []
         self.timings: dict[str, float] = {}
         self.sides = {s: Side(s, shas[s]) for s in SIDES}
@@ -98,7 +103,26 @@ class ProjectReview:
                 s.sch = stem + ".kicad_sch"
             if os.path.isfile(os.path.join(s.root, stem + ".kicad_pcb")):
                 s.pcb = stem + ".kicad_pcb"
+                self.model_fallback(s)
         self.timings["checkout"] = time.monotonic() - t0
+
+    def model_fallback(self, s: Side):
+        """Point the export checkout's board at X.step when it names a missing X.wrl (and so on);
+        see kipr.project.models. The diffs keep reading the committed text (s.pcb_text)."""
+        path = os.path.join(s.root, s.pcb)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                s.pcb_text = fh.read()
+            if self.exporter is None:
+                return
+            text, s.model_subs, s.model_counts = models.substitute(
+                s.pcb_text, os.path.join(s.root, self.pdir), self.model_dirs)
+            if s.model_subs:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                self.log(f"  {self.slug} {s.name}: {len(s.model_subs)} 3D model path(s) substituted for the export")
+        except OSError as e:
+            self.err(f"3D model fallback for {s.name}: {e}")
 
     def start_exports(self):
         if self.exporter is None:
@@ -111,7 +135,9 @@ class ProjectReview:
                 layers = self._quick_layers(os.path.join(s.root, s.pcb))
             for job in export.side_jobs(s.pcb, s.sch, layers, step=self.step, glb=self.glb,
                                         fast_checks=self.fast_checks):
-                s.futures[job.name] = self.exporter.submit(job, s.root, s.blobs, self.pdir)
+                # which models resolve depends on the machine (stock library, env vars), not only on the files
+                salt = json.dumps([sorted(s.model_subs.items()), s.model_counts]) if job.name in ("glb", "step") else ""
+                s.futures[job.name] = self.exporter.submit(job, s.root, s.blobs, self.pdir, salt=salt)
 
     @staticmethod
     def _quick_layers(path: str) -> list[str]:
@@ -130,8 +156,10 @@ class ProjectReview:
                 continue
             if s.pcb:
                 try:
-                    with open(os.path.join(s.root, s.pcb), encoding="utf-8", errors="replace") as fh:
-                        s.board = pcb.load(fh.read())
+                    if s.pcb_text is None:
+                        with open(os.path.join(s.root, s.pcb), encoding="utf-8", errors="replace") as fh:
+                            s.pcb_text = fh.read()
+                    s.board = pcb.load(s.pcb_text)
                 except Exception as e:  # noqa: BLE001
                     self.err(f"cannot parse {s.name} board {s.pcb}: {e}")
             if s.sch:
@@ -308,7 +336,8 @@ class ProjectReview:
                                     lambda sn, _l=lid: (files.get(sn) or {}).get("drill", {}).get(_l)))
         gbrjob = {sn: (files.get(sn) or {}).get("gbrjob") for sn in SIDES}
         pos = {sn: (files.get(sn) or {}).get("pos") for sn in SIDES}
-        return {"board": board, "layers": layers, "gbrjob": gbrjob, "pos": pos, "changes": changes}
+        return {"board": board, "layers": layers, "gbrjob": gbrjob, "pos": pos, "changes": changes,
+                "minor_groups": diff_pcb.minor_groups(changes)}
 
     def _write_gbrjob(self, src: str, renames: dict, side: str) -> str:
         rel = self.rel("pcb", side, "board.gbrjob")
@@ -341,6 +370,21 @@ class ProjectReview:
         res["frame"] = {"units": "m", "up": "+y", "x": "kicad_x / 1000", "z": "kicad_y / 1000",
                         "origin_mm": [0, 0]}
         res["components"] = components
+        res["models"] = {}
+        for s in (b, h):
+            if s.board is None or s.model_counts is None:
+                res["models"][s.name] = None
+                continue
+            refs: dict = {}
+            for f in s.board.footprints:
+                for m in f.models:
+                    if m["path"] in s.model_subs:
+                        refs.setdefault(m["path"], []).append(f.ref)
+            res["models"][s.name] = {
+                **s.model_counts,
+                "substitutions": [{"from": k, "to": v, "refs": sorted(refs.get(k, []), key=diff_pcb.natural_key)}
+                                  for k, v in sorted(s.model_subs.items())],
+            }
         return res
 
     def bom(self):
@@ -447,9 +491,11 @@ class ProjectReview:
         checks = self.checks()
         self.timings["assemble"] = time.monotonic() - t2
         self.timings["total"] = time.monotonic() - t0
-        comp_count = {"added": 0, "removed": 0, "moved": 0, "changed": 0}
+        comp_count = {"added": 0, "removed": 0, "moved": 0, "changed": 0, "minor": 0}
         for c in components:
-            if c["status"] in ("moved", "rotated"):
+            if c.get("minor"):
+                comp_count["minor"] += 1
+            elif c["status"] in ("moved", "rotated"):
                 comp_count["moved"] += 1
             elif c["status"] in comp_count:
                 comp_count[c["status"]] += 1
@@ -514,12 +560,14 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
         top_errors.append("kicad-cli not found: no SVG/gerber/3D exports, netlist taken from the board, "
                           "no ERC/DRC (use --kicad-cli or $KIPR_KICAD_CLI)")
     exporter = export.Exporter(cli, cache_dir or default_cache_dir(), jobs) if cli else None
+    model_dirs = models.stock_model_dirs(cli.exe) if cli else []
     projects = discover.find_projects(git, shas["base"], shas["head"], patterns)
     log(f"kipr project: {len(projects)} changed project(s) between {shas['base'][:7]} and {shas['head'][:7]}")
     url = repo_url or git.github_url()
     doc = {
         "version": 1,
-        "tool": {"name": "kipr", "version": __version__, "kicad": cli.version if cli else None},
+        "tool": {"name": "kipr", "version": __version__, "kicad": cli.version if cli else None,
+                 "stock_3d_models": bool(model_dirs) if cli else None},
         "base": {"sha": shas["base"], "ref": base, "short": shas["base"][:7]},
         "head": {"sha": shas["head"], "ref": head, "short": shas["head"][:7]},
         "repo": {"url": url, "blob": f"{url}/blob/{{sha}}/{{path}}" if url else None},
@@ -532,7 +580,7 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
         for proj in projects:
             slug = unique_slug(proj.name, used)
             log(f"- {proj.path or '.'} ({proj.status}) -> p/{slug}")
-            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks)
+            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks, model_dirs)
             try:
                 doc["projects"].append(pr.run())
             except Exception as e:  # noqa: BLE001  never crash the whole review for one project

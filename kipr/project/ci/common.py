@@ -75,6 +75,8 @@ def summary_table(doc: dict) -> str:
         comp = d(s.get("components"))
         parts = [f"+{num(comp.get('added'))}", f"−{num(comp.get('removed'))}",
                  f"↔{num(comp.get('moved'))}", f"~{num(comp.get('changed'))}"]
+        if num(comp.get("minor")):
+            parts.append(f"(+{num(comp.get('minor'))} minor)")
         checks = []
         for kind in CHECK_KINDS:
             c = check_counts(p, kind)
@@ -103,12 +105,20 @@ def change_lines(p: dict, limit: int = 40) -> list[str]:
         for c in lst(sh.get("changes")):
             if isinstance(c, dict) and not c.get("power"):
                 out.append(f"- sch {title}: {_change(c)}")
+    minor: dict = {}
     for c in lst(d(p.get("pcb")).get("changes")):
-        if isinstance(c, dict):
+        if isinstance(c, dict) and c.get("minor"):
+            minor.setdefault(text(c.get("detail")) or text(c.get("what")) or "minor", []).append(text(c.get("ref")) or "?")
+        elif isinstance(c, dict):
             out.append(f"- pcb: {_change(c)}")
     if len(out) > limit:
         more = len(out) - limit
         out = out[:limit] + [f"- … and {more} more (see the viewer or report)"]
+    # minor changes (3D model format / footprint library name only): one line per kind, refs folded
+    for label, refs in sorted(minor.items(), key=lambda kv: -len(kv[1])):
+        shown = ", ".join(md_inline(r, 20) for r in refs[:30]) + (", …" if len(refs) > 30 else "")
+        out.append(f"- pcb (minor): {len(refs)} part(s): {md_inline(label, 120)}"
+                   f"<details><summary>parts</summary>{shown}</details>")
     return out
 
 

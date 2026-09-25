@@ -106,11 +106,14 @@ class SiteTest(unittest.TestCase):
                 out[json.loads(m.group(1))] = json.loads(m.group(2))
         return out
 
+    @staticmethod
+    def shell_pack(path: Path) -> dict:
+        m = re.search(r"\] = (\{.*\});\n$", path.read_text(encoding="ascii"))
+        return json.loads(m.group(1))["files"]
+
     def test_pcba3d_constants_match_the_module(self):
         src = (site.WEB / "pcba3d" / "gerberboard.js").read_text(encoding="utf-8")
         self.assertIn(f"OFFLINE_WASM_KEY = '{site.PCBA3D_WASM}'", src)
-        kinds = re.search(r"FAB_KINDS = new Set\(\[([^\]]*)\]\)", src).group(1)
-        self.assertEqual(set(re.findall(r"'([a-z]+)'", kinds)), site.PCBA3D_FAB_KINDS)
         self.assertTrue((site.WEB / "pcba3d" / site.PCBA3D_BUNDLE).is_file(), "committed 3D bundle missing")
 
     def test_pcba3d_packs(self):
@@ -128,7 +131,10 @@ class SiteTest(unittest.TestCase):
         self.assertTrue(data["pcba3d"])
         demo = self.pack_files(self.out / "offline" / "pcba3d-demo_board.js")
         self.assertEqual(demo["p/demo_board/3d/head.glb"], {"b64": "Z2xURgIAAAA="})
-        self.assertTrue(any(k.endswith(".gbr") or k.endswith(".drl") for k in demo))
+        self.assertFalse(any(k.endswith((".gbr", ".drl")) for k in demo))  # the fab files are in the project pack
+        shell = self.shell_pack(self.out / "offline" / "demo_board.js")
+        self.assertIn("p/demo_board/pcb/head/F_Cu.gbr", shell)
+        self.assertIn("p/demo_board/pcb/head/PTH.drl", shell)
         for f in (self.out / "offline").glob("pcba3d-*.js"):
             self.assertNotIn("U0VDUkVU", f.read_text())  # base64("SECRET")
         vendor = self.pack_files(self.out / "offline" / "pcba3d-vendor.js")
@@ -146,6 +152,18 @@ class SiteTest(unittest.TestCase):
         subprocess.run(["node", str(site.WEB / "pcba3d" / "build_offline.mjs"), "--no-bundle", "--out", str(node_out)],
                        check=True, capture_output=True)
         js = {f.name: self.pack_files(f) for f in (node_out / "offline").glob("pcba3d-*.js")}
+        # the node build also packs the fab files for demo.html; site.py leaves them to the project
+        # pack, where the module's assets.js finds them: same bytes either way
+        for name, files in list(js.items()):
+            if name == "pcba3d-vendor.js":
+                continue
+            shell = self.shell_pack(self.out / "offline" / (name[len("pcba3d-"):]))
+            for k, v in list(files.items()):
+                if k.endswith((".gbr", ".drl")):
+                    self.assertEqual(shell[k], v, k)
+                    del files[k]
+            if not files:
+                del js[name]
         self.assertEqual(py, js)
 
     def test_confined_file(self):

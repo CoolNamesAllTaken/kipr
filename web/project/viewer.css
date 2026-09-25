@@ -193,6 +193,11 @@ svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .change.nobox { cursor: default; }
 .change-top { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .change-title { font-weight: 600; overflow-wrap: anywhere; }
+.minor-groups { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.minor-group summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 3px 0; }
+.minor-group .change-list { margin: 4px 0 4px 10px; flex-direction: row; flex-wrap: wrap; }
+.minor-group .change-list li { flex: 0 0 auto; }
+.change.small { padding: 2px 6px; font-size: 12px; width: auto; }
 .change-detail { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; margin-top: 2px; }
 .empty-li { padding: 6px 2px; }
 

@@ -104,7 +104,9 @@ node web/project/pcba3d/build_offline.mjs --check     # CI: fail if the committe
   writes the same packs in Python (`kipr/project/site.py`). `demo.bundle.js` is git-ignored.
 - It writes data packs in `OUT/offline/`:
   - `review.js`
-  - `pcba3d-<slug>.js`: that project's GLBs as base64 and its fab files as text
+  - `pcba3d-<slug>.js`: that project's GLBs as base64 and its fab files as text (`kipr project
+    site` leaves the fab files out: they are in the project viewer's `offline/<slug>.js`, where
+    `assets.js` looks them up)
   - `pcba3d-vendor.js`: the renderer's WASM
 
   All pack JSON is script-safe: `<`, `>`, `&`, U+2028 and U+2029 are escaped.

@@ -13,8 +13,44 @@ ROT_EPS = 0.01  # degrees
 
 # Order in which a footprint's differences are named when one "what" has to be picked.
 FP_WHAT_ORDER = ("footprint", "flipped", "moved", "rotated", "pads", "graphics", "value", "reference",
-                 "model", "dnp", "attributes", "fields", "locked")
+                 "model", "dnp", "attributes", "fields", "locked", "footprint_library", "model_format")
 FP_GEOMETRIC = {"footprint", "flipped", "moved", "rotated", "pads", "graphics"}
+# Changes that don't change the assembled board: a 3D model path that only swaps the file format
+# (same dir and stem, e.g. .wrl -> .step) and a footprint whose library nickname changed while the
+# footprint itself is identical. They are listed with minor: true but not counted as "changed".
+MINOR_WHATS = {"model_format", "footprint_library"}
+MODEL_EXTS = (".wrl", ".wrz", ".step", ".stp", ".stpz", ".igs", ".iges")
+
+
+def split_model_ext(path: str) -> tuple[str, str] | None:
+    """("dir/stem", ".ext") for a 3D model path with a known model extension, else None."""
+    low = path.lower()
+    for ext in MODEL_EXTS:
+        if low.endswith(ext):
+            return path[: -len(ext)], ext
+    return None
+
+
+def model_format_only(bm: list[dict], hm: list[dict]) -> list[tuple[str, str]] | None:
+    """[(base ext, head ext)] if the two model lists differ only in file extensions, else None."""
+    if len(bm) != len(hm) or bm == hm:
+        return None
+    swaps = []
+    for a, b in zip(bm, hm):
+        if {k: v for k, v in a.items() if k != "path"} != {k: v for k, v in b.items() if k != "path"}:
+            return None
+        if a["path"] == b["path"]:
+            continue
+        sa, sb = split_model_ext(a["path"]), split_model_ext(b["path"])
+        if not sa or not sb or sa[0] != sb[0]:
+            return None
+        swaps.append((sa[1].lower(), sb[1].lower()))
+    return swaps or None
+
+
+def lib_name(lib_id: str) -> tuple[str, str]:
+    nick, _, name = lib_id.rpartition(":")
+    return nick, name
 
 
 def match(base_items, head_items, keys):
@@ -56,9 +92,14 @@ def cu(f: Footprint) -> str:
 
 def fp_whats(b: Footprint, h: Footprint) -> tuple[list[str], list[str]]:
     whats, details = [], []
+    same_body = b.pads_key == h.pads_key and b.graphics_key == h.graphics_key
     if b.lib_id != h.lib_id:
-        whats.append("footprint")
-        details.append(f"footprint {b.lib_id} -> {h.lib_id}")
+        if lib_name(b.lib_id)[1] == lib_name(h.lib_id)[1] and b.side == h.side and same_body:
+            whats.append("footprint_library")
+            details.append(f"footprint library {lib_name(b.lib_id)[0] or '-'} -> {lib_name(h.lib_id)[0] or '-'} (same footprint)")
+        else:
+            whats.append("footprint")
+            details.append(f"footprint {b.lib_id} -> {h.lib_id}")
     if b.side != h.side:
         whats.append("flipped")
         details.append(f"side {b.side} -> {h.side}")
@@ -70,7 +111,7 @@ def fp_whats(b: Footprint, h: Footprint) -> tuple[list[str], list[str]]:
     if abs(dr) > ROT_EPS:
         whats.append("rotated")
         details.append(f"rotated {b.rot:g}° -> {h.rot:g}°")
-    if b.lib_id == h.lib_id and b.side == h.side:
+    if lib_name(b.lib_id)[1] == lib_name(h.lib_id)[1] and b.side == h.side:
         if b.pads_key != h.pads_key:
             whats.append("pads")
             details.append("pads changed")
@@ -83,7 +124,11 @@ def fp_whats(b: Footprint, h: Footprint) -> tuple[list[str], list[str]]:
     if b.ref != h.ref:
         whats.append("reference")
         details.append(f"reference {b.ref} -> {h.ref}")
-    if b.models != h.models:
+    swaps = model_format_only(b.models, h.models)
+    if swaps:
+        whats.append("model_format")
+        details.append("3D model format " + ", ".join(sorted({f"{x} -> {y}" for x, y in swaps})))
+    elif b.models != h.models:
         whats.append("model")
         bm = ", ".join(m["path"] for m in b.models) or "none"
         hm = ", ".join(m["path"] for m in h.models) or "none"
@@ -112,6 +157,10 @@ def field_diff(a: dict, b: dict) -> list[str]:
         if k.startswith("ki_"):
             continue
         va, vb = a.get(k), b.get(k)
+        # a field that appears or disappears empty is not a change: KiCad upgrades add empty
+        # fields such as Sim.Library / Sim.Name to every symbol
+        if (va or None) is None and (vb or None) is None:
+            continue
         if va != vb:
             if va is None:
                 out.append(f"{k} added: {vb!r}")
@@ -146,8 +195,10 @@ def diff_footprints(base: Board, head: Board):
         components.append(component("added", None, f, []))
     for b, h in pairs:
         whats, details = fp_whats(b, h)
-        comp_what = [w for w in ("position", "rotation", "footprint", "value", "model", "side", "dnp")
+        comp_what = [w for w in ("position", "rotation", "footprint", "value", "model", "side", "dnp",
+                                 "footprint_library", "model_format")
                      if {"position": "moved", "rotation": "rotated", "side": "flipped"}.get(w, w) in whats]
+        minor = all(w in MINOR_WHATS for w in whats)
         if not whats:
             components.append(component("unchanged", b, h, []))
             continue
@@ -158,7 +209,7 @@ def diff_footprints(base: Board, head: Board):
         holes = sorted(b.holes | h.holes) if geo and (b.holes or h.holes) else None
         changes.append(_change("footprint", whats[0], layers, geom.union(b.box, h.box), layer=cu(h),
                                ref=h.ref or b.ref,
-                               whats=whats, detail="; ".join(details), holes=holes,
+                               whats=whats, detail="; ".join(details), holes=holes, minor=minor or None,
                                base_bbox_mm=geom.to_xywh(b.box), head_bbox_mm=geom.to_xywh(h.box)))
         if "moved" in whats:
             st = "moved"
@@ -166,9 +217,25 @@ def diff_footprints(base: Board, head: Board):
             st = "rotated"
         elif comp_what or whats:
             st = "changed"
-        components.append(component(st, b, h, comp_what or whats))
+        c = component(st, b, h, comp_what or whats)
+        if minor:
+            c["minor"] = True
+        components.append(c)
     components.sort(key=lambda c: natural_key(c["ref"]))
     return changes, components
+
+
+def minor_groups(changes: list[dict]) -> list[dict]:
+    """Minor footprint changes grouped by what they are: [{"what", "detail", "count", "refs"}],
+    e.g. {"what": "model_format", "detail": "3D model format .wrl -> .step", "count": 112, ...}."""
+    groups: dict = {}
+    for c in changes:
+        if c.get("kind") == "footprint" and c.get("minor"):
+            key = (tuple(c.get("whats") or [c["what"]]), c.get("detail") or "")
+            groups.setdefault(key, []).append(c.get("ref") or "?")
+    out = [{"what": "+".join(k[0]), "detail": k[1], "count": len(refs), "refs": sorted(refs, key=natural_key)}
+           for k, refs in groups.items()]
+    return sorted(out, key=lambda g: -g["count"])
 
 
 def natural_key(s: str):

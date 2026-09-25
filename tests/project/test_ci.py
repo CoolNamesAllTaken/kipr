@@ -266,3 +266,32 @@ def test_ci_dispatch(capsys):
     assert kipr_main(["project", "ci", "--help"]) == 0
     assert "post-comment" in capsys.readouterr().out
     assert kipr_main(["project", "ci", "nope"]) == 2
+
+
+def test_minor_changes_are_grouped_in_the_comment():
+    from kipr.project.ci.common import change_lines, summary_table
+    minor = [{"kind": "footprint", "what": "model_format", "whats": ["model_format"], "ref": f"R{i}", "minor": True,
+              "detail": "3D model format .wrl -> .step"} for i in range(1, 41)]
+    p = {"slug": "a", "name": "a", "path": "a", "status": "modified",
+         "summary": {"components": {"added": 0, "removed": 0, "moved": 0, "changed": 1, "minor": 40}},
+         "pcb": {"changes": [{"kind": "footprint", "what": "value", "ref": "C1", "detail": "value 1u -> 2u"}] + minor}}
+    lines = change_lines(p)
+    assert len(lines) == 2 and "C1" in lines[0]
+    assert "40 part(s): 3D model format .wrl -&gt; .step" in lines[1] and "R30" in lines[1] and "R31" not in lines[1]
+    assert "~1 (+40 minor)" in summary_table({"projects": [p]})
+
+
+def test_model_path_resolution(tmp_path, monkeypatch):
+    from kipr.project import models
+    monkeypatch.delenv("KICAD_LIBS_DIR", raising=False)
+    assert models.resolve("${KICAD_LIBS_DIR}/x.step", str(tmp_path), []) is None
+    assert models.resolve("${KICAD9_3DMODEL_DIR}/x.step", str(tmp_path), []) is None
+    assert models.resolve("kicad-embed://x.step", str(tmp_path), []) is None
+    assert models.resolve("m/x.step", str(tmp_path), []) == [str(tmp_path / "m/x.step")]
+    monkeypatch.setenv("KICAD_LIBS_DIR", str(tmp_path / "libs"))
+    assert models.resolve("${KICAD_LIBS_DIR}/x.step", str(tmp_path), []) == [str(tmp_path / "libs/x.step")]
+    (tmp_path / "m").mkdir()
+    (tmp_path / "m" / "x.STEP").write_text("")
+    text, subs, counts = models.substitute('(model "m/x.wrl") (model "m/y.wrl") (model "${NOPE}/z.wrl")', str(tmp_path), [])
+    assert subs == {"m/x.wrl": "m/x.STEP"} and '(model "m/x.STEP")' in text
+    assert counts == {"found": 0, "substituted": 1, "missing": 1, "unknown": 1}

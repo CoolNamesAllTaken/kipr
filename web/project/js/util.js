@@ -108,6 +108,7 @@ function packFor(url) {
   const m = /^p\/([^/]+)\//.exec(url || '');
   const slug = m && decodeURIComponent(m[1]);
   if (!slug || !SLUG_RE.test(slug)) return Promise.resolve(null);
+  if (!packs.has(slug) && window.KIPR_PACKS?.[slug]) packs.set(slug, Promise.resolve(window.KIPR_PACKS[slug])); // loaded by the 3D module
   if (!packs.has(slug)) {
     packs.set(slug, new Promise((resolve) => {
       const s = document.createElement('script');
@@ -148,6 +149,45 @@ export async function fetchJson(path) {
   const r = await fetch(path, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
   return r.json();
+}
+
+/** Load a classic script once; resolves true when it loaded. */
+const scripts = new Map();
+export function loadScript(src) {
+  if (!scripts.has(src)) {
+    scripts.set(src, new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      document.head.append(s);
+    }));
+  }
+  return scripts.get(src);
+}
+
+/**
+ * From file://: pcba3d/pcba3d.bundle.js, the prebuilt classic-script build of the 3D module, which
+ * also carries the gerber renderer (window.KIPR_GERBER) for the layout tab. Null when site.py
+ * built no 3D bundle or it does not load.
+ */
+export async function loadOfflineBundle() {
+  if (!window.KIPR_PCBA3D?.mountPcba3d) {
+    if (!window.KIPR_DATA?.pcba3d) return null; // site.py built no 3D bundle: don't request it
+    if (!(await loadScript('pcba3d/pcba3d.bundle.js'))) return null;
+  }
+  return typeof window.KIPR_PCBA3D?.mountPcba3d === 'function' ? window.KIPR_PCBA3D : null;
+}
+
+/** From file://: the gerber renderer's WASM bytes from offline/pcba3d-vendor.js, or null. */
+export async function offlineWasm(key) {
+  if (!window.KIPR_OFFLINE?.files?.[key]) await loadScript('offline/pcba3d-vendor.js');
+  const b64 = window.KIPR_OFFLINE?.files?.[key]?.b64;
+  if (typeof b64 !== 'string') return null;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 const textCache = new Map();

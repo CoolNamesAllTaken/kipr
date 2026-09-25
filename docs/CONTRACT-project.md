@@ -54,7 +54,8 @@ p/<slug>/checks/{erc,drc}.{base,head}.json   raw kicad-cli ERC/DRC reports (--se
 ```jsonc
 {
   "version": 1,
-  "tool": {"name": "kipr", "version": "0.1.0", "kicad": "10.0.6"},    // kicad: null without kicad-cli
+  "tool": {"name": "kipr", "version": "0.1.0", "kicad": "10.0.6",    // kicad: null without kicad-cli
+           "stock_3d_models": true},    // KiCad's stock 3D library was found (for the model fallback); null without kicad-cli
   "base": {"sha": "…", "ref": "main", "short": "abc1234"},
   "head": {"sha": "…", "ref": "feature", "short": "def5678"},
   "repo": {"url": "https://github.com/o/r", "blob": "https://github.com/o/r/blob/{sha}/{path}"},  // nulls if not GitHub
@@ -80,7 +81,8 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
   "status": "modified",                // added | removed | modified
   "reasons": ["projects/…/adsbee_1090u.kicad_pcb"],   // changed files that made it count
   "summary": {"sheets_changed": 2, "layers_changed": 5,
-              "components": {"added": 1, "removed": 0, "moved": 3, "changed": 2},  // from the board (moved includes rotated); from the BOM if there is no board
+              "components": {"added": 1, "removed": 0, "moved": 3, "changed": 2,   // from the board (moved includes rotated); from the BOM if there is no board
+                             "minor": 105},  // minor: true components (see PcbChange); not in "changed"
               "nets_changed": 4,
               "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0}},      // null when the check could not run
   "schematic": Schematic | null,
@@ -160,7 +162,9 @@ is listed), or when the rendered SVGs differ.
   }],
   "gbrjob": {"base": "p/<slug>/pcb/base/board.gbrjob", "head": "…"},
   "pos": {"base": "p/<slug>/pcb/base/pos.csv", "head": "…"},
-  "changes": [PcbChange]
+  "changes": [PcbChange],
+  "minor_groups": [{"what": "model_format", "detail": "3D model format .wrl -> .step",   // minor changes by kind,
+                    "count": 105, "refs": ["C1", "C2", …]}]                              // largest first
 }
 ```
 
@@ -181,12 +185,22 @@ falls back to "some semantic change touches this layer".
  "bbox_mm": [x, y, w, h],                // union of base and head
  "base_bbox_mm": […], "head_bbox_mm": […],   // footprints
  "count": {"added": 3, "removed": 1},    // clustered kinds
- "detail": "moved 0.200 mm (54.5, 53.2) -> (54.5, 53.4); 3D model a.wrl -> a.step"}
+ "detail": "moved 0.200 mm (54.5, 53.2) -> (54.5, 53.4); 3D model a.wrl -> b.step",
+ "minor": true}                          // only when every what is minor (below); omitted otherwise
 ```
+
+**Minor changes.** Two footprint differences don't change the assembled board and are marked
+`minor: true` when they are all there is: `model_format` (every 3D model path differs only in its
+extension, same directory and stem, e.g. `.wrl -> .step`, offsets/scale/rotation equal) and
+`footprint_library` (the lib id's nickname changed, the footprint name, pads and graphics are
+identical). They stay in `changes` / `components` but are not counted in
+`summary.components.changed` (see `minor`), are grouped in `pcb.minor_groups`, collapsed in the
+viewer, report and PR comment, and not tinted in the 3D Changes view by default. A minor what next
+to a real change (a moved part whose model also went `.wrl -> .step`) is just listed in `whats`.
 
 | kind | what | notes |
 |---|---|---|
-| `footprint` | `added`, `removed`, `footprint` (lib id), `flipped`, `moved`, `rotated`, `pads`, `graphics`, `value`, `reference`, `model`, `dnp`, `attributes`, `fields`, `locked` | matched by uuid, then reference, then lib id + position; bbox = courtyard (else pads + graphics); pads are compared relative to the footprint, so a rotation is not a pad change |
+| `footprint` | `added`, `removed`, `footprint` (lib id), `flipped`, `moved`, `rotated`, `pads`, `graphics`, `value`, `reference`, `model`, `dnp`, `attributes`, `fields`, `locked`, `footprint_library`, `model_format` | matched by uuid, then reference, then lib id + position; bbox = courtyard (else pads + graphics); pads are compared relative to the footprint, so a rotation is not a pad change |
 | `track` | `added`, `removed`, `rerouted` | segments and arcs, grouped per (layer, net) and clustered spatially; detail has segment counts and the length delta |
 | `via` | `added`, `removed`, `modified` | per net, clustered; `layers` = every copper layer the via spans |
 | `zone` | `added`, `removed`, `outline`, `layers`, `net`, `settings`, `fill` | zones and rule areas, matched by uuid; `whats` lists all; `fill` alone means only the filled copper changed |
@@ -209,10 +223,28 @@ falls back to "some semantic change touches this layer".
              "models": [{"path": "…", "offset": [0, 0, 0], "scale": [1, 1, 1], "rotate": [0, 0, 0], "hide": true}],
              "dnp": false, "bbox_mm": [x, y, w, h], "uuid": "…"},
     "head": {…},
-    "what": ["position", "rotation", "footprint", "value", "model", "side", "dnp"]   // subset; other footprint whats (pads, fields, …) when none of these apply
-  }]
+    "what": ["position", "rotation", "footprint", "value", "model", "side", "dnp", "footprint_library", "model_format"],   // subset; other footprint whats (pads, fields, …) when none of these apply
+    "minor": true                       // status "changed" but only minor whats (see PcbChange); omitted otherwise
+  }],
+  "models": {                           // 3D model fallback of the export (null without kicad-cli / board)
+    "base": {"found": 12, "substituted": 22, "missing": 1, "unknown": 0,   // distinct model paths of the board
+             "substitutions": [{"from": "${KICAD8_3DMODEL_DIR}/R.3dshapes/R_0402.wrl",
+                                "to": "${KICAD8_3DMODEL_DIR}/R.3dshapes/R_0402.step", "refs": ["R1", "R2"]}]},
+    "head": {…}
+  }
 }
 ```
+
+**3D model fallback.** Before the GLB/STEP export, every model path of the board is resolved like
+KiCad does (`${KIPRJMOD}` and relative paths against the project directory, `${KICADn_3DMODEL_DIR}`
+against the stock library: `$KIPR_KICAD_3DMODEL_DIR`, `$KICADn_3DMODEL_DIR`, `<kicad-cli
+prefix>/share/kicad/3dmodels` or the usual install paths; other `${VAR}` from the environment). A
+path that doesn't exist while the same path with another model extension does (`.wrl`/`.wrz` <->
+`.step`/`.stp`) is rewritten in the temporary export checkout only, so KiCad 10 (whose stock
+library ships STEP only) still exports the bodies of boards that name `.wrl` models. The diffs
+read the files as committed. `found` / `missing` count paths that resolve / don't (even with the
+other extension), `unknown` those that depend on an unknown variable (set it in the environment,
+e.g. `KICAD_LIBS_DIR`).
 
 ### Bom
 

@@ -212,7 +212,7 @@ export class Pcba3dView {
       const isBase = k === 'base';
       for (const [ref, entry] of side.comps) {
         const status = this.statusFor(ref);
-        const changed = status !== 'unchanged';
+        const changed = status !== 'unchanged' && status !== 'minor';
         let visible = show.components;
         let material = null;                     // null = the model's own
         if (mode === 'overlay') {
@@ -464,7 +464,7 @@ export class Pcba3dView {
     // drawn only where the base's part is (removed, and the old place of a moved one).
     if (this.show.markers) {
       for (const [ref, c] of this.statusOf) {
-        if (c.status === 'unchanged' || ref === this.selected || ref === this.hovered) continue;
+        if (c.status === 'unchanged' || c.status === 'minor' || ref === this.selected || ref === this.hovered) continue;
         add(ref, STATUS_COLORS[c.status], 0.25, 0.8);
       }
     }

@@ -8,7 +8,9 @@
 
 import { naturalCompare } from './match.js';
 
-export const STATUSES = ['added', 'removed', 'moved', 'rotated', 'changed', 'unchanged'];
+// 'minor': the backend's minor: true (only a 3D model format swap such as .wrl -> .step, or a
+// footprint library rename): listed, but not counted, tinted or marked as a change by default.
+export const STATUSES = ['added', 'removed', 'moved', 'rotated', 'changed', 'minor', 'unchanged'];
 const CHANGE_ORDER = Object.fromEntries(STATUSES.map((s, i) => [s, i]));
 
 export const POSITION_EPS_MM = 0.001;
@@ -60,7 +62,8 @@ export function normalizeComponents(list) {
   const out = (Array.isArray(list) ? list : []).filter((c) => c && c.ref).map((c) => {
     const base = c.base || null, head = c.head || null;
     const what = Array.isArray(c.what) ? c.what : whatChanged(base, head);
-    const status = STATUSES.includes(c.status) ? c.status : deriveStatus(base, head, what);
+    let status = STATUSES.includes(c.status) ? c.status : deriveStatus(base, head, what);
+    if (c.minor && status !== 'added' && status !== 'removed') status = 'minor';
     return { ...c, base, head, what, status };
   });
   out.sort((a, b) => (CHANGE_ORDER[a.status] - CHANGE_ORDER[b.status]) || naturalCompare(a.ref, b.ref));
@@ -68,7 +71,7 @@ export function normalizeComponents(list) {
 }
 
 export function isChange(c) {
-  return c.status !== 'unchanged';
+  return c.status !== 'unchanged' && c.status !== 'minor';
 }
 
 /**
@@ -80,10 +83,11 @@ export function isChange(c) {
 export function tagsOf(c) {
   const tags = [c.status];
   const what = c.what || [];
-  if (c.status === 'unchanged' || c.status === 'added' || c.status === 'removed') return tags;
+  if (['unchanged', 'minor', 'added', 'removed'].includes(c.status)) return tags;
   if (what.includes('position') && !tags.includes('moved')) tags.push('moved');
   if (what.includes('rotation') && !tags.includes('rotated')) tags.push('rotated');
-  if (what.some((w) => !['position', 'rotation'].includes(w)) && !tags.includes('changed')) tags.push('changed');
+  // a format-only model swap next to a move doesn't make the part 'changed' too
+  if (what.some((w) => !['position', 'rotation', 'model_format', 'footprint_library'].includes(w)) && !tags.includes('changed')) tags.push('changed');
   return tags;
 }
 
@@ -130,9 +134,17 @@ export function summary(c) {
   if (c.what.includes('position')) parts.push(`moved ${Math.hypot(num(h.x) - num(b.x), num(h.y) - num(b.y)).toFixed(2)} mm`);
   if (c.what.includes('rotation')) parts.push(`${+num(b.rot).toFixed(1)}° → ${+num(h.rot).toFixed(1)}°`);
   if (c.what.includes('model')) parts.push('3D model');
+  if (c.what.includes('model_format')) {
+    const ext = (m) => (String(m || '').match(/\.[A-Za-z0-9]+$/) || ['?'])[0].toLowerCase();
+    parts.push(`3D model ${ext(b.model)} → ${ext(h.model)}`);
+  }
+  if (c.what.includes('footprint_library')) {
+    const nick = (f) => (String(f || '').includes(':') ? String(f).split(':')[0] : '∅');
+    parts.push(`library ${nick(b.footprint)} → ${nick(h.footprint)}`);
+  }
   if (c.what.includes('dnp')) parts.push(h.dnp ? 'now DNP' : 'no longer DNP');
   // The backend may name other footprint changes (pads, fields, …); list them as they come.
-  const known = new Set(['value', 'footprint', 'side', 'position', 'rotation', 'model', 'dnp']);
+  const known = new Set(['value', 'footprint', 'side', 'position', 'rotation', 'model', 'dnp', 'model_format', 'footprint_library']);
   const other = c.what.filter((w) => !known.has(w));
   if (other.length) parts.push(other.join(', '));
   return parts.join(' · ');
