@@ -1,0 +1,1264 @@
+{
+ "RP2040-Zero_Castellated": {
+  "models": [
+   {
+    "offset": [
+     -8.95,
+     -11.85,
+     1.1
+    ],
+    "rotate": [
+     -0.0,
+     -0.0,
+     -0.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  ],
+  "pads": [
+   {
+    "at": [
+     -7.62,
+     -10.16
+    ],
+    "copper_bbox": [
+     -9.77,
+     -11.01,
+     -6.77,
+     -9.31
+    ],
+    "copper_center": [
+     -8.27,
+     -10.16
+    ],
+    "hole_center": null,
+    "number": "1"
+   },
+   {
+    "at": [
+     -7.62,
+     -7.62
+    ],
+    "copper_bbox": [
+     -9.77,
+     -8.47,
+     -6.77,
+     -6.77
+    ],
+    "copper_center": [
+     -8.27,
+     -7.62
+    ],
+    "hole_center": null,
+    "number": "2"
+   },
+   {
+    "at": [
+     -7.62,
+     -5.08
+    ],
+    "copper_bbox": [
+     -9.77,
+     -5.93,
+     -6.77,
+     -4.23
+    ],
+    "copper_center": [
+     -8.27,
+     -5.08
+    ],
+    "hole_center": null,
+    "number": "3"
+   },
+   {
+    "at": [
+     -7.62,
+     -2.54
+    ],
+    "copper_bbox": [
+     -9.77,
+     -3.39,
+     -6.77,
+     -1.69
+    ],
+    "copper_center": [
+     -8.27,
+     -2.54
+    ],
+    "hole_center": null,
+    "number": "4"
+   },
+   {
+    "at": [
+     -7.62,
+     0.0
+    ],
+    "copper_bbox": [
+     -9.77,
+     -0.85,
+     -6.77,
+     0.85
+    ],
+    "copper_center": [
+     -8.27,
+     0.0
+    ],
+    "hole_center": null,
+    "number": "5"
+   },
+   {
+    "at": [
+     -7.62,
+     2.54
+    ],
+    "copper_bbox": [
+     -9.77,
+     1.69,
+     -6.77,
+     3.39
+    ],
+    "copper_center": [
+     -8.27,
+     2.54
+    ],
+    "hole_center": null,
+    "number": "6"
+   },
+   {
+    "at": [
+     -7.62,
+     5.08
+    ],
+    "copper_bbox": [
+     -9.77,
+     4.23,
+     -6.77,
+     5.93
+    ],
+    "copper_center": [
+     -8.27,
+     5.08
+    ],
+    "hole_center": null,
+    "number": "7"
+   },
+   {
+    "at": [
+     -7.62,
+     7.62
+    ],
+    "copper_bbox": [
+     -9.77,
+     6.77,
+     -6.77,
+     8.47
+    ],
+    "copper_center": [
+     -8.27,
+     7.62
+    ],
+    "hole_center": null,
+    "number": "8"
+   },
+   {
+    "at": [
+     -7.62,
+     10.16
+    ],
+    "copper_bbox": [
+     -9.77,
+     9.31,
+     -6.77,
+     11.01
+    ],
+    "copper_center": [
+     -8.27,
+     10.16
+    ],
+    "hole_center": null,
+    "number": "9"
+   },
+   {
+    "at": [
+     -5.08,
+     10.16
+    ],
+    "copper_bbox": [
+     -5.93,
+     9.31,
+     -4.23,
+     12.51
+    ],
+    "copper_center": [
+     -5.08,
+     10.91
+    ],
+    "hole_center": null,
+    "number": "10"
+   },
+   {
+    "at": [
+     -2.54,
+     10.16
+    ],
+    "copper_bbox": [
+     -3.39,
+     9.31,
+     -1.69,
+     12.51
+    ],
+    "copper_center": [
+     -2.54,
+     10.91
+    ],
+    "hole_center": null,
+    "number": "11"
+   },
+   {
+    "at": [
+     0.0,
+     10.16
+    ],
+    "copper_bbox": [
+     -0.85,
+     9.31,
+     0.85,
+     12.51
+    ],
+    "copper_center": [
+     0.0,
+     10.91
+    ],
+    "hole_center": null,
+    "number": "12"
+   },
+   {
+    "at": [
+     2.54,
+     10.16
+    ],
+    "copper_bbox": [
+     1.69,
+     9.31,
+     3.39,
+     12.51
+    ],
+    "copper_center": [
+     2.54,
+     10.91
+    ],
+    "hole_center": null,
+    "number": "13"
+   },
+   {
+    "at": [
+     5.08,
+     10.16
+    ],
+    "copper_bbox": [
+     4.23,
+     9.31,
+     5.93,
+     12.51
+    ],
+    "copper_center": [
+     5.08,
+     10.91
+    ],
+    "hole_center": null,
+    "number": "14"
+   },
+   {
+    "at": [
+     7.62,
+     10.16
+    ],
+    "copper_bbox": [
+     6.77,
+     9.31,
+     9.77,
+     11.01
+    ],
+    "copper_center": [
+     8.27,
+     10.16
+    ],
+    "hole_center": null,
+    "number": "15"
+   },
+   {
+    "at": [
+     7.62,
+     7.62
+    ],
+    "copper_bbox": [
+     6.77,
+     6.77,
+     9.77,
+     8.47
+    ],
+    "copper_center": [
+     8.27,
+     7.62
+    ],
+    "hole_center": null,
+    "number": "16"
+   },
+   {
+    "at": [
+     7.62,
+     5.08
+    ],
+    "copper_bbox": [
+     6.77,
+     4.23,
+     9.77,
+     5.93
+    ],
+    "copper_center": [
+     8.27,
+     5.08
+    ],
+    "hole_center": null,
+    "number": "17"
+   },
+   {
+    "at": [
+     7.62,
+     2.54
+    ],
+    "copper_bbox": [
+     6.77,
+     1.69,
+     9.77,
+     3.39
+    ],
+    "copper_center": [
+     8.27,
+     2.54
+    ],
+    "hole_center": null,
+    "number": "18"
+   },
+   {
+    "at": [
+     7.62,
+     0.0
+    ],
+    "copper_bbox": [
+     6.77,
+     -0.85,
+     9.77,
+     0.85
+    ],
+    "copper_center": [
+     8.27,
+     0.0
+    ],
+    "hole_center": null,
+    "number": "19"
+   },
+   {
+    "at": [
+     7.62,
+     -2.54
+    ],
+    "copper_bbox": [
+     6.77,
+     -3.39,
+     9.77,
+     -1.69
+    ],
+    "copper_center": [
+     8.27,
+     -2.54
+    ],
+    "hole_center": null,
+    "number": "20"
+   },
+   {
+    "at": [
+     7.62,
+     -5.08
+    ],
+    "copper_bbox": [
+     6.77,
+     -5.93,
+     9.77,
+     -4.23
+    ],
+    "copper_center": [
+     8.27,
+     -5.08
+    ],
+    "hole_center": null,
+    "number": "21"
+   },
+   {
+    "at": [
+     7.62,
+     -7.62
+    ],
+    "copper_bbox": [
+     6.77,
+     -8.47,
+     9.77,
+     -6.77
+    ],
+    "copper_center": [
+     8.27,
+     -7.62
+    ],
+    "hole_center": null,
+    "number": "22"
+   },
+   {
+    "at": [
+     7.62,
+     -10.16
+    ],
+    "copper_bbox": [
+     6.77,
+     -11.01,
+     9.77,
+     -9.31
+    ],
+    "copper_center": [
+     8.27,
+     -10.16
+    ],
+    "hole_center": null,
+    "number": "23"
+   }
+  ]
+ },
+ "R_0603_1608Metric": {
+  "models": [
+   {
+    "offset": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rotate": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  ],
+  "pads": [
+   {
+    "at": [
+     -0.825,
+     0.0
+    ],
+    "copper_bbox": [
+     -1.225,
+     -0.475,
+     -0.425,
+     0.475
+    ],
+    "copper_center": [
+     -0.825,
+     0.0
+    ],
+    "hole_center": null,
+    "number": "1"
+   },
+   {
+    "at": [
+     0.825,
+     0.0
+    ],
+    "copper_bbox": [
+     0.425,
+     -0.475,
+     1.225,
+     0.475
+    ],
+    "copper_center": [
+     0.825,
+     0.0
+    ],
+    "hole_center": null,
+    "number": "2"
+   }
+  ]
+ },
+ "SMA_Amphenol_132289_EdgeMount": {
+  "models": [
+   {
+    "offset": [
+     3.0,
+     0.0,
+     0.4
+    ],
+    "rotate": [
+     -90.0,
+     0.0,
+     180.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  ],
+  "pads": [
+   {
+    "at": [
+     0.15,
+     0.0
+    ],
+    "copper_bbox": [
+     -2.45,
+     -0.75,
+     2.75,
+     0.75
+    ],
+    "copper_center": [
+     0.15,
+     0.0
+    ],
+    "hole_center": null,
+    "number": "1"
+   },
+   {
+    "at": [
+     0.0,
+     4.25
+    ],
+    "copper_bbox": [
+     -2.45,
+     3.5,
+     2.45,
+     5.0
+    ],
+    "copper_center": [
+     0.0,
+     4.25
+    ],
+    "hole_center": null,
+    "number": "2"
+   },
+   {
+    "at": [
+     0.0,
+     -4.25
+    ],
+    "copper_bbox": [
+     -2.45,
+     -5.0,
+     2.45,
+     -3.5
+    ],
+    "copper_center": [
+     0.0,
+     -4.25
+    ],
+    "hole_center": null,
+    "number": "2"
+   },
+   {
+    "at": [
+     0.0,
+     -4.25
+    ],
+    "copper_bbox": [
+     -2.45,
+     -5.0,
+     2.45,
+     -3.5
+    ],
+    "copper_center": [
+     0.0,
+     -4.25
+    ],
+    "hole_center": null,
+    "number": "2"
+   },
+   {
+    "at": [
+     0.0,
+     4.25
+    ],
+    "copper_bbox": [
+     -2.45,
+     3.5,
+     2.45,
+     5.0
+    ],
+    "copper_center": [
+     0.0,
+     4.25
+    ],
+    "hole_center": null,
+    "number": "2"
+   }
+  ]
+ },
+ "USB_C_Receptacle_CNCTech_C-ARA1-AK51X": {
+  "models": [
+   {
+    "offset": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rotate": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  ],
+  "pads": [
+   {
+    "at": [
+     -2.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     -2.9,
+     -3.66,
+     -2.6,
+     -2.96
+    ],
+    "copper_center": [
+     -2.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A1"
+   },
+   {
+    "at": [
+     -2.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     -2.4,
+     -3.66,
+     -2.1,
+     -2.96
+    ],
+    "copper_center": [
+     -2.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A2"
+   },
+   {
+    "at": [
+     -1.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     -1.9,
+     -3.66,
+     -1.6,
+     -2.96
+    ],
+    "copper_center": [
+     -1.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A3"
+   },
+   {
+    "at": [
+     -1.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     -1.4,
+     -3.66,
+     -1.1,
+     -2.96
+    ],
+    "copper_center": [
+     -1.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A4"
+   },
+   {
+    "at": [
+     -0.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     -0.9,
+     -3.66,
+     -0.6,
+     -2.96
+    ],
+    "copper_center": [
+     -0.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A5"
+   },
+   {
+    "at": [
+     -0.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     -0.4,
+     -3.66,
+     -0.1,
+     -2.96
+    ],
+    "copper_center": [
+     -0.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A6"
+   },
+   {
+    "at": [
+     0.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     0.1,
+     -3.66,
+     0.4,
+     -2.96
+    ],
+    "copper_center": [
+     0.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A7"
+   },
+   {
+    "at": [
+     0.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     0.6,
+     -3.66,
+     0.9,
+     -2.96
+    ],
+    "copper_center": [
+     0.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A8"
+   },
+   {
+    "at": [
+     1.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     1.1,
+     -3.66,
+     1.4,
+     -2.96
+    ],
+    "copper_center": [
+     1.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A9"
+   },
+   {
+    "at": [
+     1.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     1.6,
+     -3.66,
+     1.9,
+     -2.96
+    ],
+    "copper_center": [
+     1.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A10"
+   },
+   {
+    "at": [
+     2.25,
+     -3.31
+    ],
+    "copper_bbox": [
+     2.1,
+     -3.66,
+     2.4,
+     -2.96
+    ],
+    "copper_center": [
+     2.25,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A11"
+   },
+   {
+    "at": [
+     2.75,
+     -3.31
+    ],
+    "copper_bbox": [
+     2.6,
+     -3.66,
+     2.9,
+     -2.96
+    ],
+    "copper_center": [
+     2.75,
+     -3.31
+    ],
+    "hole_center": null,
+    "number": "A12"
+   },
+   {
+    "at": [
+     2.8,
+     -2.2
+    ],
+    "copper_bbox": [
+     2.475,
+     -2.525,
+     3.125,
+     -1.875
+    ],
+    "copper_center": [
+     2.8,
+     -2.2
+    ],
+    "hole_center": [
+     2.8,
+     -2.2
+    ],
+    "number": "B1"
+   },
+   {
+    "at": [
+     2.4,
+     -1.3
+    ],
+    "copper_bbox": [
+     2.075,
+     -1.625,
+     2.725,
+     -0.975
+    ],
+    "copper_center": [
+     2.4,
+     -1.3
+    ],
+    "hole_center": [
+     2.4,
+     -1.3
+    ],
+    "number": "B2"
+   },
+   {
+    "at": [
+     1.6,
+     -1.3
+    ],
+    "copper_bbox": [
+     1.275,
+     -1.625,
+     1.925,
+     -0.975
+    ],
+    "copper_center": [
+     1.6,
+     -1.3
+    ],
+    "hole_center": [
+     1.6,
+     -1.3
+    ],
+    "number": "B3"
+   },
+   {
+    "at": [
+     1.2,
+     -2.2
+    ],
+    "copper_bbox": [
+     0.875,
+     -2.525,
+     1.525,
+     -1.875
+    ],
+    "copper_center": [
+     1.2,
+     -2.2
+    ],
+    "hole_center": [
+     1.2,
+     -2.2
+    ],
+    "number": "B4"
+   },
+   {
+    "at": [
+     0.8,
+     -1.3
+    ],
+    "copper_bbox": [
+     0.475,
+     -1.625,
+     1.125,
+     -0.975
+    ],
+    "copper_center": [
+     0.8,
+     -1.3
+    ],
+    "hole_center": [
+     0.8,
+     -1.3
+    ],
+    "number": "B5"
+   },
+   {
+    "at": [
+     0.4,
+     -2.2
+    ],
+    "copper_bbox": [
+     0.075,
+     -2.525,
+     0.725,
+     -1.875
+    ],
+    "copper_center": [
+     0.4,
+     -2.2
+    ],
+    "hole_center": [
+     0.4,
+     -2.2
+    ],
+    "number": "B6"
+   },
+   {
+    "at": [
+     -0.4,
+     -2.2
+    ],
+    "copper_bbox": [
+     -0.725,
+     -2.525,
+     -0.075,
+     -1.875
+    ],
+    "copper_center": [
+     -0.4,
+     -2.2
+    ],
+    "hole_center": [
+     -0.4,
+     -2.2
+    ],
+    "number": "B7"
+   },
+   {
+    "at": [
+     -0.8,
+     -1.3
+    ],
+    "copper_bbox": [
+     -1.125,
+     -1.625,
+     -0.475,
+     -0.975
+    ],
+    "copper_center": [
+     -0.8,
+     -1.3
+    ],
+    "hole_center": [
+     -0.8,
+     -1.3
+    ],
+    "number": "B8"
+   },
+   {
+    "at": [
+     -1.2,
+     -2.2
+    ],
+    "copper_bbox": [
+     -1.525,
+     -2.525,
+     -0.875,
+     -1.875
+    ],
+    "copper_center": [
+     -1.2,
+     -2.2
+    ],
+    "hole_center": [
+     -1.2,
+     -2.2
+    ],
+    "number": "B9"
+   },
+   {
+    "at": [
+     -1.6,
+     -1.3
+    ],
+    "copper_bbox": [
+     -1.925,
+     -1.625,
+     -1.275,
+     -0.975
+    ],
+    "copper_center": [
+     -1.6,
+     -1.3
+    ],
+    "hole_center": [
+     -1.6,
+     -1.3
+    ],
+    "number": "B10"
+   },
+   {
+    "at": [
+     -2.4,
+     -1.3
+    ],
+    "copper_bbox": [
+     -2.725,
+     -1.625,
+     -2.075,
+     -0.975
+    ],
+    "copper_center": [
+     -2.4,
+     -1.3
+    ],
+    "hole_center": [
+     -2.4,
+     -1.3
+    ],
+    "number": "B11"
+   },
+   {
+    "at": [
+     -2.8,
+     -2.2
+    ],
+    "copper_bbox": [
+     -3.125,
+     -2.525,
+     -2.475,
+     -1.875
+    ],
+    "copper_center": [
+     -2.8,
+     -2.2
+    ],
+    "hole_center": [
+     -2.8,
+     -2.2
+    ],
+    "number": "B12"
+   },
+   {
+    "at": [
+     -4.575,
+     2.0
+    ],
+    "copper_bbox": [
+     -5.05,
+     0.72,
+     -4.1,
+     3.0
+    ],
+    "copper_center": [
+     -4.575,
+     1.86
+    ],
+    "hole_center": [
+     -4.575,
+     2.0
+    ],
+    "number": "SH"
+   },
+   {
+    "at": [
+     -4.39,
+     -1.05
+    ],
+    "copper_bbox": [
+     -5.055,
+     -2.04,
+     -3.725,
+     -0.06
+    ],
+    "copper_center": [
+     -4.39,
+     -1.05
+    ],
+    "hole_center": [
+     -4.39,
+     -1.05
+    ],
+    "number": "SH"
+   },
+   {
+    "at": [
+     -4.295,
+     -3.03
+    ],
+    "copper_bbox": [
+     -4.77,
+     -3.93,
+     -3.82,
+     -2.13
+    ],
+    "copper_center": [
+     -4.295,
+     -3.03
+    ],
+    "hole_center": [
+     -4.295,
+     -3.03
+    ],
+    "number": "SH"
+   },
+   {
+    "at": [
+     -3.375,
+     -4.095
+    ],
+    "copper_bbox": [
+     -3.725,
+     -4.27,
+     -3.025,
+     -3.92
+    ],
+    "copper_center": [
+     -3.375,
+     -4.095
+    ],
+    "hole_center": null,
+    "number": "SH"
+   },
+   {
+    "at": [
+     3.375,
+     -4.095
+    ],
+    "copper_bbox": [
+     3.025,
+     -4.27,
+     3.725,
+     -3.92
+    ],
+    "copper_center": [
+     3.375,
+     -4.095
+    ],
+    "hole_center": null,
+    "number": "SH"
+   },
+   {
+    "at": [
+     4.295,
+     -3.03
+    ],
+    "copper_bbox": [
+     3.82,
+     -3.93,
+     4.77,
+     -2.13
+    ],
+    "copper_center": [
+     4.295,
+     -3.03
+    ],
+    "hole_center": [
+     4.295,
+     -3.03
+    ],
+    "number": "SH"
+   },
+   {
+    "at": [
+     4.39,
+     -1.05
+    ],
+    "copper_bbox": [
+     3.725,
+     -2.04,
+     5.055,
+     -0.06
+    ],
+    "copper_center": [
+     4.39,
+     -1.05
+    ],
+    "hole_center": [
+     4.39,
+     -1.05
+    ],
+    "number": "SH"
+   },
+   {
+    "at": [
+     4.575,
+     2.0
+    ],
+    "copper_bbox": [
+     4.1,
+     0.72,
+     5.05,
+     3.0
+    ],
+    "copper_center": [
+     4.575,
+     1.86
+    ],
+    "hole_center": [
+     4.575,
+     2.0
+    ],
+    "number": "SH"
+   }
+  ]
+ }
+}

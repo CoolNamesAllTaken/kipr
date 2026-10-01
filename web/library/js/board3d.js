@@ -5,7 +5,7 @@
 //   - copper pads (+ plated barrels) as real geometry from geom.json.
 // Every object is tagged with userData.group in {board, pads, silk, fab}.
 import {
-  BOARD_THICKNESS, COPPER_THICKNESS, toBoard, padOutline, padToPcb, padDrill, padCopperSides,
+  BOARD_THICKNESS, COPPER_THICKNESS, toBoard, padOutline, padToPcb, padDrill, padHoleCenter, padCopperSides,
 } from './kicad3d.js';
 import { imageSrc } from './util.js';
 
@@ -67,7 +67,7 @@ function drillRing(pad, segs = 24) {
     // stadium: two half circles joined by straight sides along the long axis
     const cx = Math.cos(a) >= 0 ? hx : -hx;
     const cy = Math.sin(a) >= 0 ? hy : -hy;
-    local.push([d.offset[0] + cx + r * Math.cos(a), d.offset[1] + cy + r * Math.sin(a)]);
+    local.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
   }
   return local.map((q) => toBoard(...padToPcb(pad, q)));
 }
@@ -210,7 +210,7 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
     }
     if (hole && pad.type === 'thru_hole') {
       const d = padDrill(pad);
-      const [cx, cy] = toBoard(...padToPcb(pad, d.offset));
+      const [cx, cy] = toBoard(...padHoleCenter(pad));
       const r = Math.min(d.w, d.h) / 2;
       const len = Math.max(d.w, d.h) - 2 * r;
       // round barrel (or stretched for slots) along board z

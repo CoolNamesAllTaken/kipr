@@ -224,15 +224,18 @@ class Footprint:
         if len(size) == 1:
             size = [size[0], size[0]]
         drill = None
+        offset = (0.0, 0.0)
         d = c.child("drill")
         if d is not None:
+            # (drill ... (offset x y)) is KiCad's pad *shape* offset: the copper sits at at+offset (in the
+            # pad's rotated frame), the hole stays at `at`. SMD pads carry it too, with no drill size.
+            offset = _xy(d.child("offset"))
             oval = "oval" in [str(v) for v in d.atoms()]
             nums = [float(v) for v in d.atoms() if _isnum(v)]
             if nums:
                 dx = nums[0]
                 dy = nums[1] if (oval and len(nums) > 1) else dx
-                off = _xy(d.child("offset"))
-                drill = dict(w=dx, h=dy, oval=oval, offset=off)
+                drill = dict(w=dx, h=dy, oval=oval)
         layers = expand_layers((c.child("layers") or Node()).atoms())
         prims = []
         pr = c.child("primitives")
@@ -265,7 +268,7 @@ class Footprint:
         chamfer = c.child("chamfer")
         return dict(
             number=str(c.arg(0, "")), type=str(c.arg(1, "")), shape=str(c.arg(2, "")),
-            x=x, y=y, angle=a, w=size[0], h=size[1], drill=drill, layers=layers,
+            x=x, y=y, angle=a, w=size[0], h=size[1], offset=offset, drill=drill, layers=layers,
             rratio=c.num("roundrect_rratio", 0.25), delta=c.nums("rect_delta") or [0.0, 0.0],
             chamfer_ratio=c.num("chamfer_ratio", 0.0),
             chamfer=[str(v) for v in chamfer.atoms()] if chamfer is not None else [],
@@ -472,15 +475,16 @@ def _graphic_bbox(g, bb: BBox):
 
 def _pad_bbox(p, bb: BBox):
     r = math.hypot(p["w"], p["h"]) / 2
+    ox, oy = p["offset"]
     pts = []
     for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-        pts.append(rot(sx * p["w"] / 2, sy * p["h"] / 2, p["angle"]))
+        pts.append(rot(ox + sx * p["w"] / 2, oy + sy * p["h"] / 2, p["angle"]))
     for prim in p["primitives"]:
         sub = BBox()
         _graphic_bbox(prim, sub)
         if sub.valid:
-            pts += [rot(sub.x0, sub.y0, p["angle"]), rot(sub.x1, sub.y1, p["angle"]),
-                    rot(sub.x0, sub.y1, p["angle"]), rot(sub.x1, sub.y0, p["angle"])]
+            pts += [rot(ox + x, oy + y, p["angle"]) for x, y in
+                    ((sub.x0, sub.y0), (sub.x1, sub.y1), (sub.x0, sub.y1), (sub.x1, sub.y0))]
     if not pts:
         bb.add(p["x"], p["y"], r)
     for dx, dy in pts:
@@ -559,6 +563,9 @@ def _graphic_svg(g, color, stroke_only=False, width=None) -> str:
 def _pad_svg(p, color, grow=0.0, opacity=None) -> str:
     tr = f"translate({f(p['x'])} {f(p['y'])})" + (f" rotate({f(-p['angle'])})" if p["angle"] else "")
     op = f' opacity="{f(opacity)}"' if opacity is not None else ""
+    ox, oy = p["offset"]
+    if ox or oy:
+        tr += f" translate({f(ox)} {f(oy)})"
     parts = [f'<path d="{_pad_shape_d(p, grow)}" fill="{color}"/>']
     for prim in p["primitives"]:
         g = dict(prim)
@@ -574,12 +581,11 @@ def _hole_svg(p) -> str:
     d = p["drill"]
     if not d:
         return ""
-    ox, oy = d["offset"]
     tr = f"translate({f(p['x'])} {f(p['y'])})" + (f" rotate({f(-p['angle'])})" if p["angle"] else "")
     ring = NPTH_RING if p["type"] == "np_thru_hole" else PTH_RING
     w, h = d["w"], d["h"]
     shape = _rrect_d(w, h, min(w, h) / 2)
-    return (f'<g transform="{tr}"><path transform="translate({f(ox)} {f(oy)})" d="{shape}" fill="{HOLE_FILL}" '
+    return (f'<g transform="{tr}"><path d="{shape}" fill="{HOLE_FILL}" '
             f'stroke="{ring}" stroke-width="{f(max(0.02, min(w, h) * 0.06))}"/></g>')
 
 
@@ -662,7 +668,8 @@ def pad_number_labels(fp: Footprint) -> list[str]:
         if s <= 0:
             continue
         size = min(s * 0.5, 1.0) / max(1, len(p["number"]) * 0.6)
-        out.append(text_el(p["number"], p["x"], p["y"], size, size, 0, "#FFFFFF", "middle", "center",
+        dx, dy = rot(*p["offset"], p["angle"])  # on the copper, which (drill (offset)) moves off `at`
+        out.append(text_el(p["number"], p["x"] + dx, p["y"] + dy, size, size, 0, "#FFFFFF", "middle", "center",
                            extra=' opacity="0.9"'))
     return out
 
@@ -751,8 +758,8 @@ def geom_json(fp: Footprint, vb) -> dict:
             "at": [round(p["x"], 4), round(p["y"], 4), round(p["angle"], 3)],
             "pos": [round(p["x"], 4), round(p["y"], 4)], "angle": round(p["angle"], 3),
             "size": [round(p["w"], 4), round(p["h"], 4)],
-            "drill": ({"shape": "oval" if d["oval"] else "circle", "size": [d["w"], d["h"]],
-                       "offset": list(d["offset"])} if d else None),
+            "offset": [round(v, 4) for v in p["offset"]],  # copper shape offset; the hole is at `at`
+            "drill": ({"shape": "oval" if d["oval"] else "circle", "size": [d["w"], d["h"]]} if d else None),
             "layers": p["layers"],
             "roundrect_rratio": p["rratio"] if p["shape"] == "roundrect" else None,
             "chamfer_ratio": p["chamfer_ratio"] or None, "chamfer": p["chamfer"] or None,
