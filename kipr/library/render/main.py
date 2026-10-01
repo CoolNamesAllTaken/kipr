@@ -26,6 +26,7 @@ from kipr.common.sexpr import dumps, parse
 
 from .. import layout as layoutmod
 from . import fp as fpmod
+from . import reencode
 from . import sym as symmod
 
 MODEL_EXTS = (".step", ".stp", ".wrl", ".STEP", ".STP", ".WRL")
@@ -318,6 +319,7 @@ class Renderer:
                                             max_total_mb=args.stock_max_total_mb,
                                             cache_dir=args.stock_models_dir)
         self._model_n = 0
+        self.upgrader = None
         self.tmpdir = tempfile.mkdtemp(prefix="kipr_render_")
         try:
             import cairosvg  # noqa: F401
@@ -405,6 +407,7 @@ class Renderer:
             self._footprint(it, entry, d, rel)
         else:
             self._symbol(it, entry, d, rel)
+        self._reencode(it, entry, d)
         # datasheet
         props = entry["properties"]["head"] or entry["properties"]["base"] or {}
         ds = props.get("Datasheet", "")
@@ -425,6 +428,42 @@ class Renderer:
                 write(p, blob)
                 entry["datasheet"]["file"] = rel(p)
         return entry
+
+    # -- re-encode detection ---------------------------------------------------------
+    def _reencode(self, it: Item, entry, d):
+        """Is a 'modified' item only re-encoded by a newer KiCad? (kipr.library.render.reencode)"""
+        if self.upgrader is None or it.status != "modified" or it.base_node is None or it.head_node is None:
+            return
+        if it.reasons or it.model_changed_paths:
+            return  # changed for another reason (parent symbol, 3D model file): stays modified
+        try:
+            if it.kind == "symbol":
+                res = reencode.classify_symbol(it.name, it.base_root, it.base_lib, it.head_root, it.head_lib,
+                                               it.base_text, self.upgrader, head_text=it.head_text,
+                                               render_identical=lambda: self._pixels_identical(d))
+            else:
+                res = reencode.classify_footprint(it.path, it.base_node, it.head_node, it.base_text, self.upgrader)
+        except Exception as e:  # never let the check turn into a verdict
+            log(traceback.format_exc())
+            it.warnings.append(f"re-encode check failed: {e}")
+            return
+        entry["reencode"] = res
+        if res["reencoded"]:
+            entry["status"] = "re-encoded"
+
+    @staticmethod
+    def _pixels_identical(d) -> bool | None:
+        """True if the base and head PNGs of an item are pixel identical (None: can't tell)."""
+        a, b = os.path.join(d, "base.png"), os.path.join(d, "head.png")
+        if not (os.path.isfile(a) and os.path.isfile(b)):
+            return None
+        try:
+            import numpy as np
+            from PIL import Image
+            x, y = np.asarray(Image.open(a).convert("RGBA")), np.asarray(Image.open(b).convert("RGBA"))
+        except Exception:
+            return None
+        return x.shape == y.shape and bool((x == y).all())
 
     # -- footprints ---------------------------------------------------------------
     def _footprint(self, it: Item, entry, d, rel):
@@ -742,6 +781,33 @@ class Renderer:
             entry["footprint_ref"] = fpref
 
 
+def reencoded_files(items: list[Item], entries: list[dict]) -> list[dict]:
+    """Library files whose format version changed (re-saved by another KiCad), with their parts."""
+    out: dict[str, dict] = {}
+    for it, e in zip(items, entries):
+        broot = it.base_root if it.kind == "symbol" else it.base_node
+        hroot = it.head_root if it.kind == "symbol" else it.head_node
+        bv, hv = reencode.file_version(broot), reencode.file_version(hroot)
+        if broot is None or hroot is None or bv == hv:
+            continue
+        f = out.setdefault(it.path, {
+            "path": it.path, "kind": it.kind, "library": it.library,
+            "base_format": bv, "head_format": hv,
+            "base_generator_version": reencode.generator_version(broot),
+            "head_generator_version": reencode.generator_version(hroot),
+            "reencoded": [], "modified": []})
+        if e.get("status") == "re-encoded":
+            f["reencoded"].append(e["id"])
+        elif e.get("status") == "modified":
+            f["modified"].append(e["id"])
+    for f in out.values():
+        old = f"KiCad {f['base_generator_version']}" if f["base_generator_version"] else "an older KiCad"
+        new = f"KiCad {f['head_generator_version']}" if f["head_generator_version"] else "a newer KiCad"
+        f["note"] = (f"{f['path'].rsplit('/', 1)[-1]} was re-saved by a newer KiCad "
+                     f"(format {f['base_format']} → {f['head_format']}, {old} → {new})")
+    return list(out.values())
+
+
 def kicad_version(items: list[Item]) -> str:
     for it in items:
         for node in (it.head_root, it.head_node):
@@ -774,9 +840,12 @@ def add_arguments(ap):
     ap.add_argument("--glb-max-mb", type=float, default=5.0, help="re-tessellate coarser above this size")
     ap.add_argument("--use-kicad-cli", action="store_true",
                     help="(optional) also export reference SVGs with kicad-cli if it is on PATH")
+    ap.add_argument("--no-reencode-check", action="store_true",
+                    help="don't tell KiCad re-encodes from edits (see docs/library.md); every changed part "
+                         "is then 'modified'")
     ap.add_argument("--clean", action="store_true", help="delete OUT/items before writing")
-    ap.add_argument("--kicad-cli", default=None, help="kicad-cli for --use-kicad-cli (default: $KIPR_KICAD_CLI, "
-                    "$KICAD_CLI or PATH)")
+    ap.add_argument("--kicad-cli", default=None, help="kicad-cli for --use-kicad-cli and the re-encode check "
+                    "(default: $KIPR_KICAD_CLI, $KICAD_CLI or PATH)")
     layoutmod.add_arguments(ap)
 
 
@@ -806,6 +875,11 @@ def run(args):
     log(f"{len(items)} changed items between {merge_base[:10]} and {head_sha[:10]}")
     r = Renderer(args, git, merge_base, head_sha, out)
     r.changed_models = changed_models
+    if not getattr(args, "no_reencode_check", False):
+        from kipr.common import kicad_cli as kicad_cli_mod
+        r.upgrader = reencode.Upgrader(kicad_cli_mod.find(getattr(args, "kicad_cli", None)))
+        log("re-encode check: " + (f"reference upgrade with kicad-cli {r.upgrader.version}" if r.upgrader.available
+                                   else "no kicad-cli; symbols by semantic comparison + renders, footprints stay modified"))
     entries = []
     for it in items:
         t = time.time()
@@ -838,6 +912,7 @@ def run(args):
         "generator": "kipr library render (built-in SVG renderer)",
         "changed_3d_files": sorted(changed_models),
         "unreferenced_changed_3d_files": sorted(changed_models - referenced_models(git, head_sha)),
+        "reencoded_files": reencoded_files(items, entries),
         "items": entries,
     }
     write(os.path.join(out, "manifest.json"), json.dumps(manifest, indent=2, ensure_ascii=False))

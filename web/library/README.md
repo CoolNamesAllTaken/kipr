@@ -46,6 +46,11 @@ about 100 KB. Files over 50 MB are left out of the packs (the 3D view then asks 
 
 - **Sidebar:** items grouped by kind, with status badge (added/modified/deleted), verdict badge and a filter box
   (`/` focuses it, `j`/`k` move between items). Each item has a deep link, `#<slug>`, for PR comments.
+- **Re-encoded parts** (status `re-encoded`: only re-saved by a newer KiCad, see docs/library.md): collapsed per
+  kind at the bottom of the sidebar ("3 re-encoded by KiCad, no changes", open when one of them is shown or the
+  filter says `re-enc`), left out of the overview's counts and table, and listed with the library notes in a
+  collapsed overview card. Their page explains the verdict and still has every view and the raw text diff. A
+  modified part in a re-saved file gets a "Changed beyond the file format upgrade" card listing the differences.
 - **Header:** repo / PR link, base → head commits, generation time, KiCad version, a PR-level findings chip and what produced the
   checks (`review.json` `generator`). The overview (`#`) shows the summary, PR-level findings and a table of all items.
 - **2D view:**

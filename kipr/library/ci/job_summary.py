@@ -17,7 +17,8 @@ import sys
 from pathlib import Path
 
 from .common import (SEVERITY_RANK, finding_line_no, findings_of, item_review, klc_not_checked, load_site,
-                     md_inline, overall_verdict, safe_http_url, safe_repo_path, verdict_of)
+                     md_inline, overall_verdict, reencoded_file_notes, reencoded_summary, safe_http_url,
+                     safe_repo_path, verdict_of)
 
 MAX_ANNOTATIONS = 50        # GitHub's per-job cap
 MAX_SUMMARY = 900_000       # the step summary limit is 1 MiB
@@ -82,7 +83,12 @@ def summary(site: Path, manifest, review, links: list[tuple[str, str]]) -> str:
              + (f" · verdicts: {verdicts.count('fail')} fail, {verdicts.count('warn')} warn, "
                 f"{verdicts.count('pass')} pass" if review else "")
              + f" · findings: {sev['error']} error(s), {sev['warning']} warning(s), {sev['info']} info"
-             + (f" · **KLC could not check {n_klc} item(s)**" if n_klc else ""), ""]
+             + (f" · **KLC could not check {n_klc} item(s)**" if n_klc else "")
+             + (f" · not counted: {md_inline(reencoded_summary(manifest), 120)}" if manifest.get("reencoded_items") else ""),
+             ""]
+    lines += [f"> {md_inline(n, 300)}" for n in reencoded_file_notes(manifest)[:20]]
+    if reencoded_file_notes(manifest):
+        lines.append("")
     good = [(n, safe_http_url(u)) for n, u in links]
     good = [(n, u) for n, u in good if u]
     if good:

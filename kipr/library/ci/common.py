@@ -25,6 +25,7 @@ REPO_RE = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
 REPO_PATH_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9 ._+,()@#=&'-][A-Za-z0-9 ._+,()@#=&'/-]{0,300}$")
 
 VERDICT_RANK = {"pass": 0, "warn": 1, "fail": 2}
+REENCODED = "re-encoded"     # manifest status: only re-saved by a newer KiCad, no content change
 SEVERITY_RANK = {"info": 0, "warning": 1, "error": 2}
 
 
@@ -167,18 +168,51 @@ def load_json(path: Path, max_bytes: int = 20_000_000):
 
 
 def load_site(site: Path):
-    """(manifest, review) from a site dir; manifest items normalized to a list of dicts."""
+    """(manifest, review) from a site dir; manifest items normalized to a list of dicts.
+
+    Parts the render step found only re-encoded by a newer KiCad (status ``re-encoded``) are moved
+    from ``items`` to ``reencoded_items``: they are not changes, so nothing counts, annotates or
+    rates them. ``reencoded_files`` is normalized to a list of dicts."""
     manifest = load_json(site / "manifest.json")
     if not isinstance(manifest, dict):
         manifest = {"items": []}
     items = manifest.get("items")
-    manifest["items"] = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+    items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+    manifest["items"] = [i for i in items if i.get("status") != REENCODED]
+    manifest["reencoded_items"] = [i for i in items if i.get("status") == REENCODED]
+    files = manifest.get("reencoded_files")
+    manifest["reencoded_files"] = [f for f in files if isinstance(f, dict)] if isinstance(files, list) else []
     review = load_json(site / "review.json")
     if not isinstance(review, dict):
         review = None
     elif not isinstance(review.get("items"), dict):
         review["items"] = {}
     return manifest, review
+
+
+def reencoded_summary(manifest) -> str:
+    """'3 symbols re-encoded by KiCad, no changes' (plain text; empty if there are none)."""
+    kinds: dict[str, int] = {}
+    for i in manifest.get("reencoded_items") or []:
+        k = i.get("kind") if i.get("kind") in ("symbol", "footprint") else "part"
+        kinds[k] = kinds.get(k, 0) + 1
+    if not kinds:
+        return ""
+    what = " and ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted(kinds.items()))
+    return f"{what} re-encoded by KiCad, no changes"
+
+
+def reencode_explanation(item: dict) -> str:
+    """The render step's one-line explanation for a re-encoded part (untrusted text: escape it)."""
+    r = item.get("reencode")
+    e = r.get("explanation") if isinstance(r, dict) else None
+    return e if isinstance(e, str) else "re-saved by a newer KiCad; no content change"
+
+
+def reencoded_file_notes(manifest) -> list[str]:
+    """Library-level notes, e.g. 'X.kicad_sym was re-saved by a newer KiCad (…)' (untrusted text)."""
+    return [f["note"] for f in manifest.get("reencoded_files") or []
+            if isinstance(f, dict) and isinstance(f.get("note"), str)]
 
 
 def item_review(review, item_id) -> dict:
