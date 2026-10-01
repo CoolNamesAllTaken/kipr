@@ -39,6 +39,10 @@ on:
         description: re-run the official KLC checker (fetched fresh at the pinned commit, ~1 s)
         type: boolean
         default: true
+      klc-ignore:
+        description: KLC checker rules to ignore, comma-separated (e.g. "F7.2"); use the same value as library-review.yml
+        type: string
+        default: ""
       pages-url:
         description: viewer base URL (default https://<owner>.github.io/<repo>/)
         type: string
@@ -124,6 +128,7 @@ jobs:
         if: steps.pr.outputs.skip == 'false'
         env:
           KLC: ${{ inputs.klc }}
+          CR_KLC_IGNORE: ${{ inputs.klc-ignore }}   # read by `kipr library checks`
           LIB_3D: ${{ inputs.lib-3d }}
           CR_PAGES_URL: ${{ inputs.pages-url }}
           PR_NUMBER: ${{ steps.pr.outputs.pr }}

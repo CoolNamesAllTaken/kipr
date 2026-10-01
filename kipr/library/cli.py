@@ -54,6 +54,8 @@ def run_all_parser() -> argparse.ArgumentParser:
     g.add_argument("--klc-utils", default=os.environ.get("CR_KLC_UTILS"),
                    help="kicad-library-utils checkout: also run KiCad's KLC checkers "
                         "(see `kipr library ci fetch-klc-utils`)")
+    g.add_argument("--klc-ignore", action="append", default=[], metavar="RULE[,RULE...]",
+                   help="KLC checker rules to ignore, e.g. F7.2 (repeatable; also CR_KLC_IGNORE)")
     g.add_argument("--site-url", default=os.environ.get("CR_SITE_URL"), help="viewer URL to link from review.md")
     g.add_argument("--no-offline", action="store_true", help="viewer without the file:// support files")
     g.add_argument("--report", type=Path, default=None,
@@ -82,6 +84,7 @@ def run_all(argv) -> int:
     if "checks" not in args.skip:
         a = checks.parse_args(["--out", str(out), "--lib-3d", args.lib_3d]
                               + (["--klc-utils", args.klc_utils] if args.klc_utils else [])
+                              + [a for r in args.klc_ignore for a in ("--klc-ignore", r)]
                               + (["--site-url", args.site_url] if args.site_url else []))
         if checks.run(a):
             failed.append("checks")

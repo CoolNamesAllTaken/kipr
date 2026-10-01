@@ -66,6 +66,25 @@ FP_BAD = """(footprint "Bad"
 )
 """
 
+# THT, origin at the part centroid (between the pads) rather than on pad 1: KLC F7.2
+FP_THT_CENTROID = """(footprint "PinHeader_1x02_P2.54mm_Vertical"
+	(version 20260206)
+	(generator "pcbnew")
+	(layer "F.Cu")
+	(descr "Through hole pin header, 1x02, 2.54mm pitch")
+	(tags "Through hole pin header THT 1x02 2.54mm")
+	(property "Reference" "REF**" (at 0 -2.8 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+	(property "Value" "PinHeader_1x02_P2.54mm_Vertical" (at 0 2.8 0) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+	(attr through_hole)
+	(fp_rect (start -1.27 -2.54) (end 1.27 2.54) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+	(fp_rect (start -1.8 -3.05) (end 1.8 3.05) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+	(fp_rect (start -1.33 -2.6) (end 1.33 2.6) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+	(fp_text user "${REFERENCE}" (at 0 0 90) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+	(pad "1" thru_hole rect (at 0 -1.27) (size 1.7 1.7) (drill 1) (layers "*.Cu" "*.Mask"))
+	(pad "2" thru_hole oval (at 0 1.27) (size 1.7 1.7) (drill 1) (layers "*.Cu" "*.Mask"))
+)
+"""
+
 SYM = """(kicad_symbol_lib
 	(version 20251024)
 	(generator "kicad_symbol_editor")
@@ -202,6 +221,50 @@ class KlcUtilsTests(unittest.TestCase):
         self.assertIn("Missing courtyard", f[1]["message"])
         self.assertTrue(all("3dshapes" not in x["message"] for x in f))
 
+    JUNIT_F72 = """<testsuites><testsuite name="Footprint KLC Checks">
+<testcase name="X - Errors"><failure message="F7.2" type="FAILURE">F7.2: For through-hole components, footprint anchor is set on pad 1
+    https://klc.kicad.org/footprint/f7/f7.2/
+    Pad '1' not located at origin
+     - Set origin to location of Pad '1'</failure>
+<failure message="F5.3" type="FAILURE">F5.3: Courtyard layer requirements
+    https://klc.kicad.org/footprint/f5/f5.3/
+    Missing courtyard</failure></testcase>
+</testsuite></testsuites>"""
+
+    def test_parse_ignore(self):
+        self.assertEqual(klc_utils.parse_ignore(""), ())
+        self.assertEqual(klc_utils.parse_ignore(None), ())
+        self.assertEqual(klc_utils.parse_ignore(["f7.2, S4.1", "F7_2", " G1.07 "]), ("F7.2", "G1.7", "S4.1"))
+        for bad in ("F7", "7.2", "F7.2.1", "Pad1", "F7.2;rm"):
+            with self.assertRaises(ValueError, msg=bad):
+                klc_utils.parse_ignore(bad)
+
+    def test_parse_junit_ignore(self):
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(self.JUNIT_F72)
+        f = klc_utils.parse_junit(root)
+        self.assertEqual([x["message"].split(":")[0] for x in f], ["KLC F7.2", "KLC F5.3"])
+        self.assertIn("Pad '1' not located at origin", f[0]["message"])
+        ignored = []
+        f = klc_utils.parse_junit(root, ("F7.2",), ignored)
+        self.assertEqual([x["message"].split(":")[0] for x in f], ["KLC F5.3"])
+        self.assertEqual(ignored, ["F7.2"])
+        self.assertFalse(any("origin" in x["message"] for x in f))
+
+    @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
+    def test_real_checker_ignore_f72(self):
+        args = (os.environ["CR_KLC_UTILS"], "footprint", "Custom_Connector", "PinHeader_1x02_P2.54mm_Vertical",
+                FP_THT_CENTROID)
+        f, err = klc_utils.run(*args)
+        self.assertIsNone(err)
+        self.assertTrue(any("KLC F7.2" in x["message"] and "not located at origin" in x["message"] for x in f), f)
+        ignored = []
+        g, err = klc_utils.run(*args, ignore=("F7.2",), ignored=ignored)
+        self.assertIsNone(err)
+        self.assertEqual(ignored, ["F7.2"])
+        self.assertFalse(any("F7.2" in x["message"] or "origin" in x["message"] for x in g), g)
+        self.assertEqual(len(g), len(f) - 1)   # everything else stays
+
     @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
     def test_real_checker(self):
         path = os.path.join(FIXTURES, "lib_fp/Custom_Package_SO.pretty/SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm.kicad_mod")
@@ -229,11 +292,35 @@ class SymbolCheckTests(unittest.TestCase):
         self.assertIn("Description` property is empty", msgs)
         self.assertIn("Pin 2 (OUT) at (5.1, 1.27) is off the 50 mil grid", msgs)
         self.assertIn("Pin 2 (X) at (5.08, -1.27) is on 50 mil but not 100 mil grid", msgs)
+        grid = {x["message"].split(" at ")[0]: x["severity"] for x in f if "grid" in x["message"]}
+        self.assertEqual(grid, {"Pin 2 (OUT)": "error", "Pin 2 (X)": "error"})
         self.assertIn("Pin number 2 is used by 2 pins", msgs)
         self.assertIn("Power pin 3 (VDD) is hidden", msgs)
         # line mapping: symbol opens at source line 4 -> file line 50
         hidden = next(x for x in f if "hidden" in x["message"])
         self.assertEqual(hidden["line"], 50 + (SYM.splitlines().index(next(l for l in SYM.splitlines() if '"VDD"' in l)) + 1) - 4)
+
+    def test_pin_grid(self):
+        def grid(*xy):
+            pins = "".join(f'(pin passive line (at {x} {y} 0) (length 2.54) (name "P{i}") (number "{i}"))'
+                           for i, (x, y) in enumerate(xy, 1))
+            text = SYM.replace(SYM[SYM.index("\t\t(symbol \"AMP1_1_1\""):SYM.index("\t)\n)")],
+                               f'\t\t(symbol "AMP1_1_1" {pins})\n')
+            sym = kc.find_item_node(sexpr.parse(text), "symbol", "AMP1")
+            f, c = kc.check_symbol(sym, kc.LineMap(sym.line, 1))
+            return ([(x["severity"], x["message"]) for x in f if "grid" in x["message"]],
+                    next(x for x in c if x["name"] == "Pins on 100 mil grid"))
+
+        found, chk = grid((0, 0), (-5.08, 2.54), (7.62, -10.16))   # all on 100 mil
+        self.assertEqual(found, [])
+        self.assertEqual(chk["result"], "pass")
+        found, chk = grid((0, 0), (1.27, 0), (2.54, -3.81))        # 50 mil only: errors (KLC S4.1)
+        self.assertEqual([s for s, _ in found], ["error", "error"])
+        self.assertIn("Pin 2 (P2) at (1.27, 0.0) is on 50 mil but not 100 mil grid.", [m for _, m in found])
+        self.assertEqual((chk["result"], chk["detail"]), ("fail", "2, 3"))
+        found, chk = grid((0.5, 0),)                                  # off 50 mil: still an error
+        self.assertEqual(found, [("error", "Pin 1 (P1) at (0.5, 0.0) is off the 50 mil grid.")])
+        self.assertEqual(chk["result"], "fail")
 
     def test_pairing(self):
         sym = kc.find_item_node(sexpr.parse(SYM), "symbol", "AMP1")
@@ -325,6 +412,65 @@ class EndToEndTests(unittest.TestCase):
                 self.assertTrue(f["line"] is None or isinstance(f["line"], int))
             for c in e["checks"]:
                 self.assertIn(c["result"], ("pass", "fail", "unknown"))
+
+    def _canned_klc(self, *extra, env=None):
+        """Run the stage with a stand-in KLC checker that reports F7.2 + F5.3 for every footprint."""
+        import xml.etree.ElementTree as ET
+        from unittest import mock
+
+        def fake_run(klu_dir, kind, library, name, text, ignore=(), ignored=None):
+            if kind != "footprint":
+                return [], None
+            return klc_utils.parse_junit(ET.fromstring(KlcUtilsTests.JUNIT_F72), ignore, ignored), None
+
+        with mock.patch.object(cr.klc_utils, "available", lambda d: bool(d)), \
+             mock.patch.object(cr.klc_utils, "run", fake_run), \
+             mock.patch.dict(os.environ, env or {}, clear=False):
+            rc = cr.run(self.args("--klc-utils", "/fake", *extra))
+        return rc, (self.load() if rc == 0 else None)
+
+    def test_klc_ignore(self):
+        fp = "footprint:Custom_Test:R_0603_1608Metric"
+        os.environ.pop("CR_KLC_IGNORE", None)
+        rc, before = self._canned_klc()
+        self.assertEqual(rc, 0)
+        self.assert_contract(before)
+        msgs = [f["message"] for f in before["items"][fp]["findings"]]
+        self.assertTrue(any("Pad '1' not located at origin" in m for m in msgs))
+        self.assertEqual(before["klc_ignored"], [])
+        self.assertNotIn("ignored by configuration", before["summary_markdown"])
+
+        for extra, env in ((["--klc-ignore", "f7.2"], None), ([], {"CR_KLC_IGNORE": "F7.2"})):
+            rc, after = self._canned_klc(*extra, env=env)
+            self.assertEqual(rc, 0)
+            self.assert_contract(after)
+            e = after["items"][fp]
+            msgs = [f["message"] for f in e["findings"]]
+            self.assertFalse(any("origin" in m or "F7.2" in m for m in msgs), msgs)
+            self.assertTrue(any("KLC F5.3" in m for m in msgs))           # other KLC findings remain
+            self.assertEqual(len(e["findings"]), len(before["items"][fp]["findings"]) - 1)
+            self.assertEqual(after["klc_ignored"], ["F7.2"])
+            self.assertIn("1 KLC rule(s) ignored by configuration (F7.2; 1 violation(s) suppressed)",
+                          after["summary_markdown"])
+            chk = next(c for c in e["checks"] if c["name"].startswith("KiCad KLC checker"))
+            self.assertEqual((chk["result"], chk["detail"]), ("fail", "1 violation(s); ignored by configuration: F7.2"))
+            md = open(os.path.join(self.out, "review.md")).read()
+            self.assertNotIn("not located at origin", md)
+
+        # ignoring every rule that fired: the KLC check passes and no longer drives the verdict
+        rc, both = self._canned_klc("--klc-ignore", "F7.2", "--klc-ignore", "F5.3")
+        e = both["items"][fp]
+        self.assertFalse(any(f["message"].startswith("KLC ") for f in e["findings"]))
+        self.assertEqual(next(c for c in e["checks"] if c["name"].startswith("KiCad KLC"))["result"], "pass")
+        self.assertIn("2 KLC rule(s) ignored by configuration (F5.3, F7.2; 2 violation(s) suppressed)",
+                      both["summary_markdown"])
+        self.assertEqual(e["verdict"], "pass")
+        self.assertEqual(before["items"][fp]["verdict"], "warn")
+
+    def test_klc_ignore_invalid(self):
+        rc, _ = self._canned_klc("--klc-ignore", "origin")
+        self.assertEqual(rc, 2)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "review.json")))
 
     def test_checks(self):
         self.assertEqual(cr.run(self.args()), 0)

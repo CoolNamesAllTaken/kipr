@@ -3,10 +3,11 @@
 Reads OUT/manifest.json (written by the render step) plus per-item assets and
 writes OUT/review.json and OUT/review.md (see docs/library.md).
 
-  kipr library checks --out cr-out [--repo .] [--klc-utils DIR] [--site-url URL]
+  kipr library checks --out cr-out [--repo .] [--klc-utils DIR [--klc-ignore F7.2,...]] [--site-url URL]
 
 Runs the KLC-style rules in kicad_checks.py and, with --klc-utils, KiCad's
-official KLC checkers. No network access and no secrets are needed.
+official KLC checkers (minus the rules in --klc-ignore). No network access and
+no secrets are needed.
 
 OUT must be self-contained (the privileged CI job has no PR checkout), so
 everything is read from OUT; --repo is optional extra context. Nothing from
@@ -105,6 +106,7 @@ class Item:
         self.pads: list[dict] = []
         self.pins: list[dict] = []
         self.paired: list[tuple[Item, bool]] = []  # (other item, exact match?)
+        self.klc_ignored: list[str] = []  # KLC rules that fired but are ignored by configuration
 
     def _load_source(self, out_dir, repo):
         src = (self.raw.get("source") or {}).get("head")
@@ -130,7 +132,8 @@ class Item:
         self.findings.extend(fs)
         self.checks.extend(cs)
 
-    def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D):
+    def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D,
+                klc_ignore=()):
         if self.status == "deleted":
             return
         if self.node is None:
@@ -152,9 +155,13 @@ class Item:
             fs, cs = kc.check_symbol(self.node, self.linemap)
         self.add(fs, cs)
         if klc_utils.available(klu_dir):
-            kfs, err = klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text)
+            kfs, err = klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text,
+                                     klc_ignore, self.klc_ignored)
+            detail = err or f"{len(kfs)} violation(s)"
+            if self.klc_ignored and not err:
+                detail += f"; ignored by configuration: {', '.join(self.klc_ignored)}"
             self.add(kfs, [kc.check("KiCad KLC checker (kicad-library-utils)",
-                                    "unknown" if err else ("fail" if kfs else "pass"), err or f"{len(kfs)} violation(s)")])
+                                    "unknown" if err else ("fail" if kfs else "pass"), detail)])
         for w in self.raw.get("warnings") or []:
             self.add([kc.finding("info", f"Render: {w}")])
 
@@ -285,6 +292,9 @@ def add_arguments(ap):
     ap.add_argument("--site-url", default=os.environ.get("CR_SITE_URL"), help="viewer URL to link from review.md")
     ap.add_argument("--klc-utils", default=os.environ.get("CR_KLC_UTILS"),
                     help="path to a kicad-library-utils checkout; runs its KLC checkers too (optional)")
+    ap.add_argument("--klc-ignore", action="append", default=[], metavar="RULE[,RULE...]",
+                    help="KLC checker rules to ignore, e.g. F7.2 (repeatable; also CR_KLC_IGNORE). "
+                         "Ignored rules produce no findings and don't count toward the verdict")
     ap.add_argument("--only", action="append", help="only check item ids matching this substring (repeatable)")
     # accepted and ignored so older callers keep working
     ap.add_argument("--no-llm", "--no-download", action="store_true", help=argparse.SUPPRESS)
@@ -317,9 +327,14 @@ def run(args) -> int:
     if args.klc_utils and not klu_dir:
         print(f"checks: warning: --klc-utils {args.klc_utils} is not a kicad-library-utils checkout; skipping KLC checker",
               file=sys.stderr)
+    try:
+        klc_ignore = klc_utils.parse_ignore([os.environ.get("CR_KLC_IGNORE", ""), *(args.klc_ignore or [])])
+    except ValueError as e:
+        print(f"checks: --klc-ignore: {e}", file=sys.stderr)
+        return 2
     models_dir = layoutmod.Layout(models=getattr(args, "lib_3d", layoutmod.DEFAULT_3D)).models
     for it in items:
-        it.analyse(repo, klu_dir, models_dir)
+        it.analyse(repo, klu_dir, models_dir, klc_ignore)
     pr_findings = [
         {"severity": "warning", "category": "3d-model", "path": p, "line": None,
          "message": f"3D model file `{p}` is added/changed in this PR but no footprint references it.",
@@ -334,10 +349,16 @@ def run(args) -> int:
     summary = [f"Reviewed **{len(items)}** item(s): {n['fail']} fail, {n['warn']} warn, {n['pass']} pass."]
     if not klu_dir:
         summary.append("The KiCad KLC checker (kicad-library-utils) was not run.")
+    elif klc_ignore:
+        hits = sum(len(it.klc_ignored) for it in items)
+        summary.append(f"{len(klc_ignore)} KLC rule(s) ignored by configuration ({', '.join(klc_ignore)}; "
+                       f"{hits} violation(s) suppressed).")
     if pr_findings:
         summary.append(f"{len(pr_findings)} PR-level finding(s) (unreferenced 3D model files).")
     review = {"schema": 1, "generator": GENERATOR if klu_dir else "deterministic checks", "generated_at": _now(),
               "summary_markdown": " ".join(summary), "items": review_items,
+              # additive: KLC checker rules ignored by configuration (--klc-ignore)
+              "klc_ignored": list(klc_ignore) if klu_dir else [],
               # additive to the contract: findings not tied to one item
               "pr_findings": pr_findings}
 

@@ -6,6 +6,12 @@ The checkers derive the expected name from the file name/dir, so each item's
 standalone source is copied into `<Library>.pretty/<name>.kicad_mod` /
 `<Library>.kicad_sym` in a temp dir first. Output is read from the JUnit report.
 They only parse the files (nothing from OUT is executed).
+
+Whole rules can be ignored by configuration (`--klc-ignore F7.2,...`, see parse_ignore): an
+ignored rule produces no finding and doesn't count toward the verdict. For example a library
+that puts every footprint origin at the part centroid (for pick-and-place) ignores F7.2 ("For
+through-hole components, footprint anchor is set on pad 1"; message "Pad '1' not located at
+origin"). F7.2 checks nothing but the anchor, so ignoring the whole rule loses nothing else.
 """
 
 from __future__ import annotations
@@ -34,12 +40,36 @@ _IGNORE = (
 _SOFT = re.compile(r"3D model (offset|rotation|name) is|More than one 3D model|anchor does not match", re.I)
 
 
+_RULE_RE = re.compile(r"^([A-Z])(\d+)[._](\d+)$")
+
+
+def parse_ignore(values) -> tuple[str, ...]:
+    """Normalise `--klc-ignore` values ("F7.2,S3.1", "f7_2", repeatable) to sorted rule ids.
+
+    Raises ValueError on anything that is not a KLC rule id (letter, number, dot, number)."""
+    if isinstance(values, str):
+        values = [values]
+    out = set()
+    for v in values or ():
+        for tok in re.split(r"[,\s]+", v or ""):
+            if not tok:
+                continue
+            m = _RULE_RE.match(tok.upper())
+            if not m:
+                raise ValueError(f"not a KLC rule id: {tok!r} (expected e.g. F7.2)")
+            out.add(f"{m.group(1)}{int(m.group(2))}.{int(m.group(3))}")
+    return tuple(sorted(out))
+
+
 def available(klu_dir: str | None) -> bool:
     return bool(klu_dir) and os.path.isfile(os.path.join(klu_dir, "klc-check", "check_footprint.py"))
 
 
-def run(klu_dir: str, kind: str, library: str, name: str, source_text: str) -> tuple[list[dict], str | None]:
-    """Return (findings, error_note). Findings use category "klc", line None."""
+def run(klu_dir: str, kind: str, library: str, name: str, source_text: str,
+        ignore=(), ignored: list[str] | None = None) -> tuple[list[dict], str | None]:
+    """Return (findings, error_note). Findings use category "klc", line None.
+
+    Violations of rules in `ignore` are dropped; their rule ids are appended to `ignored`."""
     script = "check_footprint.py" if kind == "footprint" else "check_symbol.py"
     with tempfile.TemporaryDirectory(prefix="cr-klc-") as tmp:
         safe_lib = re.sub(r"[^A-Za-z0-9._-]", "_", library) or "lib"
@@ -70,10 +100,10 @@ def run(klu_dir: str, kind: str, library: str, name: str, source_text: str) -> t
             root = ET.parse(junit).getroot()
         except ET.ParseError as e:
             return [], f"KLC report unreadable: {e}"
-    return parse_junit(root), None
+    return parse_junit(root, ignore, ignored), None
 
 
-def parse_junit(root) -> list[dict]:
+def parse_junit(root, ignore=(), ignored: list[str] | None = None) -> list[dict]:
     out = []
     for fail in root.iter("failure"):
         text = (fail.text or fail.get("message") or "").strip()
@@ -81,6 +111,10 @@ def parse_junit(root) -> list[dict]:
         if not lines:
             continue
         rule = lines[0].split(":", 1)[0]
+        if rule in ignore:
+            if ignored is not None:
+                ignored.append(rule)
+            continue
         url = next((l for l in lines if l.startswith("https://klc.kicad.org")), None)
         details = [l for l in lines[1:] if not l.startswith("https://")]
         details = [d for d in details if not any(p.search(d) for p in _IGNORE)]

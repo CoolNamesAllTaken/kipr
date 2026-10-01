@@ -28,7 +28,7 @@ Needs Python 3.10+, the system cairo library (`libcairo2`) and ideally DejaVu fo
 | Command | Writes |
 |---|---|
 | `kipr library render --repo . --base B --head H --out OUT [--pr N]` | `OUT/manifest.json`, `OUT/items/<slug>/…` |
-| `kipr library checks --out OUT [--klc-utils DIR] [--site-url URL]` | `OUT/review.json`, `OUT/review.md` |
+| `kipr library checks --out OUT [--klc-utils DIR [--klc-ignore RULE,...]] [--site-url URL]` | `OUT/review.json`, `OUT/review.md` |
 | `kipr library site --out OUT [--no-offline]` | the viewer (`index.html`, `js/`, `data.js`, `offline/`, `serve.py`) |
 | `kipr library report --out OUT [--output FILE] [--max-mb 20]` | `OUT/component-review.html` |
 
@@ -40,10 +40,31 @@ Useful options of the end-to-end run (see `kipr library --help`):
   the repository root.
 - `--klc-utils DIR`: also run the official KLC checker; `kipr library ci fetch-klc-utils DIR`
   fetches kicad-library-utils at the pinned commit (`kipr/library/ci/klc_utils.ref`).
+- `--klc-ignore RULE[,RULE...]` (repeatable, or `CR_KLC_IGNORE`; default: none): official KLC
+  checker rules to ignore, e.g. `F7.2`. An ignored rule produces no finding or annotation and
+  doesn't count toward the verdict; the summary says how many rules were ignored and how many
+  violations that suppressed, and `review.json` lists them in `klc_ignored`. Rules are ignored
+  whole. See [Ignoring KLC rules](#ignoring-klc-rules).
 - `--fetch-stock-models [--stock-models-dir DIR]`: download `${KICADn_3DMODEL_DIR}` models from
   kicad-packages3D at the tag pinned in `kipr/library/render/stock_models_tag.txt`.
 - `--no-3d`, `--no-preview`, `--png-size`, `--repo-name owner/repo` (default
   `$GITHUB_REPOSITORY`, else the github.com `origin` remote), `--report FILE`, `--skip STAGE`.
+
+### Ignoring KLC rules
+
+KLC is KiCad's convention for its own libraries; a custom library may deliberately differ.
+`--klc-ignore` / `klc-ignore` takes whole rule ids of the official checker. Known cases:
+
+| Rule | Message | Why ignore it |
+|---|---|---|
+| `F7.2` | "Pad '1' not located at origin" / "Set origin to location of Pad '1'" | libraries whose footprint origin is the part centroid (pick-and-place) for THT parts too. F7.2 ("For through-hole components, footprint anchor is set on pad 1") checks nothing else: its only other messages, "Pad 1 not found in footprint!" and "Multiple Pins exist with number '1'… None are located on origin", are part of the same origin test (the first also fires on THT logos and NPTH-only footprints). |
+
+kipr's own KLC-style rules (`kicad_checks.py`) have no footprint-origin rule. The SMD
+counterpart, F6.2 ("anchor does not match calculated center"), already agrees with a centroid
+origin and is reported as info.
+
+Symbol pins must be on the 100 mil grid (KLC S4.1): a pin connection point off it is an error,
+whether or not it is on the 50 mil grid.
 
 The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs.
 The viewer is documented in [`web/library/README.md`](../web/library/README.md).
@@ -102,11 +123,13 @@ Security notes:
 | `kicad-image` | `kicad/kicad:10.0` | job container; `none` runs on the plain runner |
 | `fetch-stock-models` | `true` | download stock KiCad 3D models (cached with actions/cache) |
 | `klc` | `true` | run the official KLC checker (cached) |
+| `klc-ignore` | `""` | KLC checker rules to ignore, comma-separated (`--klc-ignore`) |
 | `use-kicad-cli` | `false` | also export reference SVGs with kicad-cli |
 | `retention-days` | `30` | artifact retention |
 
 `library-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`, `lib-3d` (finding
-messages), `klc` (`true`), `pages-url` (default `https://<owner>.github.io/<repo>/`),
+messages), `klc` (`true`), `klc-ignore` (`""`; pass the same value as to library-review.yml,
+since the checks are re-run here), `pages-url` (default `https://<owner>.github.io/<repo>/`),
 `fail-conclusion` (`neutral`; `failure` lets you require the check, or `success`).
 
 `library-review-cleanup.yml`: `kipr-ref`, `kipr-repository`.
@@ -140,6 +163,7 @@ jobs:
       kicad-image: ${{ vars.CR_KICAD_IMAGE || 'kicad/kicad:10.0' }}
       fetch-stock-models: ${{ vars.CR_FETCH_STOCK_MODELS != 'false' }}
       klc: ${{ vars.CR_KLC != 'false' }}
+      klc-ignore: ""   # e.g. "F7.2"; same value in component-review-publish.yml
 ```
 
 `.github/workflows/component-review-publish.yml`:
@@ -159,6 +183,7 @@ jobs:
     with:
       kipr-ref: KIPR_SHA
       klc: ${{ vars.CR_KLC != 'false' }}
+      klc-ignore: ""
       pages-url: ${{ vars.CR_PAGES_URL }}
       fail-conclusion: ${{ vars.CR_FAIL_CONCLUSION || 'neutral' }}
 ```
