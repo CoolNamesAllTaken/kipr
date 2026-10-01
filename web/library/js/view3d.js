@@ -42,7 +42,11 @@ export const MODEL_LOADERS = {
       g.setIndex(new THREE.BufferAttribute(m.index, 1));
       if (!g.attributes.normal) g.computeVertexNormals();
       const color = stepColor(THREE, m.color);
-      const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide });
+      // A small positive offset pushes steep faces (hole walls seen edge-on from the Top/Bottom presets) behind the
+      // footprint copper they touch; flat faces barely move. Rendering only, see padMat in board3d.js.
+      const mat = new THREE.MeshStandardMaterial({
+        color, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+      });
       group.add(new THREE.Mesh(g, mat));
     }
     return group;
@@ -113,6 +117,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
   let lastView = 'iso';
   const center = new THREE.Vector3();
   let radius = 10;
+  const bounds = new THREE.Sphere(new THREE.Vector3(), 10); // bounds of everything drawn, for near/far
 
   function makeScene() {
     const scene = new THREE.Scene();
@@ -209,9 +214,19 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
     box.expandByScalar(0.5);
     box.getCenter(center);
     radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1);
-    camera.near = radius / 200;
-    camera.far = radius * 200;
-    camera.updateProjectionMatrix();
+    const all = new THREE.Box3();
+    for (const s of Object.values(sides)) if (s) all.expandByObject(s.root);
+    (all.isEmpty() ? box : all).getBoundingSphere(bounds);
+  }
+
+  // Depth precision: fit near/far to what is drawn, from where the camera is now (every frame, since the user
+  // zooms). The footprint copper and a STEP body can be ~10 um apart (castellated modules), which a fixed
+  // radius/200 .. radius*200 range cannot resolve from a normal viewing distance.
+  function fitClipPlanes() {
+    const d = camera.position.distanceTo(bounds.center);
+    const far = d + bounds.radius * 1.05;
+    camera.near = Math.max(d - bounds.radius * 1.05, far / 2000, 1e-4);
+    camera.far = far;
   }
 
   function setView(name) {
@@ -256,6 +271,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
       renderer.setViewport(x, 0, width, h);
       renderer.setScissor(x, 0, width, h);
       camera.aspect = width / h;
+      fitClipPlanes();
       camera.updateProjectionMatrix();
       if (clearDepth) renderer.clearDepth();
       const head = s.scene.userData.headlight;

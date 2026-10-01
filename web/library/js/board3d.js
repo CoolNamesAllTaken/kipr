@@ -179,8 +179,11 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
   plane(faces.fabBottom, -BOARD_THICKNESS - DECAL_Z - 0.005, 'fab', { transparent: true, bottom: true });
 
   // --- copper pads and plated barrels
-  const padMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.4 });
-  const barrelMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.45, side: THREE.DoubleSide });
+  // The copper is KiCad's footprint data: when a STEP body touches it (castellated module, pads at the same z),
+  // let the copper win the depth test instead of z-fighting. Rendering only; the geometry stays where KiCad puts it.
+  const copper = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 };
+  const padMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.4, ...copper });
+  const barrelMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.45, side: THREE.DoubleSide, ...copper });
   let padCount = 0;
   for (const pad of pads) {
     const sides = padCopperSides(pad);

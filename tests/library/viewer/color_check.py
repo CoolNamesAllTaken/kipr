@@ -54,8 +54,9 @@ def main(argv=None):
         with sync_playwright() as p:
             b = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
             page = b.new_page(viewport={"width": 800, "height": 600})
-            page.goto(f"http://127.0.0.1:{httpd.server_address[1]}/color.html")
-            page.wait_for_function("() => window.__v || window.__err", timeout=180000)
+            page.set_default_timeout(120000)
+            page.goto(f"http://127.0.0.1:{httpd.server_address[1]}/color.html", wait_until="domcontentloaded")
+            page.wait_for_function("() => window.__v || window.__err", timeout=180000, polling=500)
             if page.evaluate("() => window.__err"):
                 print("load error:", page.evaluate("() => window.__err"))
                 return 1
