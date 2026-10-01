@@ -212,7 +212,9 @@ workflows. The security model is the one kicad-libs already had:
    from merged code. Never checks out or runs PR code: the only code is kipr@<ref>.
    resolve-pr (PR number verified via the API) → sanitize-site (allow-listed data only)
    → checks re-run with trusted code → trusted viewer → gh-pages pr/<N>/ → sticky comment,
-   inline review and "Component review" check.
+   inline review and "Component review" check. Earlier inline comments whose finding is no
+   longer reported (fixed, re-encoded, no longer reviewed) are marked so and their threads
+   resolved; nothing is deleted, other people's comments are never touched.
         ▼
  gh-pages ──(GitHub Pages)──► https://<owner>.github.io/<repo>/pr/<N>/#<slug>
 

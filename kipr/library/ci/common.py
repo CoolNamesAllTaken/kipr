@@ -321,6 +321,16 @@ class GitHub:
     def get(self, path: str):
         return self.request("GET", path)[0]
 
+    def graphql(self, query: str, variables: dict | None = None) -> dict:
+        """POST a GraphQL query; returns `data`, raises RuntimeError on HTTP or GraphQL errors."""
+        # api.github.com -> api.github.com/graphql; GHES <host>/api/v3 -> <host>/api/graphql
+        url = (self.api[: -len("/v3")] if self.api.endswith("/api/v3") else self.api) + "/graphql"
+        data, _ = self.request("POST", url, {"query": query, "variables": variables or {}})
+        if not isinstance(data, dict) or data.get("errors"):
+            errs = data.get("errors") if isinstance(data, dict) else data
+            raise RuntimeError(f"GitHub GraphQL error: {json.dumps(errs)[:500]}")
+        return data.get("data") or {}
+
     def paginate(self, path: str, limit_pages: int = 30) -> list:
         sep = "&" if "?" in path else "?"
         url = f"{path}{sep}per_page=100"
