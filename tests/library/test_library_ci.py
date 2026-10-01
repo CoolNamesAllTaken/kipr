@@ -327,6 +327,148 @@ class TestResolve(unittest.TestCase):
             resolve_pr.resolve({"pr": "8 && x", "head_sha": HEAD}, REPO, HEAD, FakeGH(self.pr()))
 
 
+class FakeAPI:
+    """In-memory GitHub: PR review comments (REST) and review threads (GraphQL)."""
+    def __init__(self, comments, resolve_error=False):
+        self.token = "t"
+        self.comments = comments
+        self.resolved: set[int] = set()       # databaseId of the threads' first comments
+        self.resolve_error = resolve_error
+        self.calls: list[tuple] = []
+
+    def paginate(self, path):
+        self.calls.append(("GET", path))
+        if path.endswith("/pulls/8/comments"):
+            return [dict(c) for c in self.comments]
+        if path.endswith("/issues/8/comments") or path.endswith("/pulls/8/files"):
+            return []
+        raise AssertionError(path)
+
+    def request(self, method, path, body=None):
+        self.calls.append((method, path))
+        m = re.fullmatch(r"/repos/[^/]+/[^/]+/pulls/comments/(\d+)", path)
+        if method == "PATCH" and m:
+            c = next(c for c in self.comments if c["id"] == int(m.group(1)))
+            c["body"] = body["body"]
+            return c, ""
+        return {}, ""
+
+    def graphql(self, query, variables=None):
+        self.calls.append(("GRAPHQL", query.split("(")[0].strip()))
+        if query.strip().startswith("mutation"):
+            if self.resolve_error:
+                raise RuntimeError("GitHub GraphQL error: Resource not accessible by integration")
+            self.resolved.add(int(variables["id"].split("_")[1]))
+            return {}
+        nodes = [{"id": f"T_{c['id']}", "isResolved": c["id"] in self.resolved,
+                  "comments": {"nodes": [{"databaseId": c["id"]}]}}
+                 for c in self.comments if not c.get("in_reply_to_id")]
+        return {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+
+    def writes(self):
+        return [c for c in self.calls if c[0] in ("PATCH", "GRAPHQL") and c[1] != "query"]
+
+
+class TestStaleInline(Tmp):
+    BOT = {"login": "github-actions[bot]"}
+
+    def setUp(self):
+        super().setUp()
+        self.manifest, self.review = common.load_site(self.site)
+        live = next(f for i in self.manifest["items"]
+                    for f in common.findings_of(common.item_review(self.review, i["id"])))
+        self.live_key = finding_key(live)
+        gone = {"path": "lib_sch/Old.kicad_sym", "line": 3, "severity": "warning", "category": "klc",
+                "message": "Pin 4 (GP29/ADC3) is on 50 mil but not 100 mil grid"}
+        self.gone_key = finding_key(gone)
+        self.gone_body = post_review.inline_body({"name": "RP2040-Zero"}, gone)
+        self.live_body = f"🟠 still here\n\n<!-- cr-finding:{self.live_key} -->"
+        self.human_body = f"I disagree\n\n<!-- cr-finding:{self.gone_key} -->"   # copied marker, not ours
+        self.other_bot = f"lint\n\n<!-- cr-finding:{self.gone_key} -->"
+        self.gh = FakeAPI([
+            {"id": 1, "user": self.BOT, "body": self.gone_body},
+            {"id": 2, "user": self.BOT, "body": self.live_body},
+            {"id": 3, "user": {"login": "designer"}, "body": self.human_body},
+            {"id": 4, "user": {"login": "other[bot]"}, "body": self.other_bot},
+        ])
+
+    def run_publish(self, gh):
+        posted = post_review.finding_comments(gh, REPO, 8)
+        return post_review.retire_stale(gh, REPO, 8, posted, post_review.current_finding_keys(self.manifest, self.review), HEAD)
+
+    def test_stale_resolved_and_edited_others_untouched(self):
+        self.assertEqual(self.run_publish(self.gh), 1)
+        body = self.gh.comments[0]["body"]
+        self.assertTrue(body.startswith(post_review.STALE_MARKER))
+        self.assertIn(f"No longer reported as of {HEAD[:7]}", body)
+        self.assertIn("<details><summary>Original comment</summary>", body)
+        self.assertIn(self.gone_body.rstrip(), body)                # original text kept
+        self.assertEqual(self.gh.resolved, {1})
+        self.assertEqual(self.gh.comments[1]["body"], self.live_body)
+        self.assertEqual(self.gh.comments[2]["body"], self.human_body)
+        self.assertEqual(self.gh.comments[3]["body"], self.other_bot)
+        patched = [p for m, p in self.gh.calls if m == "PATCH"]
+        self.assertEqual(patched, [f"/repos/{REPO}/pulls/comments/1"])
+
+    def test_second_run_is_noop(self):
+        self.run_publish(self.gh)
+        self.gh.calls.clear()
+        self.assertEqual(self.run_publish(self.gh), 0)
+        self.assertEqual(self.gh.writes(), [])
+        self.assertFalse(any(c[0] == "GRAPHQL" for c in self.gh.calls))   # no thread lookup either
+
+    def test_resolve_fails_edit_only(self):
+        gh = FakeAPI(self.gh.comments, resolve_error=True)
+        self.assertEqual(self.run_publish(gh), 1)
+        self.assertTrue(gh.comments[0]["body"].startswith(post_review.STALE_MARKER))
+        self.assertEqual(gh.resolved, set())
+
+    def test_thread_lookup_fails_edit_only(self):
+        gh = FakeAPI(self.gh.comments)
+        gh.graphql = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("GraphQL 403"))
+        self.assertEqual(self.run_publish(gh), 1)
+        self.assertTrue(gh.comments[0]["body"].startswith(post_review.STALE_MARKER))
+
+    def test_dedupe_ignores_stale_but_keeps_live(self):
+        self.run_publish(self.gh)
+        keys = post_review.posted_finding_keys(post_review.finding_comments(self.gh, REPO, 8))
+        self.assertEqual(keys, {self.live_key})       # a finding that comes back is posted again
+
+    def test_main_retires_and_skips_without_review(self):
+        argv = ["--site", str(self.site), "--repo", REPO, "--pr", "8", "--head-sha", HEAD, "--no-check"]
+        orig = post_review.GitHub.from_env
+        try:
+            post_review.GitHub.from_env = classmethod(lambda cls, read_only=False: self.gh)
+            (self.site / "review.json").rename(self.tmp / "review.json")      # no review: touch nothing
+            self.assertEqual(post_review.main(argv), 0)
+            self.assertEqual(self.gh.comments[0]["body"], self.gone_body)
+            (self.tmp / "review.json").rename(self.site / "review.json")
+            self.assertEqual(post_review.main(argv), 0)
+            self.assertTrue(self.gh.comments[0]["body"].startswith(post_review.STALE_MARKER))
+            self.assertEqual(self.gh.resolved, {1})
+            self.assertEqual(self.gh.comments[1]["body"], self.live_body)
+            self.gh.calls.clear()
+            self.assertEqual(post_review.main(argv), 0)
+            self.assertFalse([c for c in self.gh.calls if c[0] == "PATCH" and "/pulls/comments/" in c[1]])
+        finally:
+            post_review.GitHub.from_env = orig
+
+
+class TestGraphQLURL(unittest.TestCase):
+    def test_urls(self):
+        for api, want in (("https://api.github.com", "https://api.github.com/graphql"),
+                          ("https://ghe.example.com/api/v3", "https://ghe.example.com/api/graphql")):
+            gh = common.GitHub("t", api)
+            seen = []
+            gh.request = lambda m, u, b=None: (seen.append(u), ({"data": {"ok": 1}}, ""))[1]
+            self.assertEqual(gh.graphql("query{x}"), {"ok": 1})
+            self.assertEqual(seen, [want])
+        gh.request = lambda m, u, b=None: ({"errors": [{"message": "nope"}]}, "")
+        with self.assertRaises(RuntimeError):
+            gh.graphql("query{x}")
+
+
 class TestDeploy(Tmp):
     def test_deploy_and_delete(self):
         remote = self.tmp / "remote.git"

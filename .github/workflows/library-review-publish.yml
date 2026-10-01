@@ -64,7 +64,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write        # push the preview to gh-pages
-      pull-requests: write   # sticky comment + inline review
+      pull-requests: write   # sticky comment, inline review, mark + resolve stale inline threads
       checks: write          # "Component review" check run
       actions: read          # download the artifacts of the triggering run
     # One publish at a time per PR branch; different PRs publish in parallel and

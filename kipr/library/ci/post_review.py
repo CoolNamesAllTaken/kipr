@@ -3,6 +3,9 @@
   1. inline review (event COMMENT) on .kicad_mod/.kicad_sym lines for error/warning findings
      whose line is inside the PR diff; findings already posted earlier (hidden
      `<!-- cr-finding:<key> -->` marker in our own review comments) are not posted again;
+     our earlier inline comments whose finding is no longer reported (fixed, item re-encoded
+     or no longer reviewed) get a "no longer reported" note on top, the original text folded
+     into <details>, and their review thread resolved; never deleted, humans' comments untouched;
   2. ONE sticky issue comment (hidden `<!-- component-review -->` marker), created or updated;
   3. a check run "Component review" on the head sha with the overall verdict.
 
@@ -35,6 +38,7 @@ BOT_LOGIN = os.environ.get("CR_BOT_LOGIN", "github-actions[bot]")
 INLINE_EXT = (".kicad_mod", ".kicad_sym")
 MAX_INLINE = 40
 CHECK_NAME = "Component review"
+STALE_MARKER = "<!-- cr-stale -->"
 CLOSED_BANNER = "> [!NOTE]\n> This PR is closed, so its live preview was removed. Images below still work.\n"
 
 
@@ -152,11 +156,103 @@ def find_sticky(gh: GitHub, repo: str, pr: int) -> dict | None:
     return None
 
 
-def posted_finding_keys(gh: GitHub, repo: str, pr: int) -> set[str]:
+def finding_comments(gh: GitHub, repo: str, pr: int) -> list[dict]:
+    """Our own inline review comments that carry a finding marker."""
+    return [c for c in own_comments(gh, f"/repos/{repo}/pulls/{pr}/comments")
+            if FINDING_MARKER_RE.search(c.get("body") or "")]
+
+
+def posted_finding_keys(comments: list[dict]) -> set[str]:
+    """Findings that already have a live inline comment (a stale-marked one doesn't count, so
+    a finding that comes back is posted again)."""
     keys = set()
-    for c in own_comments(gh, f"/repos/{repo}/pulls/{pr}/comments"):
-        keys.update(FINDING_MARKER_RE.findall(c.get("body") or ""))
+    for c in comments:
+        body = c.get("body") or ""
+        if STALE_MARKER not in body:
+            keys.update(FINDING_MARKER_RE.findall(body))
     return keys
+
+
+def current_finding_keys(manifest, review) -> set[str]:
+    """Every finding of this review (any severity, inline or not): an earlier inline comment
+    whose key is not in here is stale."""
+    return {finding_key(f) for item in manifest["items"] for f in findings_of(item_review(review, item.get("id")))}
+
+
+def stale_body(body: str, head_sha: str) -> str:
+    """Our comment, marked as no longer reported; the original text folded into <details>."""
+    return (f"{STALE_MARKER}\n✅ **No longer reported as of {head_sha[:7]}** (finding fixed, item re-encoded, "
+            f"or no longer reviewed).\n\n<details><summary>Original comment</summary>\n\n{body.rstrip()}\n\n</details>\n")
+
+
+THREADS_QUERY = """
+query($owner: String!, $name: String!, $pr: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
+      }
+    }
+  }
+}"""
+
+RESOLVE_MUTATION = """
+mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }"""
+
+
+def review_threads(gh: GitHub, repo: str, pr: int) -> dict[int, dict]:
+    """databaseId of a thread's first comment -> {"id", "isResolved"}."""
+    owner, name = repo.split("/", 1)
+    out: dict[int, dict] = {}
+    after = None
+    for _ in range(30):
+        data = gh.graphql(THREADS_QUERY, {"owner": owner, "name": name, "pr": pr, "after": after})
+        threads = (((data.get("repository") or {}).get("pullRequest") or {}).get("reviewThreads") or {})
+        for t in threads.get("nodes") or []:
+            first = ((t.get("comments") or {}).get("nodes") or [{}])[0] or {}
+            if isinstance(first.get("databaseId"), int) and t.get("id"):
+                out[first["databaseId"]] = {"id": t["id"], "isResolved": bool(t.get("isResolved"))}
+        page = threads.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            break
+        after = page.get("endCursor")
+    return out
+
+
+def stale_comments(comments: list[dict], current: set[str]) -> list[dict]:
+    """Our finding comments not yet marked stale whose finding is not in `current`."""
+    return [c for c in comments if STALE_MARKER not in (c.get("body") or "")
+            and not set(FINDING_MARKER_RE.findall(c.get("body") or "")) & current]
+
+
+def retire_stale(gh: GitHub, repo: str, pr: int, comments: list[dict], current: set[str], head_sha: str) -> int:
+    """Mark our inline comments whose finding is gone and resolve their threads. Idempotent:
+    a comment already marked is left alone. Returns the number of comments marked now."""
+    stale = stale_comments(comments, current)
+    if not stale:
+        return 0
+    try:
+        threads = review_threads(gh, repo, pr)
+    except RuntimeError as e:
+        log(f"warning: cannot list review threads, stale comments are edited but not resolved: {e}")
+        threads = {}
+    n = 0
+    for c in stale:
+        try:
+            gh.request("PATCH", f"/repos/{repo}/pulls/comments/{c['id']}", {"body": stale_body(c["body"], head_sha)})
+            n += 1
+        except RuntimeError as e:
+            log(f"warning: cannot mark stale comment {c.get('id')}: {e}")
+            continue
+        t = threads.get(c["id"])
+        if t and not t["isResolved"]:
+            try:
+                gh.graphql(RESOLVE_MUTATION, {"id": t["id"]})
+            except RuntimeError as e:
+                log(f"warning: cannot resolve thread of comment {c.get('id')} (edited only): {e}")
+    log(f"marked {n} inline comment(s) as no longer reported")
+    return n
 
 
 def upsert_sticky(gh: GitHub, repo: str, pr: int, body: str) -> None:
@@ -222,10 +318,11 @@ def main(argv=None) -> int:
     else:
         log("no token and no --files-json: inline comments disabled")
         files = []
-    already = set()
+    already, posted = set(), None
     if online:
         try:
-            already = posted_finding_keys(gh, repo, pr)
+            posted = finding_comments(gh, repo, pr)
+            already = posted_finding_keys(posted)
         except RuntimeError as e:
             log(f"warning: cannot list existing review comments: {e}")
 
@@ -246,6 +343,9 @@ def main(argv=None) -> int:
         print("===== check run (POST /repos/%s/check-runs) =====" % repo)
         print(json.dumps(check, indent=2, ensure_ascii=False) if check else "(disabled)")
         print(f"===== {len(already)} finding(s) already posted inline =====")
+        if posted and review and not a.no_inline:
+            n = len(stale_comments(posted, current_finding_keys(manifest, review)))
+            print(f"===== {n} inline comment(s) would be marked no longer reported =====")
         return 0
 
     if payload:
@@ -258,6 +358,9 @@ def main(argv=None) -> int:
             inlined &= already
             body = build_comment(ctx, manifest, review, artifact_url=a.artifact_url, report_url=a.report_url, run_url=a.run_url,
                                  note=a.note, inlined=inlined, n_inline=len(inlined))
+    # without a review every earlier finding would look stale; keep them as they are then
+    if posted and review and not a.no_inline:
+        retire_stale(gh, repo, pr, posted, current_finding_keys(manifest, review), head_sha)
     upsert_sticky(gh, repo, pr, body)
     if check:
         try:
