@@ -1,5 +1,5 @@
 // Schematic diff: per-sheet list, side-by-side / ink diff / onion skin / swipe, change list that zooms.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
@@ -227,8 +227,13 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
       dispR = wantR();
       setMode(mode);
       const ci = Number.parseInt(params.c, 10);
+      const at = parseAtParam(params.at);
       if (Number.isInteger(ci) && ci >= 0 && ci < changes.items.length) changes.select(ci);
+      else if (at) showAt(at);
     });
+
+  // "at=x,y[,w,h]" (links from the ERC/DRC tab, e.g. a grid finding): zoom there and outline it
+  function showAt(box) { stage.zoomTo(box); stage.highlight(box); }
 
   return {
     get mode() { return mode; },
@@ -237,6 +242,8 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
       const ci = Number.parseInt(p.c, 10);
       if (Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length) changes.select(ci);
+      const at = parseAtParam(p.at);
+      if (at && stage) showAt(at);
     },
     onKey(e) {
       if (e.key === 'n') { changes.next(); return true; }

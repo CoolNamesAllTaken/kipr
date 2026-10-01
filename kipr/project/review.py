@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, field
 
 from .. import __version__
-from . import classify, diff_net, diff_pcb, diff_sch, discover, export, models, pcb, sch
+from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, models, pcb, sch
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
 from ..common.kicad_cli import KicadCli
@@ -57,8 +57,9 @@ class Side:
 class ProjectReview:
     def __init__(self, git: Git, proj: discover.Project, slug: str, out: str, tmp: str, shas: dict,
                  exporter: export.Exporter | None, step: bool, glb: bool, log, fast_checks: bool = False,
-                 model_dirs: list[str] | None = None):
+                 model_dirs: list[str] | None = None, grid_check: str = "changed", grid_mil: float = 50.0):
         self.git, self.proj, self.slug, self.out = git, proj, slug, out
+        self.grid_check, self.grid_mil = grid_check, grid_mil
         self.tmp, self.exporter, self.step, self.glb, self.log = tmp, exporter, step, glb, log
         self.fast_checks = fast_checks
         self.model_dirs = model_dirs or []
@@ -466,6 +467,15 @@ class ProjectReview:
             out[kind] = d
         return out
 
+    def grid(self):
+        """checks.grid: schematic items off the connection grid (see kipr.project.grid)."""
+        b, h = self.sides["base"], self.sides["head"]
+        try:
+            return grid.check(b.schem, h.schem, self.pdir, self.grid_check, self.grid_mil)
+        except Exception as e:  # noqa: BLE001
+            self.err(f"schematic grid check failed: {e}")
+            return None
+
     # -- main ------------------------------------------------------------------------------
     def run(self) -> dict:
         t0 = time.monotonic()
@@ -489,6 +499,7 @@ class ProjectReview:
         bom = self.bom()
         net = self.netlist()
         checks = self.checks()
+        checks["grid"] = self.grid()
         self.timings["assemble"] = time.monotonic() - t2
         self.timings["total"] = time.monotonic() - t0
         comp_count = {"added": 0, "removed": 0, "moved": 0, "changed": 0, "minor": 0}
@@ -510,6 +521,7 @@ class ProjectReview:
             "nets_changed": len((net or {}).get("changes", [])),
             "erc": {"new": len(checks["erc"]["new"]), "fixed": len(checks["erc"]["fixed"])} if checks.get("erc") else None,
             "drc": {"new": len(checks["drc"]["new"]), "fixed": len(checks["drc"]["fixed"])} if checks.get("drc") else None,
+            "grid": {"count": checks["grid"]["count"], "points": checks["grid"]["points"]} if checks.get("grid") else None,
         }
         doc.update({"schematic": schematic, "pcb": pcbs, "pcba3d": p3d, "bom": bom, "netlist": net,
                     "checks": checks, "info": self.info(), "errors": self.errors,
@@ -548,19 +560,24 @@ def unique_slug(name: str, used: set) -> str:
 def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str | None = None,
         jobs: int = 4, cache_dir: str | None = None, step: bool = False, glb: bool = True,
         repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print,
-        significant_fields: str | None = None) -> dict:
-    """`significant_fields`: see kipr.project.classify (None = the defaults)."""
+        significant_fields: str | None = None, grid_check: str = "changed", grid_mil: float = 50.0) -> dict:
+    """`significant_fields`: see kipr.project.classify (None = the defaults). `grid_check`:
+    changed | all | off, `grid_mil`: the schematic connection grid (see kipr.project.grid)."""
+    if grid_check not in grid.MODES:
+        raise ValueError(f"grid_check must be one of {', '.join(grid.MODES)}")
+    if not grid_mil > 0:
+        raise ValueError("grid_mil must be > 0")
     cfg = classify.Config.from_option(significant_fields)
     prev = classify.set_active(cfg)
     try:
         return _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url,
-                    no_export, fast_checks, log, cfg)
+                    no_export, fast_checks, log, cfg, grid_check, grid_mil)
     finally:
         classify.set_active(prev)
 
 
 def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url, no_export,
-         fast_checks, log, cfg) -> dict:
+         fast_checks, log, cfg, grid_check="changed", grid_mil=50.0) -> dict:
     git = Git(repo)
     shas = {"base": git.rev(base), "head": git.rev(head)}
     os.makedirs(out, exist_ok=True)
@@ -581,7 +598,8 @@ def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb,
         "version": 1,
         "tool": {"name": "kipr", "version": __version__, "kicad": cli.version if cli else None,
                  "stock_3d_models": bool(model_dirs) if cli else None,
-                 "significant_fields": list(cfg.significant)},
+                 "significant_fields": list(cfg.significant),
+                 "grid_check": grid_check, "sch_grid_mil": grid_mil},
         "base": {"sha": shas["base"], "ref": base, "short": shas["base"][:7]},
         "head": {"sha": shas["head"], "ref": head, "short": shas["head"][:7]},
         "repo": {"url": url, "blob": f"{url}/blob/{{sha}}/{{path}}" if url else None},
@@ -594,14 +612,15 @@ def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb,
         for proj in projects:
             slug = unique_slug(proj.name, used)
             log(f"- {proj.path or '.'} ({proj.status}) -> p/{slug}")
-            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks, model_dirs)
+            pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks, model_dirs,
+                               grid_check, grid_mil)
             try:
                 doc["projects"].append(pr.run())
             except Exception as e:  # noqa: BLE001  never crash the whole review for one project
                 traceback.print_exc()
                 doc["projects"].append({"slug": slug, "name": proj.name, "path": proj.path, "status": proj.status,
                                         "summary": None, "schematic": None, "pcb": None, "pcba3d": None,
-                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None},
+                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None},
                                         "errors": pr.errors + [f"internal error: {e!r}"]})
     finally:
         if exporter:

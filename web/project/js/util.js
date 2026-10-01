@@ -219,6 +219,15 @@ export function parseViewBox(txt) {
   return [v.x, v.y, v.w, v.h].every(Number.isFinite) && v.w > 0 && v.h > 0 ? v : null;
 }
 
+/** A deep link's "at" param: "x,y" -> a 4 mm box around the point; "x,y,w,h" -> that box (mm). */
+export function parseAtParam(v) {
+  const n = String(v || '').split(',');
+  if ((n.length !== 2 && n.length !== 4) || !n.every((t) => /^-?\d+(?:\.\d+)?$/.test(t))) return null;
+  const [x, y, w, h] = n.map(Number);
+  if (n.length === 2) return { x: x - 2, y: y - 2, w: 4, h: 4 };
+  return w > 0 && h > 0 ? { x, y, w, h } : null;
+}
+
 /** A badge whose class is derived from a sanitised value: `status-added`, `sev-error`, ... */
 export function badge(kind, value, title) {
   if (value === null || value === undefined || value === '') return null;

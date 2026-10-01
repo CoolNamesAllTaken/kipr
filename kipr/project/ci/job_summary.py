@@ -6,8 +6,10 @@
 --annotate prints `::error file=…,line=…::` / `::warning …::` workflow commands for the NEW
 ERC/DRC violations (fixed ones and exclusions are not annotated). Each is placed on the line of
 the first violating item in the head checkout (`--repo-dir`, found by its KiCad uuid), else on
-line 1 of the project's schematic/board. GitHub shows at most 10 errors and 10 warnings per
-step, so errors come first. --summary appends markdown to FILE (normally $GITHUB_STEP_SUMMARY).
+line 1 of the project's schematic/board. Schematic items off the connection grid
+(checks.grid) are warnings on their .kicad_sch line. GitHub shows at most 10 errors and 10
+warnings per step, so errors come first, then ERC/DRC warnings, then the grid.
+--summary appends markdown to FILE (normally $GITHUB_STEP_SUMMARY).
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ import re
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, d, load_review, lst, safe_http_url, safe_repo_path, text)
+from .common import (CHECK_KINDS, d, grid_findings, grid_mil, load_review, lst, safe_http_url, safe_repo_path, text)
 from .make_comment import build_comment
 
 MAX_ANNOTATIONS = 50
@@ -95,8 +97,16 @@ def annotations(doc: dict, repo_dir: Path | None = None) -> list[str]:
                 if level:
                     rows.append((level, kind, pdir, name, v))
     rows.sort(key=lambda r: r[0] != "error")
+    for p in doc["projects"]:  # after every ERC/DRC row
+        name = text(p.get("name"))
+        if re.fullmatch(r"[A-Za-z0-9 ._+-]{1,120}", name or ""):
+            rows += [("warning", "grid", safe_repo_path(text(p.get("path"))) or "", name, dict(f, _mil=grid_mil(p)))
+                     for f in grid_findings(p)]
     out = []
     for level, kind, pdir, name, v in rows[:MAX_ANNOTATIONS]:
+        if kind == "grid":
+            out.append(_grid_annotation(v, name))
+            continue
         path, line = loc.locate(pdir, name, kind, lst(v.get("uuids")))
         props = []
         if path:
@@ -109,6 +119,19 @@ def annotations(doc: dict, repo_dir: Path | None = None) -> list[str]:
             msg += f" (at {pos[0]:.2f}, {pos[1]:.2f} mm)"
         out.append(f"::{level} {','.join(props)}::{_data(msg)}")
     return out
+
+
+def _grid_annotation(f: dict, name: str) -> str:
+    props = []
+    path, line = safe_repo_path(text(f.get("file"))), f.get("line")
+    if path and path.endswith(".kicad_sch"):
+        ok = isinstance(line, int) and not isinstance(line, bool) and line > 0
+        props += [f"file={_prop(path)}", f"line={line if ok else 1}"]
+    kind = text(f.get("kind")).replace("_", " ")[:30]
+    who = (text(f.get("ref")) or text(f.get("text")))[:60]
+    props.append("title=" + _prop(f"Off the {f['_mil']} mil grid: {kind} {who} ({name})"[:120]))
+    msg = re.sub(r"\s+", " ", f"{kind} {who} on sheet {text(f.get('sheet'))[:80]}: {text(f.get('detail'))}").strip()[:900]
+    return f"::warning {','.join(props)}::{_data(msg)}"
 
 
 def summary(doc: dict, links: dict[str, str]) -> str:

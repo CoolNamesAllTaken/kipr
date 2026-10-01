@@ -7,8 +7,8 @@ import {
   sortLayers, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
 import { fitTransform, zoomAbout } from '../../web/project/js/panzoom.js';
-import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText } from '../../web/project/js/util.js';
-import { matchesQuery, statusCounts } from '../../web/project/js/tables.js';
+import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
+import { matchesQuery, statusCounts, sheetSpotHash, gridGroups } from '../../web/project/js/tables.js';
 import { faceOf, pickDiffLayer, parseAt } from '../../web/project/js/layout.js';
 import { pickSheet } from '../../web/project/js/schematic.js';
 import { describeChange } from '../../web/project/js/changes.js';
@@ -249,4 +249,18 @@ test('app: summary chips, tab counts, project list hygiene', () => {
   const list = projectsOf({ projects: [{ slug: 'b', status: 'added' }, { slug: 'a', status: 'modified' }, { slug: 'a' }, { slug: '../x' }, { slug: '<img>' }, null, 'x'] });
   assert.deepEqual(list.map((x) => x.slug), ['a', 'b']);
   assert.deepEqual(projectsOf(null), []);
+});
+
+test('grid findings: per-sheet groups and links to the spot on the sheet', () => {
+  const items = [{ sheet: 'root', ref: 'U1' }, { sheet: 'root/power', text: '+3V3' }, { sheet: 'root', ref: 'R1' }, 'junk'];
+  assert.deepEqual(gridGroups(items).map((g) => [g.sheet, g.items.length]), [['root', 2], ['root/power', 1]]);
+  assert.equal(sheetSpotHash('demo', 'root/power', [198.73, 128.73, 2.54, 2.54], [200, 130]),
+    '#/p/demo/schematic/root%2Fpower?at=198.73%2C128.73%2C2.54%2C2.54');
+  assert.equal(sheetSpotHash('demo', 'root', 'junk', [200, 130]), '#/p/demo/schematic/root?at=200%2C130');
+  assert.equal(sheetSpotHash('demo', 'root', null, ['x', 1]), '#/p/demo/schematic/root');
+  assert.deepEqual(parseAtParam('198.73,128.73,2.54,2.54'), { x: 198.73, y: 128.73, w: 2.54, h: 2.54 });
+  assert.deepEqual(parseAtParam('200,130'), { x: 198, y: 128, w: 4, h: 4 });
+  assert.equal(parseAtParam('1,2,0,3'), null);
+  assert.equal(parseAtParam('1,2,3'), null);
+  assert.equal(parseAtParam('1e3,2'), null);
 });

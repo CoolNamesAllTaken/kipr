@@ -37,6 +37,7 @@ const MOCK_VIEWS = [
   ['bom-filter', `${P}/bom?q=4.7k&st=changed`],
   ['netlist', `${P}/netlist`],
   ['checks', `${P}/checks`],
+  ['sch-grid-at', `${P}/schematic/root?mode=side&at=133.5,76.5,14,11`],
   ['pcba3d', `${P}/pcba3d`],
   ['added-layout', '#/p/sensor_breakout/layout?view=top&mode=single'],
   ['removed-sch', '#/p/old_adapter/schematic'],

@@ -1,7 +1,7 @@
 // Layout diff: gerber-rendered board (realistic top/bottom faces and a per-layer view), layer toggles,
 // per-layer pixel diff, side-by-side / onion / swipe, change list that zooms, measure tool.
 // Without WebGL2 (or from file://) it falls back to the per-layer SVG exports.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
@@ -36,10 +36,9 @@ export function pickDiffLayer(layers, face) {
   return changed.find((l) => l.kind === 'copper' && onFace(l)) || changed.find(onFace) || changed[0] || layers[0] || null;
 }
 
-/** "at=x,y" from a DRC link -> a 4 mm box around the point. */
+/** "at=x,y" from a DRC link -> a 4 mm box around the point ("x,y,w,h": that box). */
 export function parseAt(v) {
-  const m = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(String(v || ''));
-  return m ? { x: +m[1] - 2, y: +m[2] - 2, w: 4, h: 4 } : null;
+  return parseAtParam(v);
 }
 
 export function createLayoutView(project, container, ctx) {

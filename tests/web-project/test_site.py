@@ -198,6 +198,11 @@ class ReportTest(unittest.TestCase):
     def test_content(self):
         for text in ("demo_board", "sensor_breakout", "old_adapter", "R2", "4.7k", "/SDA", "clearance", "Unchanged sheets: Connectors"):
             self.assertIn(text, self.html)
+        # schematic grid findings: one table per sheet, file:line, detail
+        self.assertIn("Schematic grid <span class=\"muted\">50 mil, added or moved items: 2 off grid", self.html)
+        self.assertIn("<h4>root/power</h4>", self.html)
+        self.assertIn("boards/demo_board/demo_board.kicad_sch:412", self.html)
+        self.assertIn("3 of 3 pins off the 50 mil grid", self.html)
         if report.Image is not None and report.cairosvg is not None:
             # base / head / diff for 4 changed sheets of demo_board, 1 + 1 sheets of the others, 6 changed layers
             self.assertGreaterEqual(self.html.count("data:image/png"), 3 * 4)

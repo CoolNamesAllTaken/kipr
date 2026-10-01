@@ -383,7 +383,8 @@ def demo_board(out: Path) -> dict:
     return {
         "slug": slug, "name": "demo_board", "path": "boards/demo_board", "status": "modified",
         "summary": {"sheets_changed": 4, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1, "minor": 2},
-                    "nets_changed": 3, "erc": {"new": 1, "fixed": 1}, "drc": {"new": 2, "fixed": 1}},
+                    "nets_changed": 3, "erc": {"new": 1, "fixed": 1}, "drc": {"new": 2, "fixed": 1},
+                    "grid": {"count": 2, "points": 5}},
         "schematic": sch, "pcb": pcb,
         "pcba3d": {"base": {"glb": f"p/{slug}/3d/base.glb"}, "head": {"glb": f"p/{slug}/3d/head.glb"}, "components": comps},
         "bom": {"rows": [
@@ -416,6 +417,24 @@ def demo_board(out: Path) -> dict:
                             {"severity": "warning", "type": "silk_overlap", "description": "Silkscreen overlap", "items": ["U1 silk", "R2 silk"], "pos_mm": [124.0, 84.0]}],
                     "fixed": [{"severity": "warning", "type": "track_dangling", "description": "Track has unconnected end", "items": ["Track /OLD"], "pos_mm": [126.0, 86.0]}],
                     "report": {"base": None, "head": None}},
+            # schematic items off the 50 mil grid (kipr.project.grid): one symbol with its pins + a wire, one label
+            "grid": {"grid_mil": 50.0, "grid_mm": 1.27, "tolerance_mm": 0.001, "mode": "changed", "checked": 41, "count": 2, "points": 5,
+                     "sheets": [{"id": "root", "file": "boards/demo_board/demo_board.kicad_sch", "count": 1},
+                                {"id": "root/power", "file": "boards/demo_board/power.kicad_sch", "count": 1}],
+                     "items": [
+                         {"kind": "symbol", "severity": "warning", "change": "moved", "ref": "U1", "text": "MCU", "sheet": "root", "sheets": ["root"],
+                          "file": "boards/demo_board/demo_board.kicad_sch", "line": 412, "uuid": "5b0e6c1e-0000-4000-8000-000000000001",
+                          "pos_mm": [135.5, 80.0], "bbox_mm": [133.5, 76.5, 14, 11], "off_count": 3,
+                          "points": [{"name": "1", "pos_mm": [135.5, 82.0], "off_mm": [0.48, 0.06]}, {"name": "2", "pos_mm": [145.5, 82.0], "off_mm": [-0.13, 0.06]},
+                                     {"name": "3", "pos_mm": [140.5, 76.0], "off_mm": [0.17, -0.2]}],
+                          "related": [{"kind": "wire", "uuid": "5b0e6c1e-0000-4000-8000-000000000002", "line": 530, "text": None, "change": "moved", "off_count": 1}],
+                          "detail": "3 of 3 pins off the 50 mil grid, e.g. pin 1 at (135.5, 82) (x +0.48 y +0.06 mm); also 1 wire attached"},
+                         {"kind": "global_label", "severity": "warning", "change": "added", "ref": None, "text": "+3V3", "sheet": "root/power", "sheets": ["root/power"],
+                          "file": "boards/demo_board/power.kicad_sch", "line": 88, "uuid": "5b0e6c1e-0000-4000-8000-000000000003",
+                          "pos_mm": [200.0, 130.0], "bbox_mm": [198.73, 128.73, 2.54, 2.54], "off_count": 1,
+                          "points": [{"name": "", "pos_mm": [200.0, 130.0], "off_mm": [-0.66, 0.54]}], "related": [],
+                          "detail": "off the 50 mil grid at (200, 130) (x -0.66 y +0.54 mm)"},
+                     ]},
         },
         "errors": ["kicad-cli: STEP export skipped (mock)"],
     }
