@@ -161,21 +161,22 @@ def pad_geom(p, grow=0.0):
         pg = _gfx_geom(g, grow)
         if pg is not None:
             parts.append(pg)
-    return _place(unary_union(parts), p)
+    ox, oy = p.get("offset", (0.0, 0.0))  # KiCad shape offset: copper at at+offset, hole at at
+    return _place(affinity.translate(unary_union(parts), ox, oy), p)
 
 
 def drill_geom(p):
     d = p["drill"]
     if not d:
         return None
-    ox, oy = d["offset"]
+    # the hole is at the pad position; (drill (offset)) moves the copper (pad_geom)
     w, h = d["w"], d["h"]
     r = min(w, h) / 2
     dx, dy = max(0.0, w / 2 - r), max(0.0, h / 2 - r)
     if dx or dy:
-        g = LineString([(ox - dx, oy - dy), (ox + dx, oy + dy)]).buffer(r, quad_segs=QS * 2)
+        g = LineString([(-dx, -dy), (dx, dy)]).buffer(r, quad_segs=QS * 2)
     else:
-        g = Point(ox, oy).buffer(r, quad_segs=QS * 2)
+        g = Point(0, 0).buffer(r, quad_segs=QS * 2)
     return _place(g, p)
 
 

@@ -1,7 +1,7 @@
 // Unit tests for the pure parts of the viewer.   node --test tests/library/viewer/unit.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelMatrix, applyMatrix, padToPcb, padDrill, padCopperSides, padOutline } from '../../../web/library/js/kicad3d.js';
+import { modelMatrix, applyMatrix, padToPcb, padDrill, padCopperSides, padOutline, padOffset, padHoleCenter } from '../../../web/library/js/kicad3d.js';
 import { safeUrl, assetUrl, githubBlobUrl } from '../../../web/library/js/util.js';
 import { diffRows } from '../../../web/library/js/details.js';
 
@@ -35,6 +35,24 @@ test('pad helpers', () => {
   assert.equal(padDrill(pad).w, 0.8);
   assert.equal(padDrill({ drill: null }), null);
   assert.equal(padOutline({ size: [1, 1], shape: 'roundrect', roundrect_rratio: 0.25 }).outer.length, 36);
+});
+
+test('pad shape offset moves the copper, not the hole (KiCad (drill (offset)))', () => {
+  const box = (ring) => [Math.min(...ring.map((q) => q[0])), Math.max(...ring.map((q) => q[0]))];
+  // RP2040-Zero castellated pad 1: SMD, offset only, copper centred 0.65 mm outward of `at`
+  const smd = { at: [-7.62, -10.16, 0], size: [3, 1.7], shape: 'roundrect', roundrect_rratio: 0.25, offset: [-0.65, 0], drill: null };
+  assert.ok(near(box(padOutline(smd).outer), [-2.15, 0.85], 1e-9));
+  assert.equal(padDrill(smd), null);
+  // rotated THT pad: offset turns with the pad; hole stays on `at`
+  const tht = { at: [2, 3, 90], size: [1, 2], shape: 'oval', offset: [0, -0.5], drill: { shape: 'circle', size: [0.6, 0.6] } };
+  const c = padOutline(tht, 32).outer.map((q) => padToPcb(tht, q));
+  const mid = (i) => (Math.min(...c.map((q) => q[i])) + Math.max(...c.map((q) => q[i]))) / 2;
+  assert.ok(near([mid(0), mid(1)], padToPcb(tht, [0, -0.5]), 1e-9));
+  assert.ok(near(padToPcb(tht, [0, -0.5]), [1.5, 3], 1e-12));
+  assert.deepEqual(padHoleCenter(tht), [2, 3]);
+  // geom.json from before the fix: the offset only came as drill.offset
+  assert.deepEqual(padOffset({ drill: { size: [1, 1], offset: [0.2, 0] } }), [0.2, 0]);
+  assert.deepEqual(padOffset({ drill: null }), [0, 0]);
 });
 
 test('URL filters', () => {
