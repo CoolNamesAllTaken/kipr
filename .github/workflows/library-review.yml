@@ -59,6 +59,10 @@ on:
         description: also run the official KLC checker (kicad-library-utils at a pinned commit, cached)
         type: boolean
         default: true
+      klc-error-severity:
+        description: "severity of the 'KLC could not check this item' finding: error, warning (default) or info"
+        type: string
+        default: warning
       use-kicad-cli:
         description: also export reference SVGs with kicad-cli (items/<slug>/kicad_cli_<side>.svg)
         type: boolean
@@ -179,6 +183,7 @@ jobs:
         continue-on-error: true
         env:
           KLC: ${{ inputs.klc }}
+          CR_KLC_ERROR_SEVERITY: ${{ inputs.klc-error-severity }}   # read by `kipr library checks`
         run: |
           extra=()
           if [ "$KLC" = "true" ]; then

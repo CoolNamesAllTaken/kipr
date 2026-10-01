@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
 import sys
 
+from kipr.common import kicad_cli as kicad_cli_mod
 from kipr.common import sexpr
 
 from .. import layout as layoutmod
@@ -85,6 +87,7 @@ class Item:
         lr = (raw.get("line_range") or {}).get("head")
         self.file_start = lr[0] if isinstance(lr, list) and lr else None
         self.file_end = lr[1] if isinstance(lr, list) and len(lr) > 1 else None
+        self.out_dir = out_dir
         self.source_text, self.source_origin = self._load_source(out_dir, repo)
         self.node = None
         self.linemap = kc.LineMap(1, self.file_start)
@@ -132,7 +135,7 @@ class Item:
         self.checks.extend(cs)
 
     def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D,
-                klc_error_severity: str = "warning"):
+                klc_error_severity: str = "warning", upgrader: "Upgrader | None" = None):
         if self.status == "deleted":
             return
         if self.node is None:
@@ -154,18 +157,59 @@ class Item:
             fs, cs = kc.check_symbol(self.node, self.linemap)
         self.add(fs, cs)
         if klc_utils.available(klu_dir):
-            self.add_klc(klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text),
-                         klc_error_severity)
+            res = klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text)
+            upgraded = None
+            # Only when the checker can't read the original: symbols it refuses for their file
+            # version, footprints it can't load (legacy `module` files). Readable originals are
+            # checked as they are: on an upgraded footprint the checker misses e.g. unlocked RefDes.
+            if upgrader is not None and (res.version_mismatch if self.kind == "symbol" else res.parse_failed):
+                res, upgraded = self.klc_on_upgraded_copy(klu_dir, upgrader, res)
+            self.add_klc(res, klc_error_severity, upgraded)
         for w in self.raw.get("warnings") or []:
             self.add([kc.finding("info", f"Render: {w}")])
 
-    def add_klc(self, res: "klc_utils.KlcResult", error_severity: str = "warning"):
+    def klc_on_upgraded_copy(self, klu_dir: str, upgrader: "Upgrader", first: "klc_utils.KlcResult"):
+        """The checker can't read the original: check a KiCad-upgraded temporary copy instead.
+        Returns (result, upgrade record or None). The repo is never touched."""
+        old = _file_version(self.source_text) or "legacy (no version)"
+        why = (f"{self.kind} file version {old} is not supported by the KLC checker ({first.version_mismatch[1]})"
+               if first.version_mismatch else first.error)
+        text, rec, err = upgrader.upgrade(self)
+        if text is None:
+            return klc_utils.KlcResult(error=f"{why}, and upgrading a copy failed: {err}",
+                                       stderr_tail=first.stderr_tail), None
+        res = klc_utils.run(klu_dir, self.kind, self.library, self.name, text)
+        if res.ok:
+            res.findings = [self.map_klc_line(f) for f in res.findings]
+        else:
+            res.error = f"{res.error} (on a copy upgraded by KiCad {rec.get('kicad')}; original: {why})"
+        return res, rec
+
+    def map_klc_line(self, f: dict) -> dict:
+        """KLC findings carry no line. One that names exactly one pin of this symbol gets that
+        pin's line in the original (pins are matched by number and name); anything else stays
+        line-less and is shown at the item's first line."""
+        if self.kind != "symbol":
+            return f
+        refs = {(m.group(2), m.group(1)) for m in _PIN_REF.finditer(f.get("message") or "")}
+        if len(refs) == 1:
+            (num, name), = refs
+            hits = [p for p in self.pins if p["number"] == num and p["name"] == name]
+            if len(hits) == 1 and hits[0].get("line"):
+                f["line"] = self.linemap(hits[0]["line"])
+        return f
+
+    def add_klc(self, res: "klc_utils.KlcResult", error_severity: str = "warning", upgraded: dict | None = None):
         """Record the official checker's outcome. A run that didn't really check the item is
         never a pass: it becomes klc status "error" plus a finding saying so."""
         name = "KiCad KLC checker (kicad-library-utils)"
         if res.ok:
             self.klc = {"status": "ok", "attempts": res.attempts}
             detail = f"{len(res.findings)} violation(s)"
+            if upgraded:
+                self.klc["upgraded"] = upgraded
+                detail += (f"; checked on a KiCad {upgraded.get('kicad')}-upgraded copy "
+                           f"(file version {upgraded.get('from')} → {upgraded.get('to')})")
             if res.retried_because:
                 detail += f" (retried once: {res.retried_because})"
                 self.klc["retried_because"] = res.retried_because
@@ -184,6 +228,71 @@ class Item:
     def det_verdict(self) -> str:
         sev = {f["severity"] for f in self.findings}
         return "fail" if "error" in sev else "warn" if "warning" in sev else "pass"
+
+
+# kicad-library-utils' pinString(): "Pin <name> (<number>)", then " @ (x,y)" / " in unit n" / end
+_PIN_REF = re.compile(r"Pin (\S(?:[^()]*?\S)?) \(([^()\s]+)\)(?= @ \(| in unit |[\s:;,.]|$)")
+UPGRADED_SUFFIX = ".klc-upgraded"
+
+
+class Upgrader:
+    """KiCad-upgraded copies of item sources the KLC checker can't read (symbol files at another
+    file version, legacy footprints).
+
+    With kicad-cli (the unprivileged CI job runs in the KiCad image) the copy is made with
+    `kicad-cli sym upgrade` / `fp upgrade` and saved next to the item's source in OUT
+    (items/<slug>/head.klc-upgraded.kicad_sym|.kicad_mod + .json). Without it (the privileged publish job,
+    which never runs KiCad on PR data) a saved copy is used if its .json matches the source's
+    sha256. Either way it is only data for the KLC checker, like the source itself."""
+
+    def __init__(self, kicad_cli: str | None):
+        self.exe = kicad_cli
+        self.kicad = kicad_cli_mod.version(kicad_cli) if kicad_cli else None
+        if kicad_cli and not self.kicad:
+            self.exe = None
+
+    def _paths(self, item: Item):
+        rel = (item.raw.get("source") or {}).get("head")
+        if item.source_origin != "out" or not isinstance(rel, str):
+            return None, None
+        stem, ext = os.path.splitext(rel)
+        return safe_join(item.out_dir, stem + UPGRADED_SUFFIX + ext), safe_join(item.out_dir, stem + UPGRADED_SUFFIX + ".json")
+
+    def upgrade(self, item: Item) -> tuple[str | None, dict, str]:
+        """(upgraded text or None, record {from, to, kicad}, error)."""
+        sha = hashlib.sha256(item.source_text.encode("utf-8")).hexdigest()
+        copy, meta = self._paths(item)
+        if copy and meta and os.path.isfile(copy) and os.path.isfile(meta):
+            try:
+                with open(meta, encoding="utf-8") as fh:
+                    rec = json.load(fh)
+                if isinstance(rec, dict) and rec.get("source_sha256") == sha:
+                    text = read_text(copy)
+                    if text:
+                        return text, {k: str(rec.get(k)) for k in ("from", "to", "kicad")}, ""
+            except (OSError, ValueError):
+                pass
+        if not self.exe:
+            return None, {}, "kicad-cli is not available here (and no upgraded copy was saved with the item)"
+        text, err = kicad_cli_mod.upgrade_text(self.exe, item.kind, item.source_text, f"{item.name}.kicad_mod")
+        if text is None:
+            return None, {}, err
+        rec = {"from": _file_version(item.source_text) or "legacy (no version)", "to": _file_version(text),
+               "kicad": self.kicad}
+        if copy and meta:
+            try:
+                with open(copy, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                with open(meta, "w", encoding="utf-8") as fh:
+                    json.dump({**rec, "source_sha256": sha}, fh)
+            except OSError:
+                pass  # the copy is a convenience for the publish job; the check itself has the text
+        return text, rec, ""
+
+
+def _file_version(text: str) -> str | None:
+    m = re.search(r"\(version (\d+)\)", text or "")
+    return m.group(1) if m else None
 
 
 def pair_items(items: list[Item]) -> None:
@@ -311,6 +420,9 @@ def add_arguments(ap):
     ap.add_argument("--site-url", default=os.environ.get("CR_SITE_URL"), help="viewer URL to link from review.md")
     ap.add_argument("--klc-utils", default=os.environ.get("CR_KLC_UTILS"),
                     help="path to a kicad-library-utils checkout; runs its KLC checkers too (optional)")
+    ap.add_argument("--kicad-cli", default=None,
+                    help="kicad-cli for upgrading symbol files the KLC checker can't read (default: "
+                         "$KIPR_KICAD_CLI, $KICAD_CLI or PATH; optional)")
     ap.add_argument("--klc-error-severity", choices=tuple(SEV_ORDER),
                     default=os.environ.get("CR_KLC_ERROR_SEVERITY") or "warning",
                     help="severity of the 'KLC could not check this item' finding (default warning, "
@@ -352,8 +464,9 @@ def run(args) -> int:
               f"use one of {', '.join(SEV_ORDER)}", file=sys.stderr)
         return 2
     models_dir = layoutmod.Layout(models=getattr(args, "lib_3d", layoutmod.DEFAULT_3D)).models
+    upgrader = Upgrader(kicad_cli_mod.find(args.kicad_cli)) if klu_dir else None
     for it in items:
-        it.analyse(repo, klu_dir, models_dir, args.klc_error_severity)
+        it.analyse(repo, klu_dir, models_dir, args.klc_error_severity, upgrader)
     pr_findings = [
         {"severity": "warning", "category": "3d-model", "path": p, "line": None,
          "message": f"3D model file `{p}` is added/changed in this PR but no footprint references it.",
