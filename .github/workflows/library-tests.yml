@@ -37,7 +37,8 @@ jobs:
           python -m pip install -q -e ".[3d,test]"
           python -m playwright install --with-deps chromium
       - name: Tests
-        run: python -m pytest tests/library -q
+        # per-test limit: a stuck browser test fails with its name instead of running into the job timeout
+        run: python -m pytest tests/library -q --timeout=600 --durations=15
       - name: kipr library on its fixture repo
         run: |
           python tests/library/fixture_repo.py "$RUNNER_TEMP/repo"

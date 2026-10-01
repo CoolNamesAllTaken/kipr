@@ -182,6 +182,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
   }
 
   function applyVisibility() {
+    invalidate();
     forEachTagged((o, side) => {
       let on = visible[o.userData.group] !== false;
       // overlay: one board (head's) with both sides' copper + models drawn see-through
@@ -191,6 +192,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
   }
 
   function applyOverlayMaterials() {
+    invalidate();
     forEachTagged((o, side) => {
       if (!['pads', 'model'].includes(o.userData.group)) return;
       o.userData.origMat ??= o.material;
@@ -248,18 +250,30 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
     controls.target.copy(center);
     camera.lookAt(center);
     controls.update();
+    invalidate();
   }
 
   let raf = 0;
   let stopped = false;
+  // Draw only when something changed (camera incl. damping, size, view/mode/visibility): an idle viewer costs
+  // nothing, which matters on laptops and in software GL (CI screenshots).
+  let dirty = true;
+  const invalidate = () => { dirty = true; };
+  controls.addEventListener('change', invalidate);
+
   function render() {
     if (stopped) return;
     raf = requestAnimationFrame(render);
-    controls.update();
+    const moved = controls.update();
     const w = container.clientWidth || 400;
     const h = container.clientHeight || 300;
     const px = renderer.getPixelRatio();
-    if (renderer.domElement.width !== Math.floor(w * px) || renderer.domElement.height !== Math.floor(h * px)) renderer.setSize(w, h, false);
+    if (renderer.domElement.width !== Math.floor(w * px) || renderer.domElement.height !== Math.floor(h * px)) {
+      renderer.setSize(w, h, false);
+      dirty = true;
+    }
+    if (!dirty && !moved) return;
+    dirty = false;
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.setScissor(0, 0, w, h);
