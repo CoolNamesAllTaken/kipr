@@ -28,7 +28,7 @@ Needs Python 3.10+, the system cairo library (`libcairo2`) and ideally DejaVu fo
 | Command | Writes |
 |---|---|
 | `kipr library render --repo . --base B --head H --out OUT [--pr N]` | `OUT/manifest.json`, `OUT/items/<slug>/…` |
-| `kipr library checks --out OUT [--klc-utils DIR] [--site-url URL]` | `OUT/review.json`, `OUT/review.md` |
+| `kipr library checks --out OUT [--klc-utils DIR [--kicad-cli PATH]] [--site-url URL]` | `OUT/review.json`, `OUT/review.md` |
 | `kipr library site --out OUT [--no-offline]` | the viewer (`index.html`, `js/`, `data.js`, `offline/`, `serve.py`) |
 | `kipr library report --out OUT [--output FILE] [--max-mb 20]` | `OUT/component-review.html` |
 
@@ -64,13 +64,36 @@ Otherwise the item gets KLC status `error` instead of a pass:
   comment mark the item "KLC not checked"; the job summary counts them.
 
 Causes it reports: a crash (traceback; e.g. a symbol property without `(effects)`), "Could not
-parse" (the pinned checker only accepts its own symbol file version, so symbol libraries saved
-by older KiCad versions, e.g. `(version 20241209)`, are not KLC-checked), a timeout (120 s), a
-killed process, and a missing, unreadable or empty report or one that contradicts the exit code.
+parse" that an upgraded copy doesn't fix (below), a timeout (120 s), a killed process, and a missing, unreadable or empty report or one that contradicts the exit code.
 The last three, and a killed process, can be flakes (`check_symbol.py` can drop a worker's
 results when the worker exits right after posting them), so they are retried once; a retry that
 succeeds is noted in the check's detail. Crashes, parse errors and timeouts are not retried, and
 neither are real passes.
+
+### Older file formats: KLC on a KiCad-upgraded copy
+
+The pinned checker reads only its own symbol file version (`20251024`) and can't load legacy
+`(module …)` footprints. For those items kipr writes a temporary copy re-saved by KiCad
+(`kicad-cli sym upgrade` / `fp upgrade --force`, `kipr.common.kicad_cli.upgrade_text`), runs KLC
+on the copy and attaches the findings to the original item. The repository's files are never
+changed.
+
+- The item's `klc` record gets `"upgraded": {"from": "20241209", "to": "20251024", "kicad":
+  "10.0.6"}` and the check's detail says "checked on a KiCad 10.0.6-upgraded copy (file version
+  20241209 → 20251024)". Only if the upgrade fails (or the copy is still unreadable) is the item
+  "KLC could not check".
+- Line numbers: KLC findings carry no line and are shown at the item's first line. A symbol
+  finding that names exactly one pin ("Pin GND (6) @ (0,-600)") gets that pin's line in the
+  original file (matched by pin number and name), never a line of the copy.
+- Footprints the checker can read are checked as they are, even at older versions: on an
+  upgraded footprint this checker version misses e.g. an unlocked RefDes (F5.1/F5.2), which it
+  does find in the KiCad 6/7 encoding. Symbols at the checker's version gave identical KLC
+  results before and after a forced re-save (11/11 kicad-libs libraries).
+- kicad-cli is found via `--kicad-cli`, `$KIPR_KICAD_CLI`, `$KICAD_CLI` or `PATH` (the
+  library-review job runs in the KiCad image). The copy is saved next to the item's source in OUT
+  (`items/<slug>/head.klc-upgraded.kicad_sym|.kicad_mod` + `.json` with the source's sha256), so
+  the privileged publish job, which never runs KiCad on PR data, re-checks the same copy as
+  data. A copy whose sha256 doesn't match the source is ignored.
 
 The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs.
 The viewer is documented in [`web/library/README.md`](../web/library/README.md).
@@ -129,11 +152,13 @@ Security notes:
 | `kicad-image` | `kicad/kicad:10.0` | job container; `none` runs on the plain runner |
 | `fetch-stock-models` | `true` | download stock KiCad 3D models (cached with actions/cache) |
 | `klc` | `true` | run the official KLC checker (cached) |
+| `klc-error-severity` | `warning` | severity of "KLC could not check this item" (`error`, `warning`, `info`) |
 | `use-kicad-cli` | `false` | also export reference SVGs with kicad-cli |
 | `retention-days` | `30` | artifact retention |
 
 `library-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`, `lib-3d` (finding
-messages), `klc` (`true`), `pages-url` (default `https://<owner>.github.io/<repo>/`),
+messages), `klc` (`true`), `klc-error-severity` (`warning`; same value as library-review.yml),
+`pages-url` (default `https://<owner>.github.io/<repo>/`),
 `fail-conclusion` (`neutral`; `failure` lets you require the check, or `success`).
 
 `library-review-cleanup.yml`: `kipr-ref`, `kipr-repository`.

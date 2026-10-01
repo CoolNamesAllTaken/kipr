@@ -286,6 +286,14 @@ if mode == "crash":
 if mode == "parse":
     print('Could not parse library: x.kicad_sym. (Version of symbol file is "20241209", not "20251024")')
     report(""); sys.exit(0)
+if mode == "fpparse":       # check_footprint.py on a legacy file it can't load
+    print("Could not parse footprint: x.kicad_mod. (list index out of range)")
+    sys.exit(3)
+if mode in ("pin1", "pins2"):  # S4.3 naming one pin / two pins
+    pins = "Pin IN (1) @ (-200,0)" if mode == "pin1" else "Pin IN (1) @ (-200,0); Pin VDD (3) @ (0,200)"
+    report('<testcase name="X - Warnings"><failure message="S4.3" type="WARNING">S4.3: Pin stacking'
+           '\n    https://klc.kicad.org/symbol/s4/s4.3/\n    Found legacy pin-stack ' + pins + '</failure></testcase>')
+    sys.exit(2)
 if mode == "empty":          # the check_symbol.py worker race: results lost, exit 0, no test case
     report(""); sys.exit(0)
 if mode == "inconsistent":   # errors in the report but exit 0
@@ -472,6 +480,154 @@ class PathSafetyTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # end-to-end on a mock OUT built from this repo's PR range (or synthetic data)
 # ---------------------------------------------------------------------------
+
+class KlcUpgradeTests(unittest.TestCase):
+    """Items the KLC checker can't read are checked on a KiCad-upgraded temporary copy."""
+
+    SYM_ID = "symbol:Custom_Test:AMP1"
+    FP_ID = "footprint:Custom_Test:R_0603_1608Metric"
+
+    def setUp(self):
+        import stat
+        import test_kicad_cli_upgrade as fake_cli
+        self.tmp = tempfile.mkdtemp()
+        self.klu = os.path.join(self.tmp, "klu")
+        os.makedirs(os.path.join(self.klu, "klc-check"))
+        for script in ("check_footprint.py", "check_symbol.py"):
+            with open(os.path.join(self.klu, "klc-check", script), "w") as f:
+                f.write(FAKE_CHECKER)
+        self.cli = os.path.join(self.tmp, "kicad-cli")
+        with open(self.cli, "w") as f:   # "upgrades" by rewriting (version ...) to 20990101
+            f.write(fake_cli.FAKE.replace("args = sys.argv[1:]\n", 'args = sys.argv[1:]\nif args == ["version"]:\n'
+                                                                 '    print("10.0.9"); sys.exit(0)\n', 1))
+        os.chmod(self.cli, os.stat(self.cli).st_mode | stat.S_IEXEC)
+        self.cli_argv = os.path.join(self.tmp, "cli_argv")
+        self.counter = os.path.join(self.tmp, "count")
+        self.out = os.path.join(self.tmp, "out")
+        build_synthetic_out(self.out)
+        self.sym_src = os.path.join(self.out, "items", "symbol__Custom_Test__AMP1", "head.kicad_sym")
+        with open(self.sym_src) as f:
+            text = f.read()
+        with open(self.sym_src, "w") as f:
+            f.write(text.replace("(version 20251024)", "(version 20241209)"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def stage(self, modes, cli=True, cli_mode="ok"):
+        from unittest import mock
+        for p in (self.counter, self.cli_argv):
+            if os.path.exists(p):
+                os.remove(p)
+        env = {"FAKE_KLC_MODE": modes, "FAKE_KLC_COUNTER": self.counter, "FAKE_ARGV": self.cli_argv,
+               "FAKE_MODE": cli_mode}
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(cr.kicad_cli_mod, "find", lambda explicit=None: self.cli if cli else None):
+            self.assertEqual(cr.run(cr.parse_args(["--out", self.out, "--klc-utils", self.klu])), 0)
+        with open(os.path.join(self.out, "review.json")) as f:
+            return json.load(f)
+
+    def klc_check(self, e):
+        return next(c for c in e["checks"] if c["name"].startswith("KiCad KLC checker"))
+
+    def test_symbol_checked_on_upgraded_copy(self):
+        # footprint: pass; symbol original: refused for its version; symbol copy: one KLC error
+        r = self.stage("pass,parse,errors")
+        e = r["items"][self.SYM_ID]
+        self.assertEqual(e["klc"], {"status": "ok", "attempts": 1,
+                                    "upgraded": {"from": "20241209", "to": "20990101", "kicad": "10.0.9"}})
+        self.assertEqual(self.klc_check(e), {
+            "name": "KiCad KLC checker (kicad-library-utils)", "result": "fail",
+            "detail": "1 violation(s); checked on a KiCad 10.0.9-upgraded copy (file version 20241209 → 20990101)"})
+        self.assertTrue(any("KLC F5.3" in f["message"] for f in e["findings"]))
+        self.assertFalse(any("could not check" in f["message"] for f in e["findings"]))
+        self.assertNotIn("KLC could not check", r["summary_markdown"])
+        self.assertEqual(r["items"][self.FP_ID]["klc"], {"status": "ok", "attempts": 1})   # not upgraded
+        # the copy was made with sym upgrade and saved next to the source; the source is untouched
+        self.assertEqual(open(self.cli_argv).read().split("\n")[:3], ["sym", "upgrade", "--force"])
+        d = os.path.dirname(self.sym_src)
+        with open(os.path.join(d, "head.klc-upgraded.kicad_sym")) as f:
+            self.assertIn("(version 20990101)", f.read())
+        with open(os.path.join(d, "head.klc-upgraded.json")) as f:
+            meta = json.load(f)
+        self.assertEqual({k: meta[k] for k in ("from", "to", "kicad")}, {"from": "20241209", "to": "20990101", "kicad": "10.0.9"})
+        with open(self.sym_src) as f:
+            self.assertIn("(version 20241209)", f.read())
+
+        # the publish job (no kicad-cli) reuses the saved copy while the source is unchanged
+        r = self.stage("pass,parse,errors", cli=False)
+        self.assertEqual(r["items"][self.SYM_ID]["klc"]["upgraded"]["from"], "20241209")
+        self.assertFalse(os.path.exists(self.cli_argv))
+        # ... but not a copy saved for different source text
+        with open(self.sym_src, "a") as f:
+            f.write("\n")
+        r = self.stage("pass,parse", cli=False)
+        e = r["items"][self.SYM_ID]
+        self.assertEqual(e["klc"]["status"], "error")
+        self.assertIn("symbol file version 20241209 is not supported by the KLC checker (20251024), and upgrading "
+                      "a copy failed: kicad-cli is not available here", e["klc"]["reason"])
+        self.assertIn("**KLC could not check 1 item(s)**", r["summary_markdown"])
+
+    def test_upgrade_failure_is_not_checked(self):
+        r = self.stage("pass,parse", cli_mode="fail")
+        e = r["items"][self.SYM_ID]
+        self.assertEqual(e["klc"]["status"], "error")
+        self.assertTrue(e["klc"]["reason"].endswith(
+            "and upgrading a copy failed: kicad-cli sym upgrade failed (exit 3): Unable to load library"), e["klc"]["reason"])
+        self.assertEqual(e["verdict"], "fail")   # SYM has real errors too; the KLC error adds a warning
+        self.assertTrue(any(f["message"].startswith("KLC could not check this item: symbol file version 20241209")
+                            for f in e["findings"]))
+
+    def test_copy_still_unreadable(self):
+        r = self.stage("pass,parse,parse")
+        e = r["items"][self.SYM_ID]
+        self.assertEqual(e["klc"]["status"], "error")
+        self.assertIn("(on a copy upgraded by KiCad 10.0.9; original: symbol file version 20241209", e["klc"]["reason"])
+
+    def test_footprints_only_when_unreadable(self):
+        # a readable footprint is checked as it is (the checker misses e.g. unlocked RefDes on upgraded copies)
+        r = self.stage("pass,pass")
+        self.assertEqual(r["items"][self.FP_ID]["klc"], {"status": "ok", "attempts": 1})
+        self.assertFalse(os.path.exists(self.cli_argv))
+        # a legacy footprint the checker can't load is checked on an fp-upgraded copy
+        r = self.stage("fpparse,errors,pass")
+        e = r["items"][self.FP_ID]
+        self.assertEqual(e["klc"]["upgraded"]["to"], "20990101")
+        self.assertEqual(self.klc_check(e)["result"], "fail")
+        argv = open(self.cli_argv).read().split("\n")
+        self.assertEqual(argv[:3], ["fp", "upgrade", "--force"])
+        self.assertEqual(argv[argv.index("LS") + 1:], ["R_0603_1608Metric.kicad_mod"])   # named after the footprint
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "items", "footprint__Custom_Test__R_0603_1608Metric",
+                                                    "head.klc-upgraded.kicad_mod")))
+        # a crash is not a reason to upgrade
+        r = self.stage("crash,pass")
+        self.assertEqual(r["items"][self.FP_ID]["klc"]["status"], "error")
+        self.assertNotIn("upgraded", r["items"][self.FP_ID]["klc"]["reason"])
+
+    def test_pin_findings_get_the_pin_line(self):
+        sym_lines = SYM.splitlines()
+        line_of = lambda pat: 4 + next(i for i, l in enumerate(sym_lines) if pat in l) - next(
+            i for i, l in enumerate(sym_lines) if '(symbol "AMP1"' in l)   # file_start 4 = the symbol's line
+        r = self.stage("pass,parse,pin1")
+        f = next(x for x in r["items"][self.SYM_ID]["findings"] if "KLC S4.3" in x["message"])
+        self.assertEqual(f["line"], line_of('(name "IN"'))
+        r = self.stage("pass,parse,pins2")     # two pins named: no single line
+        f = next(x for x in r["items"][self.SYM_ID]["findings"] if "KLC S4.3" in x["message"])
+        self.assertIsNone(f["line"])
+
+    @unittest.skipUnless(os.environ.get("CR_KLC_UTILS") and cr.kicad_cli_mod.find(),
+                         "needs CR_KLC_UTILS and kicad-cli")
+    def test_real_tools(self):
+        with open(self.sym_src, "w") as f:
+            f.write(SYM_KLC.replace("(version 20251024)", "(version 20241209)"))
+        self.assertEqual(cr.run(cr.parse_args(["--out", self.out, "--klc-utils", os.environ["CR_KLC_UTILS"]])), 0)
+        with open(os.path.join(self.out, "review.json")) as f:
+            e = json.load(f)["items"][self.SYM_ID]
+        self.assertEqual(e["klc"]["status"], "ok", e["klc"])
+        self.assertEqual(e["klc"]["upgraded"]["from"], "20241209")
+        self.assertEqual(e["klc"]["upgraded"]["to"], "20251024")
+        self.assertIn("upgraded copy", self.klc_check(e)["detail"])
+
 
 def build_synthetic_out(out):
     """Minimal OUT without git: one footprint + one symbol pointing at it."""

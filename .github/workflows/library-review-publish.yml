@@ -39,6 +39,10 @@ on:
         description: re-run the official KLC checker (fetched fresh at the pinned commit, ~1 s)
         type: boolean
         default: true
+      klc-error-severity:
+        description: "severity of the 'KLC could not check this item' finding: error, warning (default) or info; pass the same value as to library-review.yml"
+        type: string
+        default: warning
       pages-url:
         description: viewer base URL (default https://<owner>.github.io/<repo>/)
         type: string
@@ -124,6 +128,7 @@ jobs:
         if: steps.pr.outputs.skip == 'false'
         env:
           KLC: ${{ inputs.klc }}
+          CR_KLC_ERROR_SEVERITY: ${{ inputs.klc-error-severity }}   # read by `kipr library checks`
           LIB_3D: ${{ inputs.lib-3d }}
           CR_PAGES_URL: ${{ inputs.pages-url }}
           PR_NUMBER: ${{ steps.pr.outputs.pr }}

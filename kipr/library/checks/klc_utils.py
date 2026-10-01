@@ -58,10 +58,18 @@ class KlcResult:
     stderr_tail: str = ""             # last lines of the checker's stderr/stdout, for the finding
     attempts: int = 1
     retried_because: str | None = None  # first attempt's reason when a retry then succeeded
+    # (file version, version the checker wants) when it refused the file only for its version;
+    # the checks stage then retries on a KiCad-upgraded copy (see main.Item.add_klc_upgraded)
+    version_mismatch: tuple[str, str] | None = None
+    parse_failed: bool = False  # the checker could not load the file at all ("Could not parse")
 
     @property
     def ok(self) -> bool:
         return self.error is None
+
+
+# kicad-library-utils' symbol loader accepts exactly one file version
+_VERSION_RE = re.compile(r'could not parse the item: Version of symbol file is "(\d+)", not "(\d+)"')
 
 
 class _Failed(Exception):
@@ -150,7 +158,10 @@ def run(klu_dir: str, kind: str, library: str, name: str, source_text: str) -> K
                     continue
                 reason = e.reason if attempt == 1 else f"{e.reason} (after {attempt} attempts)"
                 tail = e.tail.replace(tmp, "<tmp>").replace(os.path.abspath(klu_dir), "<kicad-library-utils>")
-                return KlcResult(error=reason, stderr_tail=tail, attempts=attempt)
+                vm = _VERSION_RE.search(e.reason)
+                return KlcResult(error=reason, stderr_tail=tail, attempts=attempt,
+                                 version_mismatch=(vm.group(1), vm.group(2)) if vm else None,
+                                 parse_failed=e.reason.startswith("KLC checker could not parse"))
             return KlcResult(findings=parse_junit(root), attempts=attempt,
                              retried_because=first if attempt > 1 else None)
     raise AssertionError("unreachable")
