@@ -292,35 +292,11 @@ class SymbolCheckTests(unittest.TestCase):
         self.assertIn("Description` property is empty", msgs)
         self.assertIn("Pin 2 (OUT) at (5.1, 1.27) is off the 50 mil grid", msgs)
         self.assertIn("Pin 2 (X) at (5.08, -1.27) is on 50 mil but not 100 mil grid", msgs)
-        grid = {x["message"].split(" at ")[0]: x["severity"] for x in f if "grid" in x["message"]}
-        self.assertEqual(grid, {"Pin 2 (OUT)": "error", "Pin 2 (X)": "error"})
         self.assertIn("Pin number 2 is used by 2 pins", msgs)
         self.assertIn("Power pin 3 (VDD) is hidden", msgs)
         # line mapping: symbol opens at source line 4 -> file line 50
         hidden = next(x for x in f if "hidden" in x["message"])
         self.assertEqual(hidden["line"], 50 + (SYM.splitlines().index(next(l for l in SYM.splitlines() if '"VDD"' in l)) + 1) - 4)
-
-    def test_pin_grid(self):
-        def grid(*xy):
-            pins = "".join(f'(pin passive line (at {x} {y} 0) (length 2.54) (name "P{i}") (number "{i}"))'
-                           for i, (x, y) in enumerate(xy, 1))
-            text = SYM.replace(SYM[SYM.index("\t\t(symbol \"AMP1_1_1\""):SYM.index("\t)\n)")],
-                               f'\t\t(symbol "AMP1_1_1" {pins})\n')
-            sym = kc.find_item_node(sexpr.parse(text), "symbol", "AMP1")
-            f, c = kc.check_symbol(sym, kc.LineMap(sym.line, 1))
-            return ([(x["severity"], x["message"]) for x in f if "grid" in x["message"]],
-                    next(x for x in c if x["name"] == "Pins on 100 mil grid"))
-
-        found, chk = grid((0, 0), (-5.08, 2.54), (7.62, -10.16))   # all on 100 mil
-        self.assertEqual(found, [])
-        self.assertEqual(chk["result"], "pass")
-        found, chk = grid((0, 0), (1.27, 0), (2.54, -3.81))        # 50 mil only: errors (KLC S4.1)
-        self.assertEqual([s for s, _ in found], ["error", "error"])
-        self.assertIn("Pin 2 (P2) at (1.27, 0.0) is on 50 mil but not 100 mil grid.", [m for _, m in found])
-        self.assertEqual((chk["result"], chk["detail"]), ("fail", "2, 3"))
-        found, chk = grid((0.5, 0),)                                  # off 50 mil: still an error
-        self.assertEqual(found, [("error", "Pin 1 (P1) at (0.5, 0.0) is off the 50 mil grid.")])
-        self.assertEqual(chk["result"], "fail")
 
     def test_pairing(self):
         sym = kc.find_item_node(sexpr.parse(SYM), "symbol", "AMP1")

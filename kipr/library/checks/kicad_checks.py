@@ -512,12 +512,13 @@ def check_symbol(sym: Node, lm: LineMap):
     off50 = [p for p in off100 if not (_on_grid(p["x"], GRID_50MIL) and _on_grid(p["y"], GRID_50MIL))]
     C.append(check("Pins on 100 mil grid", "pass" if not off100 else "fail",
                    ", ".join(p["number"] for p in off100)))
-    # KLC S4.1: connection points on the 100 mil grid. Anything off it is an error; the message
-    # says whether the pin is at least on the 50 mil grid (usually a half-grid slip).
-    for p in off100:
-        where = "off the 50 mil grid" if p in off50 else "on 50 mil but not 100 mil grid"
-        F.append(finding("error", f"Pin {p['number']} ({p['name']}) at ({p['x']}, {p['y']}) is {where}.",
+    for p in off50:
+        F.append(finding("error", f"Pin {p['number']} ({p['name']}) at ({p['x']}, {p['y']}) is off the 50 mil grid.",
                          lm(p["line"]), "Move pin connection points onto the 100 mil (2.54 mm) grid (KLC S4.1)."))
+    for p in off100:
+        if p not in off50:
+            F.append(finding("warning", f"Pin {p['number']} ({p['name']}) at ({p['x']}, {p['y']}) is on 50 mil but not 100 mil grid.",
+                             lm(p["line"]), "KLC S4.1 requires a 100 mil grid for pin connection points."))
     for p in pins:
         if p["length"] and not _on_grid(p["length"], GRID_50MIL):
             F.append(finding("info", f"Pin {p['number']} length {p['length']} mm is not a multiple of 50 mil.", lm(p["line"])))

@@ -63,9 +63,6 @@ kipr's own KLC-style rules (`kicad_checks.py`) have no footprint-origin rule. Th
 counterpart, F6.2 ("anchor does not match calculated center"), already agrees with a centroid
 origin and is reported as info.
 
-Symbol pins must be on the 100 mil grid (KLC S4.1): a pin connection point off it is an error,
-whether or not it is on the 50 mil grid.
-
 The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs.
 The viewer is documented in [`web/library/README.md`](../web/library/README.md).
 
