@@ -40,10 +40,37 @@ Useful options of the end-to-end run (see `kipr library --help`):
   the repository root.
 - `--klc-utils DIR`: also run the official KLC checker; `kipr library ci fetch-klc-utils DIR`
   fetches kicad-library-utils at the pinned commit (`kipr/library/ci/klc_utils.ref`).
+- `--klc-error-severity error|warning|info` (or `CR_KLC_ERROR_SEVERITY`; default `warning`):
+  severity of the "KLC could not check this item" finding, so whether an item the KLC checker
+  could not check is `fail`, `warn` (default) or left to its other findings. See
+  [When the KLC checker fails](#when-the-klc-checker-fails).
 - `--fetch-stock-models [--stock-models-dir DIR]`: download `${KICADn_3DMODEL_DIR}` models from
   kicad-packages3D at the tag pinned in `kipr/library/render/stock_models_tag.txt`.
 - `--no-3d`, `--no-preview`, `--png-size`, `--repo-name owner/repo` (default
   `$GITHUB_REPOSITORY`, else the github.com `origin` remote), `--report FILE`, `--skip STAGE`.
+
+### When the KLC checker fails
+
+An item only counts as KLC-checked when kicad-library-utils demonstrably checked it: its JUnit
+report has a test case for the item and agrees with the exit code (0 clean, 2 warnings, 3 errors).
+Otherwise the item gets KLC status `error` instead of a pass:
+
+- `review.json`: `items[id].klc = {"status": "error", "reason": "…", "attempts": n}` (additive;
+  `{"status": "ok", "attempts": n}` when it ran), the "KiCad KLC checker" check has result
+  `error`, and there is a finding "KLC could not check this item: <reason>." with the last lines
+  of the checker's output, at `--klc-error-severity` (default warning, so the verdict is at least
+  `warn`).
+- The summary says "**KLC could not check N item(s)**". The HTML report, the viewer and the PR
+  comment mark the item "KLC not checked"; the job summary counts them.
+
+Causes it reports: a crash (traceback; e.g. a symbol property without `(effects)`), "Could not
+parse" (the pinned checker only accepts its own symbol file version, so symbol libraries saved
+by older KiCad versions, e.g. `(version 20241209)`, are not KLC-checked), a timeout (120 s), a
+killed process, and a missing, unreadable or empty report or one that contradicts the exit code.
+The last three, and a killed process, can be flakes (`check_symbol.py` can drop a worker's
+results when the worker exits right after posting them), so they are retried once; a retry that
+succeeds is noted in the check's detail. Crashes, parse errors and timeouts are not retried, and
+neither are real passes.
 
 The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs.
 The viewer is documented in [`web/library/README.md`](../web/library/README.md).

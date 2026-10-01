@@ -17,7 +17,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from .common import (MARKER, SEVERITY_RANK, check_repo, check_sha, finding_line_no, findings_of, generator_of, item_review, load_site,
+from .common import (KLC_NOT_CHECKED, MARKER, SEVERITY_RANK, check_repo, klc_not_checked, check_sha, finding_line_no, findings_of, generator_of, item_review, load_site,
                      md_block, md_code, md_inline, overall_verdict, parse_pr_number, safe_http_url,
                      safe_repo_path, safe_site_file, safe_slug, verdict_of)
 
@@ -101,7 +101,8 @@ def details_block(ctx: Ctx, item: dict, review, inlined: set[str]) -> str:
     status = item.get("status")
     kind = md_inline(item.get("kind"), 20)
     summary = (f"{VERDICT_ICON[v]} <b>{md_inline(item_label(item), 120)}</b> "
-               f"<sub>{kind} · {md_inline(status, 20)}</sub>")
+               f"<sub>{kind} · {md_inline(status, 20)}"
+               + (f" · ⚠️ {KLC_NOT_CHECKED}" if klc_not_checked(ir) else "") + "</sub>")
     lines = [f"<details><summary>{summary}</summary>", ""]
 
     links = []
@@ -239,7 +240,8 @@ def build_comment(ctx: Ctx, manifest: dict, review, *, artifact_url: str | None 
         comp = f"[{name}]({ctx.viewer}#{slug})" if slug else name
         table.append(f"| {VERDICT_ICON[v]} | {comp} | {md_inline(i.get('kind'), 20)} | "
                      f"{STATUS_TEXT.get(i.get('status'), md_inline(i.get('status'), 20))} | "
-                     f"{VERDICT_TEXT[v]} | {top_findings_cell(findings_of(ir))} |")
+                     f"{VERDICT_TEXT[v]}{f'<br>⚠️ {KLC_NOT_CHECKED}' if klc_not_checked(ir) else ''} | "
+                     f"{top_findings_cell(findings_of(ir))} |")
         table_len += len(table[-1])
     if not items:
         table = ["_No footprint or symbol changes were found in this PR._"]

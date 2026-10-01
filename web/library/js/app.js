@@ -3,7 +3,7 @@ import { el, clear, append, fetchJson, githubUrl, shortSha, markdown, badge } fr
 import { createView2D } from './view2d.js';
 import { createPanel3D, has3d } from './panel3d.js';
 import { renderDetails } from './details.js';
-import { renderReview, reviewFor, findingCounts, renderFindings, sortFindings, generatorOf } from './review.js';
+import { renderReview, reviewFor, findingCounts, klcBadge, renderFindings, sortFindings, generatorOf } from './review.js';
 
 const $ = (sel) => document.querySelector(sel);
 const KIND_LABEL = { footprint: 'Footprints', symbol: 'Symbols' };
@@ -104,7 +104,8 @@ function renderList() {
       el('span', { class: 'item-meta' },
         el('span', { class: 'lib', title: it.library }, it.library),
         badge('status', it.status),
-        r ? badge('verdict', r.verdict, `${c.error} errors, ${c.warning} warnings`) : null))));
+        r ? badge('verdict', r.verdict, `${c.error} errors, ${c.warning} warnings`) : null,
+        klcBadge(r)))));
     }
     list.append(ul);
   }
@@ -161,7 +162,7 @@ function renderOverview(unknownSlug) {
       el('td', {}, el('a', { href: `#${it.slug}` }, it.name)),
       el('td', {}, it.library), el('td', {}, it.kind),
       el('td', {}, badge('status', it.status)),
-      el('td', {}, r ? badge('verdict', r.verdict) : el('span', { class: 'muted' }, '—')),
+      el('td', {}, r ? [badge('verdict', r.verdict), ' ', klcBadge(r)] : el('span', { class: 'muted' }, '—')),
       el('td', { class: 'num' }, r ? String(c.error) : ''), el('td', { class: 'num' }, r ? String(c.warning) : ''),
       el('td', { class: 'num' }, it.warnings?.length ? String(it.warnings.length) : ''));
   });
@@ -183,6 +184,7 @@ function renderItem(item) {
     el('span', { class: 'muted' }, `${item.library} · ${item.kind}`),
     badge('status', item.status),
     r ? badge('verdict', r.verdict) : null,
+    klcBadge(r),
     el('button', { class: 'btn small', title: 'Copy a link to this item', onclick: (e) => copyLink(e.currentTarget) }, 'Copy link'));
 
   // view tabs

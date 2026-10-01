@@ -200,7 +200,12 @@
           "line": null
         }
       ],
-      "checks": []
+      "checks": [],
+      "klc": {
+        "status": "error",
+        "reason": "KLC checker crashed: IndexError: list index out of range",
+        "attempts": 1
+      }
     },
     "symbol:Custom_Audio:NS4168": {
       "verdict": "pass",
