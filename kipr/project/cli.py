@@ -45,6 +45,12 @@ def add_review_arguments(ap: argparse.ArgumentParser) -> None:
                          "case-insensitive globs over the field name without spaces/_/-/. (default: part "
                          "numbers: MPN, manufacturer, LCSC, Digi-Key, Mouser, ... see docs/project.md); a "
                          "leading + adds to the defaults. Other field changes are listed as minor.")
+    ap.add_argument("--grid-check", choices=("changed", "all", "off"), default="changed",
+                    help="schematic connection grid check: warn about symbol pins, wire ends, junctions, "
+                         "no-connects, labels, sheet pins and bus entries off the grid that the PR added or "
+                         "moved (changed, the default), everywhere on the head side (all), or not at all (off)")
+    ap.add_argument("--sch-grid-mil", type=float, default=50.0, metavar="MIL",
+                    help="schematic connection grid in mil (default: 50 = 1.27 mm)")
 
 
 def run_review(args) -> int:
@@ -52,7 +58,7 @@ def run_review(args) -> int:
     doc = run(args.repo, args.base, args.head, str(args.out), patterns=args.projects, kicad_cli=args.kicad_cli,
               jobs=args.jobs, cache_dir=args.cache_dir, step=args.step, glb=not args.no_glb,
               repo_url=args.repo_url, no_export=args.no_export, fast_checks=args.fast_checks,
-              significant_fields=args.significant_fields)
+              significant_fields=args.significant_fields, grid_check=args.grid_check, grid_mil=args.sch_grid_mil)
     n_err = sum(len(p.get("errors") or []) for p in doc["projects"]) + len(doc["errors"])
     print(f"wrote {args.out}/project-review.json: {len(doc['projects'])} project(s), {n_err} error(s)")
     return 0

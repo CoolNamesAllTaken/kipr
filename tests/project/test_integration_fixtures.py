@@ -152,3 +152,23 @@ def test_complex_hierarchy_new_sheet_outline_and_drc(doc):
     assert nets["/status_led/LED_A"] == "added"
     assert [v["type"] for v in p["checks"]["drc"]["new"]] == ["track_width"]
     assert p["checks"]["drc"]["fixed"] == []
+
+
+def test_schematic_grid_check(doc):
+    """Default mode "changed": only what head added or moved. pic_programmer's new C10 and power
+    symbols are on the 50 mil grid; complex_hierarchy's new LED_A label is 0.635 mm off it."""
+    p = proj(doc, "pic_programmer")
+    g = p["checks"]["grid"]
+    assert (g["mode"], g["grid_mil"], g["count"]) == ("changed", 50.0, 0) and g["checked"] > 0
+    assert p["summary"]["grid"] == {"count": 0, "points": 0}
+    if "complex_hierarchy" not in [x["slug"] for x in doc["projects"]]:
+        return
+    g = proj(doc, "complex_hierarchy")["checks"]["grid"]
+    (f,) = g["items"]
+    assert (f["kind"], f["text"], f["change"], f["sheet"]) == ("label", "LED_A", "added", "root/status_led")
+    assert f["file"] == "complex_hierarchy/status_led.kicad_sch" and f["pos_mm"] == [101.6, 70.485]
+    assert f["points"][0]["off_mm"] == [0, -0.635]
+    text = subprocess.run(["git", "-C", REPO, "show", f"{doc['head']['sha']}:{f['file']}"], capture_output=True,
+                          text=True, check=True).stdout
+    line = text.split("\n")[f["line"] - 1]
+    assert line.strip().startswith('(label "LED_A"')

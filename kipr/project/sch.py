@@ -123,6 +123,7 @@ class Sheet:
     title: dict = field(default_factory=dict)
     error: str | None = None
     names: list[str] = field(default_factory=list)  # sheet names from the root, e.g. ["Root", "power"]
+    node: Node | None = field(default=None, repr=False, compare=False)  # the parsed file (shared by instances)
 
 
 def _lib_symbols(root: Node) -> dict[str, Node]:
@@ -171,15 +172,44 @@ def _lib_points(lib: Node, unit: int, style: int, libs: dict[str, Node], depth=0
     return pts
 
 
+def lib_pins(lib: Node, unit: int, style: int, libs: dict[str, Node], depth=0):
+    """Pins of one unit/body style of a library symbol: [(number, name, x, y, hidden)], (x, y) the
+    connection point in the symbol's own frame (y up)."""
+    pins = []
+    ext = lib.value("extends")
+    if ext is not None and depth < 4:
+        parent = libs.get(str(ext)) or next((v for k, v in libs.items() if k.split(":")[-1] == str(ext)), None)
+        if parent is not None:
+            pins.extend(lib_pins(parent, unit, style, libs, depth + 1))
+    for sub in lib.children("symbol"):
+        m = re.match(r"^(.*)_(\d+)_(\d+)$", str(sub.arg(0, "")))
+        if m:
+            u, st = int(m.group(2)), int(m.group(3))
+            if u not in (0, unit) or st not in (0, style):
+                continue
+        for g in sub.children("pin"):
+            x, y = pt(g.child("at"))
+            pins.append((str(g.value("number", "") or ""), str(g.value("name", "") or ""), x, y,
+                         g.flag("hide")))
+    return pins
+
+
+def symbol_lib(s: Node, libs: dict[str, Node]) -> Node | None:
+    """The embedded library symbol a placed symbol uses (lib_name wins over lib_id)."""
+    lib_name = s.value("lib_name")
+    lib = libs.get(str(lib_name)) if lib_name is not None else None
+    return lib if lib is not None else libs.get(str(s.value("lib_id", "")))
+
+
 def symbol_transform(x0, y0, rot, mirror):
-    """Library (y up) -> sheet (y down) transform of a placed symbol."""
+    """Library (y up) -> sheet (y down) transform of a placed symbol: rotation, then the mirror
+    (as eeschema does; the other order puts the pins of a rotated, mirrored symbol elsewhere)."""
     def tf(p):
-        x, y = p[0], -p[1]
+        x, y = geom.rotate(p[0], -p[1], rot)
         if mirror == "y":
             x = -x
         elif mirror == "x":
             y = -y
-        x, y = geom.rotate(x, y, rot)
         return (x0 + x, y0 + y)
     return tf
 
@@ -187,9 +217,7 @@ def symbol_transform(x0, y0, rot, mirror):
 def _symbol(s: Node, libs: dict[str, Node], inst_path: str) -> Symbol:
     props = props_of(s)
     lib_id = str(s.value("lib_id", ""))
-    lib_name = s.value("lib_name")
-    lib = libs.get(str(lib_name)) if lib_name is not None else None
-    lib = lib if lib is not None else libs.get(lib_id)
+    lib = symbol_lib(s, libs)
     at = s.child("at")
     xyz = (at.nums() + [0, 0, 0]) if at is not None else [0, 0, 0]
     unit = int(s.num("unit", 1) or 1)
@@ -368,6 +396,7 @@ def load_hierarchy(read, root_file: str, project_name: str = "") -> SchematicSet
         if node is None:
             sheet.error = f"missing {file}"
             return
+        sheet.node = node
         libs = _lib_symbols(node)
         tb = node.child("title_block")
         if tb is not None:

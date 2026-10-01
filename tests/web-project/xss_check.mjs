@@ -57,7 +57,7 @@ function poison(dir) {
   if (sheets[3]) sheets[3].head = `p/${first.slug}/evil.svg`;
   // extra projects: a hostile slug (must be dropped) and one with nothing but hostile strings
   r.projects.push({ slug: '../../x"><img src=x onerror=window.__pwned=1>', name: P, status: 'added' });
-  r.projects.push({ slug: 'hostile', name: P, path: P, status: P, summary: { sheets_changed: P, components: P }, schematic: { sheets: P }, pcb: { layers: [P], changes: [P, { bbox_mm: [P, 1, 2, 3], kind: P }] }, bom: { rows: [P, { refs: P, status: P }] }, netlist: { changes: [{ net: P, added: [P] }] }, checks: { erc: { new: [{ description: P, pos_mm: [JS, 1] }] }, drc: P }, errors: [P] });
+  r.projects.push({ slug: 'hostile', name: P, path: P, status: P, summary: { sheets_changed: P, components: P, grid: { count: P } }, schematic: { sheets: P }, pcb: { layers: [P], changes: [P, { bbox_mm: [P, 1, 2, 3], kind: P }] }, bom: { rows: [P, { refs: P, status: P }] }, netlist: { changes: [{ net: P, added: [P] }] }, checks: { erc: { new: [{ description: P, pos_mm: [JS, 1] }] }, drc: P, grid: { grid_mil: P, mode: P, checked: P, items: [P, { kind: P, change: P, ref: P, text: P, detail: P, sheet: P, file: P, line: P, bbox_mm: [JS, 1, 2, 3], pos_mm: [P, 1], related: [P, { kind: P, text: P, line: P }] }] } }, errors: [P] });
   fs.writeFileSync(f, JSON.stringify(r));
   return r;
 }

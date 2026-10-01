@@ -485,6 +485,33 @@ def checks_section(checks) -> str:
                              esc("; ".join(str(x) for x in lst(v.get("items")))), esc(at + (f" {v.get('sheet')}" if v.get("sheet") else ""))])
         out.append(f"<h3>{label} <span class=\"muted\">{esc(fmt(c.get('base_count')))} → {esc(fmt(c.get('head_count')))}</span></h3>"
                    + table(["", "Severity", "Type", "Description", "Items", "Where"], rows))
+    out.append(grid_section(d(checks).get("grid")))
+    return "\n".join(out)
+
+
+def grid_section(g) -> str:
+    """checks.grid: schematic items off the connection grid, one table per sheet."""
+    g = d(g)
+    if not g:
+        return ""
+    mil = num(g.get("grid_mil"))
+    scope = "added or moved items" if g.get("mode") == "changed" else "all items"
+    head = (f'<h3>Schematic grid <span class="muted">{esc(fmt(mil))} mil, {esc(scope)}: '
+            f'{esc(fmt(num(g.get("count")) or 0))} off grid</span></h3>')
+    items = [d(f) for f in lst(g.get("items"))]
+    if not items:
+        return head + '<p class="muted">Everything checked is on the grid.</p>'
+    out = [head]
+    for sheet in dict.fromkeys(str(f.get("sheet") or "") for f in items):
+        rows = []
+        for f in (f for f in items if str(f.get("sheet") or "") == sheet):
+            pos = f.get("pos_mm")
+            at = ", ".join(f"{x:g}" for x in pos) if isinstance(pos, list) and len(pos) == 2 and all(num(x) is not None for x in pos) else ""
+            line = f.get("line") if isinstance(f.get("line"), int) else None
+            where = esc(f"{f.get('file') or ''}" + (f":{line}" if line else ""))
+            rows.append([status_badge(f.get("change")), esc(str(f.get("kind") or "").replace("_", " ")),
+                         f"<code>{esc(f.get('ref') or f.get('text') or '')}</code>", esc(f.get("detail")), esc(at), where])
+        out.append(f"<h4>{esc(sheet)}</h4>" + table(["", "Kind", "Item", "Detail", "At (mm)", "File"], rows))
     return "\n".join(out)
 
 
@@ -495,7 +522,7 @@ def summary_row(p) -> list:
     return [f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
             n(s.get("sheets_changed")), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
             n(c.get("changed")) + (f' <span class="muted">+{esc(fmt(num(c.get("minor"))))} minor</span>' if num(c.get("minor")) else ""),
-            n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new"))]
+            n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new")), n(d(s.get("grid")).get("count"))]
 
 
 CSS = """
@@ -550,7 +577,7 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
                  '<span><i class="k" style="background:rgb(30,175,70)"></i>added (head only)</span>'
                  '<span><i class="k" style="background:rgba(110,110,110,.6)"></i>unchanged</span></p>')
     parts.append('<section class="card"><h2>Projects</h2>' + table(
-        ["Project", "Status", "Sheets", "Layers", "Comp. +", "Comp. −", "Moved", "Changed", "Nets", "ERC new", "DRC new"],
+        ["Project", "Status", "Sheets", "Layers", "Comp. +", "Comp. −", "Moved", "Changed", "Nets", "ERC new", "DRC new", "Off grid"],
         [summary_row(p) for p in projects]) + "</section>")
     for p in projects:
         slug = p["slug"]

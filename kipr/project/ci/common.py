@@ -66,10 +66,38 @@ def new_violations(p: dict, kind: str) -> list[dict]:
     return [v for v in lst(d(d(p.get("checks")).get(kind)).get("new")) if isinstance(v, dict)]
 
 
+def grid_findings(p: dict) -> list[dict]:
+    """checks.grid.items: schematic items off the connection grid (warnings)."""
+    return [f for f in lst(d(d(p.get("checks")).get("grid")).get("items")) if isinstance(f, dict)]
+
+
+def grid_cell(p: dict) -> str:
+    g = d(d(p.get("summary")).get("grid"))
+    if not g:
+        return "n/a"
+    n = num(g.get("count"))
+    return f"🟠 {n}" if n else "0"
+
+
+def grid_mil(p: dict) -> str:
+    v = d(d(p.get("checks")).get("grid")).get("grid_mil")
+    return f"{v:g}" if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 10000 else "?"
+
+
+def grid_line(f: dict, mil: str = "50") -> str:
+    """One off-grid finding: kind, what (reference / label text), sheet and detail, escaped."""
+    kind = md_inline(text(f.get("kind")).replace("_", " "), 30)
+    who = text(f.get("ref")) or text(f.get("text"))
+    sheet = md_inline(text(f.get("sheet")), 60)
+    det = md_inline(text(f.get("detail")), 200)
+    return (f"- {SEVERITY_ICON['warning']} off the {md_inline(mil, 8)} mil grid: {kind}"
+            + (f" {code(who, 60)}" if who else "") + (f" on {sheet}" if sheet else "") + (f": {det}" if det else ""))
+
+
 def summary_table(doc: dict) -> str:
     """One markdown table row per project (all values escaped)."""
-    rows = ["| Project | Status | Sheets | Layers | Components | Nets | ERC new / fixed | DRC new / fixed | Notes |",
-            "|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| Project | Status | Sheets | Layers | Components | Nets | ERC new / fixed | DRC new / fixed | Off grid | Notes |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for p in doc["projects"]:
         s = d(p.get("summary"))
         comp = d(s.get("components"))
@@ -90,7 +118,7 @@ def summary_table(doc: dict) -> str:
             f"{code(text(p.get('name')) or text(p.get('slug')), 60)}<br><sub>{md_inline(text(p.get('path')) or '.', 120)}</sub>",
             f"{STATUS_ICON[st]} {st}",
             str(num(s.get("sheets_changed"))), str(num(s.get("layers_changed"))), " ".join(parts),
-            str(num(s.get("nets_changed"))), checks[0], checks[1],
+            str(num(s.get("nets_changed"))), checks[0], checks[1], grid_cell(p),
             f"⚠️ {errors} export/parse problem(s)" if errors else ""]) + " |")
     return "\n".join(rows)
 

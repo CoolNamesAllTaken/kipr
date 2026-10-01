@@ -12,8 +12,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, load_review, md_inline, new_violations,
-                     safe_http_url, summary_table, text, truncate, violation_line)
+from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, grid_findings, grid_line, grid_mil,
+                     load_review, md_inline, new_violations, safe_http_url, summary_table, text, truncate, violation_line)
 
 MAX_COMMENT = 60000  # GitHub's hard limit is 65536 characters
 TITLE = "## KiCad project review"
@@ -70,6 +70,11 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
                     body += [violation_line(v, kind) for v in vs[:15]]
                     if len(vs) > 15:
                         body.append(f"- … and {len(vs) - 15} more new {kind.upper()} violation(s)")
+            gf = grid_findings(p)
+            if gf:
+                body += [grid_line(f, grid_mil(p)) for f in gf[:15]]
+                if len(gf) > 15:
+                    body.append(f"- … and {len(gf) - 15} more off-grid item(s)")
             fixed = [f"{kind.upper()} {c[1]}" for kind in CHECK_KINDS if (c := check_counts(p, kind)) and c[1]]
             if fixed:
                 body.append(f"- ✅ fixed: {', '.join(fixed)}")
@@ -80,7 +85,7 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
             if perr:
                 body += [f"- ⚠️ {e}" for e in perr[:10]]
             if body:
-                lines += ["", f"<details><summary><b>{name}</b>: changes and new ERC/DRC violations</summary>", ""]
+                lines += ["", f"<details><summary><b>{name}</b>: changes, new ERC/DRC violations, off-grid items</summary>", ""]
                 lines += body + ["", "</details>"]
     if sha:
         lines += ["", f"<sub>kipr project review for {md_inline(sha[:12], 12)}.</sub>"]

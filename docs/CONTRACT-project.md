@@ -56,7 +56,8 @@ p/<slug>/checks/{erc,drc}.{base,head}.json   raw kicad-cli ERC/DRC reports (--se
   "version": 1,
   "tool": {"name": "kipr", "version": "0.1.0", "kicad": "10.0.6",    // kicad: null without kicad-cli
            "stock_3d_models": true,     // KiCad's stock 3D library was found (for the model fallback); null without kicad-cli
-           "significant_fields": ["mpn", "lcsc*", …]},   // the field patterns in effect (see "Change classification")
+           "significant_fields": ["mpn", "lcsc*", …],   // the field patterns in effect (see "Change classification")
+           "grid_check": "changed", "sch_grid_mil": 50.0},   // --grid-check, --sch-grid-mil (see "Grid")
   "base": {"sha": "…", "ref": "main", "short": "abc1234"},
   "head": {"sha": "…", "ref": "feature", "short": "def5678"},
   "repo": {"url": "https://github.com/o/r", "blob": "https://github.com/o/r/blob/{sha}/{path}"},  // nulls if not GitHub
@@ -85,13 +86,14 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
               "components": {"added": 1, "removed": 0, "moved": 3, "changed": 2,   // from the board (moved includes rotated); from the BOM if there is no board
                              "minor": 105},  // minor: true components (see PcbChange); not in "changed"
               "nets_changed": 4,
-              "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0}},      // null when the check could not run
+              "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0},       // null when the check could not run
+              "grid": {"count": 1, "points": 23}},   // checks.grid count/points; null when off or no schematic
   "schematic": Schematic | null,
   "pcb": Pcb | null,
   "pcba3d": Pcba3d | null,
   "bom": Bom | null,
   "netlist": Netlist | null,
-  "checks": {"erc": CheckDelta | null, "drc": CheckDelta | null},
+  "checks": {"erc": CheckDelta | null, "drc": CheckDelta | null, "grid": Grid | null},
   "info": {"base": {"title": "…", "rev": "E", "date": "…", "company": "…", "comment1": "…"}, "head": {…}},  // title blocks
   "errors": ["kicad-cli glb failed for head: …"],   // non-fatal problems, shown in the UI
   "timings_s": {"checkout": 0.4, "parse": 7.9, "diff": 0.03, "export_wait": 71.0, "assemble": 5.0, "total": 84.4},
@@ -339,3 +341,58 @@ on real boards (~30-50 s per check and side). `--fast-checks` runs them with emp
 tables instead (~2-6 s) and drops the library violation types (`lib_footprint_issues`,
 `lib_footprint_mismatch`, `footprint_link_issues`, `lib_symbol_issues`, `lib_symbol_mismatch`);
 the delta then says `"libraries": "project"`.
+
+### Grid
+
+Schematic connection points off the grid (`--grid-check changed|all|off`, default `changed`;
+`--sch-grid-mil`, default 50 = 1.27 mm). `null` with `--grid-check off` or without a head
+schematic. Checked on the head side: symbol pin connection points (placement + library pin
+positions with rotation/mirror, for the placed unit/body style), wire and bus endpoints, bus
+entries (both ends), junctions, no-connect flags, label anchors (`label`, `global_label`,
+`hierarchical_label`, `netclass_flag`, `directive_label`) and sheet pins. A coordinate is on the
+grid when it is within `tolerance_mm` of a multiple of `grid_mm`. Each sheet file is checked once
+(a file used by several sheet instances reports on the first one, `sheets` lists all).
+
+`changed` mode flags only points the PR added or moved: an item is matched to base by uuid, else
+by position (the same sheet file, or the file of the base sheet with the same id, and the same
+kind); points that existed in base are skipped. `all` checks every point.
+
+```jsonc
+{"grid_mil": 50.0, "grid_mm": 1.27, "tolerance_mm": 0.001, "mode": "changed",
+ "checked": 412,                        // points checked (in "changed" mode: new or moved ones)
+ "count": 2,                            // findings (items below)
+ "points": 23,                          // off-grid points, related items included
+ "sheets": [{"id": "root/power", "file": "boards/x/power.kicad_sch", "count": 1}],   // head hierarchy order
+ "items": [GridFinding]}                // sorted by sheet (hierarchy order), then y, x
+```
+
+`GridFinding` (always a warning):
+
+```jsonc
+{"kind": "symbol",                      // symbol | sheet | wire | bus | bus_entry | junction | no_connect |
+                                        // label | global_label | hierarchical_label | netclass_flag | directive_label
+ "severity": "warning",
+ "change": "moved",                     // added | moved | unchanged (unchanged only in "all" mode)
+ "power": true,                         // power symbols only
+ "ref": "U3",                           // symbol reference / sheet name; null otherwise
+ "text": "LM1117",                      // symbol value / label text; null otherwise
+ "sheet": "root/power", "sheets": ["root/power"],   // sheet id(s), see Schematic
+ "file": "boards/x/power.kicad_sch",    // repo-relative sheet file
+ "line": 1234,                          // 1-based line of the item's "(symbol" / "(wire" / … in head
+ "uuid": "…",
+ "pos_mm": [x, y],                      // the item's anchor (symbol/label position, sheet corner, first off-grid point)
+ "bbox_mm": [x, y, w, h],               // the off-grid points (and the symbol body), padded: zoom here
+ "off_count": 20,                       // off-grid points of this item
+ "points": [{"name": "1",               // pin number / sheet pin name / "" for wiring; first 50 only
+             "pos_mm": [x, y], "off_mm": [dx, dy]}],   // dx/dy: signed distance to the nearest grid line, 0 = on it
+ "related": [{"kind": "wire", "uuid": "…", "line": 1301, "ref": null, "text": null, "change": "moved",
+              "off_count": 1, "power": true}],          // power: power symbols only
+ "detail": "20 of 24 pins off the 50 mil grid, e.g. pin 1 at (101.915, 64.77) (x +0.635 mm); also 18 wires, 1 power symbol attached"}
+```
+
+**Grouping.** Findings of one sheet file that share an off-grid point are one finding: a symbol
+or sheet box names it and the wires, junctions, no-connects, labels and power symbols on its
+off-grid pins (and the wiring connected to those through other off-grid points) are `related`.
+Two symbols or sheet boxes are never merged; power symbols are not anchors (they join the part
+they sit on). Off-grid wiring that touches no symbol is grouped by its shared points and named by
+its most telling item (label, bus entry, bus, wire, junction, no-connect).

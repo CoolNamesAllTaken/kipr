@@ -19,14 +19,15 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
 ## Views
 
 - **Projects** (`#/`): every changed project with summary counts (sheets, layers, components +/−/moved/
-  changed, nets, new ERC/DRC), review-level errors. Sidebar list with the same chips and a filter.
+  changed, nets, new ERC/DRC, off-grid schematic items), review-level errors. Sidebar list with the same chips and a filter.
 - **Project** (`#/p/<slug>/<tab>[/<item>]?<params>`): tabs Schematic, Layout, 3D PCBA, BOM, Netlist, ERC/DRC,
   each with a change count; export problems (`errors`) in a collapsible notice; "Copy link".
-- **Schematic** (`…/schematic/<sheet id>?mode=side|diff|onion|swipe&c=<change>`): sheet list with status and
+- **Schematic** (`…/schematic/<sheet id>?mode=side|diff|onion|swipe&c=<change>&at=x,y[,w,h]`): sheet list with status and
   change counts; side by side with synced pan/zoom, red/green ink diff (removed/added ink, unchanged dimmed),
   onion skin (opacity slider), swipe. The change list (`sheets[].changes`) zooms to each `bbox_mm` and
   highlights it; a moved item is highlighted at `base_bbox_mm` / `head_bbox_mm` on the base / head pane.
-  Without itemised changes the ink diff's changed areas are listed instead.
+  Without itemised changes the ink diff's changed areas are listed instead. `at` zooms to and outlines a
+  point (4 mm box) or box in sheet mm; the grid findings of the ERC/DRC tab link here with it.
 - **Layout** (`…/layout[/<layer>]?view=top|bottom|layers&mode=…&c=…&at=x,y`): gerbers rendered with our
   wasm-gerber-renderer fork. Top / bottom are realistic faces (the fork's `addBoardLayers`: substrate,
   finish in mask openings, mask, silk clipped, transparent holes; bottom mirrored); Layers stacks the
@@ -39,7 +40,9 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   file:// the prebuilt `pcba3d/pcba3d.bundle.js`; a placeholder when the module is missing. Once the
   module has loaded its data, `.pcba3d-host[data-ready]` holds its error count (the browser tests wait on it).
 - **BOM / Netlist / ERC-DRC**: filter box (all terms must match), status filter, sortable columns;
-  base → head values as del/ins. Filters are in the URL (`q`, `st`).
+  base → head values as del/ins. Filters are in the URL (`q`, `st`). Below ERC and DRC, the schematic grid
+  check (`checks.grid`): one block per sheet, one row per finding (a symbol with its off-grid pins and the
+  wiring attached to them), linking to the spot on the sheet.
 
 Every render of a sheet or board frames an explicit box in KiCad mm (never "fit"), so base, head, diffs,
 change boxes and the measure tool all share one coordinate system: sheet SVG viewBox = sheet mm, PCB SVG

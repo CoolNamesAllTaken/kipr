@@ -50,6 +50,8 @@ fits the data into its size budget, then runs `site` and `report`.
 | `--cache-dir D` | `$KIPR_CACHE_DIR` or `~/.cache/kipr` | export cache |
 | `--repo-url URL` | `origin` if on GitHub | for source links |
 | `--significant-fields PATTERNS` | part numbers (MPN, manufacturer, LCSC, Digi-Key, Mouser, …) | which symbol/footprint fields count as real changes; other field changes are minor. Comma-separated globs, `+` extends the defaults. See [Change classification](CONTRACT-project.md#change-classification) |
+| `--grid-check changed\|all\|off` | `changed` | [schematic grid check](#schematic-grid-check): warn about connection points the PR added or moved off the grid (`changed`), about every off-grid point on the head side (`all`), or not at all |
+| `--sch-grid-mil MIL` | `50` | the schematic connection grid in mil (50 mil = 1.27 mm) |
 
 What counts as a changed project: a directory with a `.kicad_pro` in which a `.kicad_sch`,
 `.kicad_pcb`, `.kicad_pro`, `.kicad_dru`, lib table, project library or 3D model changed, or that
@@ -89,6 +91,37 @@ viewer, report and PR comment ("105 parts: 3D model format .wrl -> .step") and a
 3D Changes view. Fields that appear or disappear empty (KiCad upgrades add `Sim.Library ""` and
 the like) are not reported at all.
 
+### Schematic grid check
+
+Symbol pins should sit on a 100 mil grid in the libraries, and everything that connects in a
+schematic on the 50 mil connection grid; a part dropped 0.635 mm off it still looks connected but
+its wires end next to the pin. `kipr project` checks the head side's connection points against
+the grid (`--sch-grid-mil`, 50 by default, with a 0.001 mm tolerance for float noise):
+
+- symbol pin connection points: the placement plus the library pin positions with rotation and
+  mirror, for the placed unit and body style (pins of the embedded library symbol, `extends`
+  included);
+- wire and bus endpoints, bus entries (both ends), junctions, no-connect flags;
+- label anchors: local, global and hierarchical labels, net-class and directive flags;
+- sheet pins.
+
+So that legacy sheets don't flood a review, the default (`--grid-check changed`) only flags what
+the PR **added or moved**: an item is matched to base by its uuid, else by position (same sheet
+file and kind), and only its points that are new in head are checked, so a wire whose far end was
+dragged off the grid is flagged for that end only. `--grid-check all` checks every point (each
+finding still says whether it was `added`, `moved` or `unchanged`); `off` skips the check.
+
+Findings are warnings, grouped per sheet: one symbol (or sheet box) with all its off-grid pins is
+one finding, and the off-grid wires, junctions, labels and power symbols that touch its pins are
+listed with it (`also 3 wires, 1 power symbol attached`), so a misplaced part with 20 pins reads
+as one part. Other off-grid wiring is grouped by shared off-grid points. They show up in
+`checks.grid` of the JSON ([contract](CONTRACT-project.md#grid)), the summary (`Off grid`), the
+viewer's ERC/DRC tab (a row zooms to the spot on the sheet), the report, the PR comment and, in
+CI, as warning annotations on the item's line of the `.kicad_sch` file.
+
+KiCad 10's own ERC has a similar `endpoint_off_grid` warning (pins and wire ends only, one per
+symbol, on the project's connection grid); new ones also appear in the ERC delta.
+
 Typical cost: the two public KiCad demo boards of the fixture repo take under a minute cold
 (mostly ERC/DRC) and ~3 s with a warm cache. A 4-layer, 160-component board with a 3.5 MB `.kicad_pcb` took 52 s cold
 (24 s with `--fast-checks`, 6 s warm) and produced 33 MB of output (0.6 MB JSON).
@@ -107,7 +140,7 @@ without ever running PR code.
  caller "KiCad project review" ──uses──► kipr project-review.yml
    UNPRIVILEGED: contents: read, no secrets. Container kicad/kicad:10.0.x. Checks out the PR head
    (full history), uses the merge base, pip-installs kipr@<ref>, runs `kipr project`, the viewer
-   and the report. Annotations for new ERC/DRC errors/warnings, job summary. Artifacts:
+   and the report. Annotations for new ERC/DRC errors/warnings and off-grid schematic items, job summary. Artifacts:
    project-review.html (not zipped), project-review-site, project-review-data, pr-meta.
         │ workflow_run: completed (success or failure)
         ▼
@@ -149,6 +182,8 @@ Security notes (same as the library review):
 | `fast-checks` | `false` | `--fast-checks` (skip global libraries in ERC/DRC) |
 | `significant-fields` | `""` | `--significant-fields` (which fields count as real changes; empty = part numbers) |
 | `step` | `false` | also export STEP models |
+| `grid-check` | `changed` | `--grid-check` (schematic connection grid: `changed`, `all` or `off`) |
+| `sch-grid-mil` | `50` | `--sch-grid-mil` (the grid in mil) |
 | `kicad-image` | `kicad/kicad:10.0.6-amd64-full` | job container; pins the KiCad version (the `-full` images have the stock 3D models) |
 | `jobs` | `4` | parallel kicad-cli processes |
 | `max-artifact-mb` | `250` | size budget of the viewer artifact and the report; optional exports are dropped to fit |
@@ -253,7 +288,7 @@ The GitHub glue is `kipr project ci <tool>` (each has `--help`):
 
 | Tool | Where | What |
 |---|---|---|
-| `job-summary --out OUT [--annotate] [--repo-dir .] [--summary FILE] [--link NAME=URL]` | review | annotations for new ERC/DRC errors/warnings (placed on the item's line, found by its KiCad uuid) + job summary |
+| `job-summary --out OUT [--annotate] [--repo-dir .] [--summary FILE] [--link NAME=URL]` | review | annotations for new ERC/DRC errors/warnings (placed on the item's line, found by its KiCad uuid) and off-grid schematic items (warnings on their `.kicad_sch` line) + job summary |
 | `limit-size --out OUT --max-mb N` | review | drop optional exports to fit a budget |
 | `pr-meta --pr N --head-sha … --base-sha … --merge-base … --out DIR` | review | write pr.json |
 | `resolve-pr --meta pr.json --repo o/r --run-head-sha SHA` | publish | verify the PR (same tool as the library review) |
@@ -271,6 +306,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/export.py` | kicad-cli jobs, export cache, file-name mapping |
 | `kipr/project/pcb.py`, `sch.py` | s-expression models of boards and schematic hierarchies |
 | `kipr/project/diff_pcb.py`, `diff_sch.py`, `diff_net.py` | semantic diffs, BOM, netlist, ERC/DRC deltas |
+| `kipr/project/grid.py` | schematic connection grid check (`checks.grid`) |
 | `kipr/project/ci/` | GitHub glue (above) |
 | `kipr/project/cli.py` | `kipr project [review\|site\|report\|ci]` |
 | `kipr/project/site.py`, `report.py` | viewer copy + file:// support, no-JS HTML report |

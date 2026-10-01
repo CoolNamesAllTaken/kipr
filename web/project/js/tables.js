@@ -171,6 +171,66 @@ export function createChecksView(project, container, ctx) {
       ],
     });
   }
+  const grid = obj(checks.grid);
+  if (grid) container.append(gridCard(project, grid));
   if (!any && !obj(checks.drc) && !obj(checks.erc)) container.prepend(el('p', { class: 'muted' }, 'ERC/DRC were not run for this project.'));
   return { destroy() {} };
+}
+
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const box4 = (b) => Array.isArray(b) && b.length === 4 && b.every(num) && b[2] > 0 && b[3] > 0;
+
+/** Link to a spot on a schematic sheet: #/p/<slug>/schematic/<sheet>?at=x,y,w,h (or x,y). */
+export function sheetSpotHash(slug, sheet, bboxMm, posMm) {
+  let at = null;
+  if (box4(bboxMm)) at = bboxMm.map((v) => +v.toFixed(3)).join(',');
+  else if (Array.isArray(posMm) && posMm.length === 2 && posMm.every(num)) at = posMm.map((v) => +v.toFixed(3)).join(',');
+  return formatHash({ slug, tab: 'schematic', item: typeof sheet === 'string' ? sheet : null, params: { at } });
+}
+
+/** Group grid findings by sheet, in the backend's (hierarchy) order. */
+export function gridGroups(items) {
+  const groups = new Map();
+  for (const f of arr(items).filter(obj)) {
+    const k = typeof f.sheet === 'string' ? f.sheet : '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(f);
+  }
+  return [...groups].map(([sheet, list]) => ({ sheet, items: list }));
+}
+
+// checks.grid: schematic items off the connection grid, one block per sheet; a row links to the spot
+function gridCard(project, g) {
+  const items = arr(g.items).filter(obj);
+  const mil = num(g.grid_mil) ? g.grid_mil : '?';
+  const scope = g.mode === 'all' ? 'all items' : 'items the PR added or moved';
+  const sec = el('section', { class: 'card grid-check' });
+  sec.append(el('h3', {}, `Schematic grid (${mil} mil)`, ' ',
+    el('span', { class: 'muted' }, `${scope}${num(g.checked) ? `, ${g.checked} points checked` : ''}`), ' ',
+    items.length ? badge('sev', 'warning') : null, ' ', items.length ? badge('delta', `${items.length} off grid`) : null));
+  if (!items.length) { sec.append(el('p', { class: 'muted' }, 'Everything checked is on the grid.')); return sec; }
+  const sheets = new Map(arr(obj(project.schematic)?.sheets).filter(obj).map((s) => [s.id, s]));
+  for (const { sheet, items: list } of gridGroups(items)) {
+    const sh = sheets.get(sheet);
+    const rows = list.map((f) => {
+      const who = typeof f.ref === 'string' && f.ref ? f.ref : typeof f.text === 'string' ? f.text : '';
+      const pos = Array.isArray(f.pos_mm) && f.pos_mm.length === 2 && f.pos_mm.every(num) ? f.pos_mm : null;
+      const file = typeof f.file === 'string' ? `${f.file}${Number.isInteger(f.line) ? `:${f.line}` : ''}` : '';
+      const rel = arr(f.related).filter(obj);
+      return el('tr', {},
+        el('td', {}, badge('status', typeof f.change === 'string' ? f.change : null)),
+        el('td', {}, badge('kind', String(f.kind ?? '').replace(/_/g, ' '))),
+        el('td', {}, el('code', {}, who)),
+        el('td', {}, String(f.detail ?? ''), rel.length ? el('ul', { class: 'items' }, rel.map((r) => el('li', {},
+          `${String(r.kind ?? '').replace(/_/g, ' ')}${typeof r.text === 'string' ? ` ${r.text}` : ''}${Number.isInteger(r.line) ? ` (line ${r.line})` : ''}`))) : null),
+        el('td', {}, el('a', { href: sheetSpotHash(project.slug, sheet, f.bbox_mm, f.pos_mm), title: 'Show on the sheet' },
+          pos ? `(${pos[0].toFixed(2)}, ${pos[1].toFixed(2)})` : 'sheet'), file ? el('div', { class: 'small muted path' }, file) : null));
+    });
+    sec.append(el('h4', {}, el('a', { href: formatHash({ slug: project.slug, tab: 'schematic', item: sheet || null }) }, sh?.title || sheet || '?'),
+      ' ', el('span', { class: 'muted' }, `${sheet} · ${list.length} item${list.length === 1 ? '' : 's'}`)),
+    el('div', { class: 'scroll-x' }, el('table', { class: 'grid' },
+      el('thead', {}, el('tr', {}, ['', 'Kind', 'Item', 'Detail', 'Where'].map((t) => el('th', { scope: 'col' }, t)))),
+      el('tbody', {}, rows))));
+  }
+  return sec;
 }

@@ -54,6 +54,11 @@ Netlist changes (complex_hierarchy): nets 52 → 53 (new `/status_led/LED_A`; VC
 GND + D401.1).
 
 ERC: 0 violations on both sides (4 sheets on head).
+
+Schematic grid (`checks.grid`, 50 mil): the new `LED_A` label of `status_led.kicad_sch` sits at
+(101.6, 70.485), 0.635 mm off the grid in y (mid-wire, so KiCad's ERC doesn't flag it): the only
+grid finding of the fixtures, in `changed` and `all` mode. Everything else (both projects, both
+sides) is on the grid.
 DRC (`--schematic-parity --severity-all`): base 0 violations / 0 unconnected / 68 parity; head
 1 / 0 / 68. The 68 parity items come from the demo itself and are the same on both sides: its
 footprints use the project library nickname `complex_hierarchy:` while the symbols name

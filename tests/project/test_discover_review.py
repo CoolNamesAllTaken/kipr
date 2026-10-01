@@ -118,7 +118,11 @@ def test_review_without_kicad_cli(repo, tmp_path):
     assert c["what"] == ["position", "value"] and c["status"] == "changed"  # a new value wins over the move
     assert [row["key"] for row in p["bom"]["rows"] if row["status"] == "changed"] == ["R1"]
     assert p["netlist"]["source"] == "board" and p["netlist"]["changes"] == []
-    assert p["checks"] == {"erc": None, "drc": None}
+    assert p["checks"]["erc"] is None and p["checks"]["drc"] is None
+    # R1's value changed, it didn't move: nothing new to check against the grid
+    g = p["checks"]["grid"]
+    assert (g["mode"], g["grid_mil"], g["count"], g["items"]) == ("changed", 50.0, 0, []) and s["grid"]["count"] == 0
+    assert doc["tool"]["grid_check"] == "changed" and doc["tool"]["sch_grid_mil"] == 50.0
 
 
 def test_review_missing_kicad_cli_is_reported_not_fatal(repo, tmp_path, monkeypatch):

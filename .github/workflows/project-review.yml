@@ -9,7 +9,8 @@
 #   project-review-site    the interactive viewer + all exports (zip; unzip and run serve.py)
 #   project-review-data    project-review.json
 #   pr-meta                pr.json, read by project-review-publish.yml
-# New ERC/DRC errors and warnings also show up as annotations on the changed files.
+# New ERC/DRC errors and warnings and off-grid schematic items also show up as annotations on the
+# changed files.
 #
 # Caller (see docs/project.md):
 #   on: pull_request: paths: ["**/*.kicad_pcb", "**/*.kicad_sch", "**/*.kicad_pro"]
@@ -43,6 +44,14 @@ on:
         description: symbol/footprint fields whose changes count as real changes (comma-separated globs; a leading + extends the defaults; empty = part numbers such as MPN, LCSC, Digi-Key, Mouser)
         type: string
         default: ""
+      grid-check:
+        description: schematic connection grid check, warnings for off-grid pins, wire ends, labels, ... (changed = only what the PR added or moved, all, off)
+        type: string
+        default: changed
+      sch-grid-mil:
+        description: schematic connection grid in mil
+        type: number
+        default: 50
       step:
         description: also export STEP models of the boards
         type: boolean
@@ -216,6 +225,8 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           FAST: ${{ inputs.fast-checks }}
           SIGNIFICANT_FIELDS: ${{ inputs.significant-fields }}
+          GRID_CHECK: ${{ inputs.grid-check }}
+          SCH_GRID_MIL: ${{ inputs.sch-grid-mil }}
           STEP: ${{ inputs.step }}
           JOBS: ${{ inputs.jobs }}
         run: |
@@ -228,6 +239,7 @@ jobs:
           if [ "$FAST" = "true" ]; then args+=(--fast-checks); fi
           if [ "$STEP" = "true" ]; then args+=(--step); fi
           if [ -n "$SIGNIFICANT_FIELDS" ]; then args+=(--significant-fields "$SIGNIFICANT_FIELDS"); fi
+          args+=(--grid-check "${GRID_CHECK:-changed}" --sch-grid-mil "${SCH_GRID_MIL:-50}")
           # site + report run after the size budget below
           kipr project "${args[@]}" --skip site --skip report
 
@@ -248,7 +260,7 @@ jobs:
           budget=$(awk -v m="$MAX_MB" 'BEGIN { printf "%.1f", m * 0.5 }')
           kipr project ci limit-size --out "$OUT" --max-mb "$budget"
 
-      - name: Annotate new ERC/DRC violations
+      - name: Annotate new ERC/DRC violations and off-grid items
         if: always()
         continue-on-error: true
         run: |
