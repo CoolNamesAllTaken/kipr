@@ -203,6 +203,15 @@ def findings_of(ir: dict) -> list[dict]:
     return sorted(out, key=lambda f: -SEVERITY_RANK.get(f.get("severity"), -1))
 
 
+def klc_not_checked(ir: dict) -> bool:
+    """True when the official KLC checker ran but could not check this item (review.json `klc`)."""
+    k = ir.get("klc") if isinstance(ir, dict) else None
+    return isinstance(k, dict) and k.get("status") == "error"
+
+
+KLC_NOT_CHECKED = "KLC not checked"
+
+
 def verdict_of(ir: dict) -> str | None:
     v = ir.get("verdict")
     return v if v in VERDICT_RANK else None

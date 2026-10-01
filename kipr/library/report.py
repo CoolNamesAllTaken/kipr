@@ -27,8 +27,8 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from .ci.common import (SEVERITY_RANK, VERDICT_RANK, check_repo, check_sha, finding_line_no, load_json,
-                        safe_http_url, safe_repo_path, safe_site_file, safe_slug)
+from .ci.common import (KLC_NOT_CHECKED, SEVERITY_RANK, VERDICT_RANK, check_repo, check_sha, finding_line_no,
+                        klc_not_checked, load_json, safe_http_url, safe_repo_path, safe_site_file, safe_slug)
 from .ci.sanitize_site import svg_is_safe
 
 try:
@@ -491,7 +491,9 @@ def component_section(ctx: Ctx, imgs: Images, item: dict, lv) -> str:
     out = [f'<section class="comp v-{v or "none"}" id="{slug_id(slug)}">',
            f'<h2><span class="badge v-{v or "none"}">{esc(VERDICT_LABEL[v])}</span> '
            f'{esc(item.get("library"))}:<wbr>{esc(item.get("name"))}</h2>',
-           f'<p class="meta"><span class="pill">{esc(kind)}</span> <span class="pill st-{esc(status)}">{esc(status)}</span> ']
+           f'<p class="meta"><span class="pill">{esc(kind)}</span> <span class="pill st-{esc(status)}">{esc(status)}</span> '
+           + (f'<span class="pill klc-err" title="{esc((entry.get("klc") or {}).get("reason"))}">'
+              f'{KLC_NOT_CHECKED}</span> ' if klc_not_checked(entry) else "")]
     if path:
         out.append(f'<a href="{esc(src_url)}"><code>{esc(path)}</code></a>' if src_url else f"<code>{esc(path)}</code>")
         if isinstance(rng, list) and len(rng) == 2:
@@ -561,7 +563,8 @@ def summary_table(ctx: Ctx, items: list[dict]) -> str:
         top = next((f for f in fs if f.get("severity") != "info"), fs[0] if fs else None)
         rows.append(
             f'<tr><td><span class="badge v-{v or "none"}">{esc(VERDICT_LABEL[v])}</span></td>'
-            f'<td><a href="#{slug_id(slug)}">{esc(it.get("library"))}:<wbr>{esc(it.get("name"))}</a></td>'
+            f'<td><a href="#{slug_id(slug)}">{esc(it.get("library"))}:<wbr>{esc(it.get("name"))}</a>'
+            + (f' <span class="pill klc-err">{KLC_NOT_CHECKED}</span>' if klc_not_checked(entry) else "") + '</td>'
             f'<td>{esc(it.get("kind"))}</td><td>{esc(it.get("status"))}</td>'
             f'<td class="num">{n["error"] or ""}</td><td class="num">{n["warning"] or ""}</td><td class="num">{n["info"] or ""}</td>'
             f'<td>{inline_md(_clip(top.get("message"), 160)) if top else ""}</td></tr>')
@@ -628,7 +631,8 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:6px;paddin
 pre .add{color:var(--addfg);background:var(--add);display:inline-block;min-width:100%}
 pre .del{color:var(--delfg);background:var(--del);display:inline-block;min-width:100%}
 pre .hunk{color:var(--link)}pre .meta{color:var(--muted)}
-tr.bad td{background:var(--del)}tr.ck-fail td{color:var(--fail)}
+tr.bad td{background:var(--del)}tr.ck-fail td,tr.ck-error td{color:var(--fail)}
+.pill.klc-err{border-color:var(--fail);color:var(--fail);font-weight:600}
 footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:8px}
 """
 
@@ -694,9 +698,10 @@ def build(site: Path, level: int = 0, server: str = "https://github.com", now: s
     if generator:
         meta.append(f"checks: {esc(str(generator)[:80])}")
     h.append(" · ".join(meta) + "</p>")
+    n_klc = sum(klc_not_checked(ctx.item_review(i.get("id"))) for i in items)
     cards = [("components", len(items))] + [(k, v) for k, v in status.items() if v] + \
             [(f"{k} verdict", verdicts.count(k)) for k in ("fail", "warn", "pass") if verdicts.count(k)] + \
-            [(f"{k}s", v) for k, v in sev.items() if v]
+            [(f"{k}s", v) for k, v in sev.items() if v] + ([("KLC could not check", n_klc)] if n_klc else [])
     h.append('<div class="cards">' + "".join(f'<div class="card"><b>{v}</b>{esc(k)}</div>' for k, v in cards) + "</div>")
     if lv[3]:
         h.append(f'<p class="note">To stay under the size limit: {esc(lv[3])}. Open the interactive viewer '

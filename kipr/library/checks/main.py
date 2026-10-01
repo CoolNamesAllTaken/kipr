@@ -105,6 +105,7 @@ class Item:
         self.pads: list[dict] = []
         self.pins: list[dict] = []
         self.paired: list[tuple[Item, bool]] = []  # (other item, exact match?)
+        self.klc: dict | None = None  # official checker outcome; None when it didn't run
 
     def _load_source(self, out_dir, repo):
         src = (self.raw.get("source") or {}).get("head")
@@ -130,7 +131,8 @@ class Item:
         self.findings.extend(fs)
         self.checks.extend(cs)
 
-    def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D):
+    def analyse(self, repo: str | None, klu_dir: str | None = None, models_dir: str = layoutmod.DEFAULT_3D,
+                klc_error_severity: str = "warning"):
         if self.status == "deleted":
             return
         if self.node is None:
@@ -152,11 +154,32 @@ class Item:
             fs, cs = kc.check_symbol(self.node, self.linemap)
         self.add(fs, cs)
         if klc_utils.available(klu_dir):
-            kfs, err = klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text)
-            self.add(kfs, [kc.check("KiCad KLC checker (kicad-library-utils)",
-                                    "unknown" if err else ("fail" if kfs else "pass"), err or f"{len(kfs)} violation(s)")])
+            self.add_klc(klc_utils.run(klu_dir, self.kind, self.library, self.name, self.source_text),
+                         klc_error_severity)
         for w in self.raw.get("warnings") or []:
             self.add([kc.finding("info", f"Render: {w}")])
+
+    def add_klc(self, res: "klc_utils.KlcResult", error_severity: str = "warning"):
+        """Record the official checker's outcome. A run that didn't really check the item is
+        never a pass: it becomes klc status "error" plus a finding saying so."""
+        name = "KiCad KLC checker (kicad-library-utils)"
+        if res.ok:
+            self.klc = {"status": "ok", "attempts": res.attempts}
+            detail = f"{len(res.findings)} violation(s)"
+            if res.retried_because:
+                detail += f" (retried once: {res.retried_because})"
+                self.klc["retried_because"] = res.retried_because
+            self.add(res.findings, [kc.check(name, "fail" if res.findings else "pass", detail)])
+            return
+        self.klc = {"status": "error", "reason": res.error, "attempts": res.attempts}
+        msg = f"KLC could not check this item: {res.error}."
+        if res.stderr_tail:  # one code span per line: the viewer/report/comment render `code`, not fences
+            msg += "\nChecker output (last lines):\n" + "\n".join(
+                f"`{l.strip().replace('`', chr(39))}`" for l in res.stderr_tail.splitlines() if l.strip())
+        self.add([kc.finding(error_severity, msg, None,
+                             "The official KLC rules were not applied to this item; check it by hand "
+                             "or fix what stops the checker, then re-run.")],
+                 [kc.check(name, "error", res.error)])
 
     def det_verdict(self) -> str:
         sev = {f["severity"] for f in self.findings}
@@ -239,8 +262,11 @@ def det_summary(item: Item) -> str:
 def item_entry(item: Item, verdict: str, summary: str, datasheet_used: str | None) -> dict:
     # severity first; within a severity, line-cited findings (actionable) before uncited ones
     findings = sorted(item.findings, key=lambda f: (SEV_ORDER.get(f["severity"], 3), f.get("line") is None, f.get("line") or 0))
-    return {"verdict": verdict, "summary": summary, "datasheet_used": datasheet_used,
-            "findings": findings, "checks": item.checks}
+    e = {"verdict": verdict, "summary": summary, "datasheet_used": datasheet_used,
+         "findings": findings, "checks": item.checks}
+    if item.klc is not None:
+        e["klc"] = item.klc  # additive: {"status": "ok"|"error", "reason"?, "attempts", "retried_because"?}
+    return e
 
 
 def _md_cell(s: str, limit: int = 160) -> str:
@@ -285,6 +311,10 @@ def add_arguments(ap):
     ap.add_argument("--site-url", default=os.environ.get("CR_SITE_URL"), help="viewer URL to link from review.md")
     ap.add_argument("--klc-utils", default=os.environ.get("CR_KLC_UTILS"),
                     help="path to a kicad-library-utils checkout; runs its KLC checkers too (optional)")
+    ap.add_argument("--klc-error-severity", choices=tuple(SEV_ORDER),
+                    default=os.environ.get("CR_KLC_ERROR_SEVERITY") or "warning",
+                    help="severity of the 'KLC could not check this item' finding (default warning, "
+                         "i.e. verdict warn; also CR_KLC_ERROR_SEVERITY)")
     ap.add_argument("--only", action="append", help="only check item ids matching this substring (repeatable)")
     # accepted and ignored so older callers keep working
     ap.add_argument("--no-llm", "--no-download", action="store_true", help=argparse.SUPPRESS)
@@ -317,9 +347,13 @@ def run(args) -> int:
     if args.klc_utils and not klu_dir:
         print(f"checks: warning: --klc-utils {args.klc_utils} is not a kicad-library-utils checkout; skipping KLC checker",
               file=sys.stderr)
+    if args.klc_error_severity not in SEV_ORDER:
+        print(f"checks: bad KLC error severity {args.klc_error_severity!r} (CR_KLC_ERROR_SEVERITY); "
+              f"use one of {', '.join(SEV_ORDER)}", file=sys.stderr)
+        return 2
     models_dir = layoutmod.Layout(models=getattr(args, "lib_3d", layoutmod.DEFAULT_3D)).models
     for it in items:
-        it.analyse(repo, klu_dir, models_dir)
+        it.analyse(repo, klu_dir, models_dir, args.klc_error_severity)
     pr_findings = [
         {"severity": "warning", "category": "3d-model", "path": p, "line": None,
          "message": f"3D model file `{p}` is added/changed in this PR but no footprint references it.",
@@ -334,6 +368,10 @@ def run(args) -> int:
     summary = [f"Reviewed **{len(items)}** item(s): {n['fail']} fail, {n['warn']} warn, {n['pass']} pass."]
     if not klu_dir:
         summary.append("The KiCad KLC checker (kicad-library-utils) was not run.")
+    else:
+        unchecked = [it for it in items if (it.klc or {}).get("status") == "error"]
+        if unchecked:
+            summary.append(f"**KLC could not check {len(unchecked)} item(s)**; see their findings.")
     if pr_findings:
         summary.append(f"{len(pr_findings)} PR-level finding(s) (unreferenced 3D model files).")
     review = {"schema": 1, "generator": GENERATOR if klu_dir else "deterministic checks", "generated_at": _now(),

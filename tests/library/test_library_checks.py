@@ -86,6 +86,24 @@ SYM = """(kicad_symbol_lib
 """
 
 
+# A symbol complete enough for kicad-library-utils' parser (every property has (effects)).
+SYM_KLC = """(kicad_symbol_lib (version 20251024) (generator "kicad_symbol_editor")
+  (symbol "AMP1" (in_bom yes) (on_board yes)
+    (property "Reference" "U" (at 0 10.16 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "AMP1" (at 0 -10.16 0) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Description" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (symbol "AMP1_0_1"
+      (rectangle (start -7.62 7.62) (end 7.62 -7.62) (stroke (width 0.254) (type default)) (fill (type background))))
+    (symbol "AMP1_1_1"
+      (pin input line (at -10.16 0 0) (length 2.54) (name "IN" (effects (font (size 1.27 1.27))))
+        (number "1" (effects (font (size 1.27 1.27)))))
+      (pin output line (at 10.16 0 180) (length 2.54) (name "OUT" (effects (font (size 1.27 1.27))))
+        (number "2" (effects (font (size 1.27 1.27))))))))
+"""
+
+
 def _msgs(findings):
     return [f["message"] for f in findings]
 
@@ -209,14 +227,207 @@ class KlcUtilsTests(unittest.TestCase):
             self.skipTest("demo footprint not in this checkout")
         with open(path) as fh:
             text = fh.read()
-        f, err = klc_utils.run(os.environ["CR_KLC_UTILS"], "footprint", "Custom_Package_SO",
-                               "SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm", text)
-        self.assertIsNone(err)
-        self.assertTrue(any("F6.3" in x["message"] for x in f), f)
+        r = klc_utils.run(os.environ["CR_KLC_UTILS"], "footprint", "Custom_Package_SO",
+                          "SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm", text)
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(r.attempts, 1)
+        self.assertTrue(any("F6.3" in x["message"] for x in r.findings), r.findings)
         # unparseable input is reported as an error, not as a clean pass
-        f, err = klc_utils.run(os.environ["CR_KLC_UTILS"], "footprint", "Custom_Test", "Bad", FP_BAD)
-        self.assertEqual(f, [])
-        self.assertIn("could not parse", err)
+        r = klc_utils.run(os.environ["CR_KLC_UTILS"], "footprint", "Custom_Test", "Bad", FP_BAD)
+        self.assertEqual(r.findings, [])
+        self.assertIn("could not parse", r.error)
+
+    @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
+    def test_real_checker_crash_is_not_a_pass(self):
+        # a symbol property without (effects) crashes kicad-library-utils' parser (IndexError)
+        r = klc_utils.run(os.environ["CR_KLC_UTILS"], "symbol", "Custom_Test", "AMP1", SYM_KLC.replace(
+            '(property "Value" "AMP1" (at 0 -10.16 0) (effects (font (size 1.27 1.27))))',
+            '(property "Value" "AMP1" (at 0 -10.16 0))'))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.findings, [])
+        self.assertIn("KLC checker crashed: IndexError", r.error)
+        self.assertIn("effects", r.stderr_tail)
+        self.assertNotIn("/tmp", r.stderr_tail)
+        self.assertEqual(r.attempts, 1)              # deterministic crash: not retried
+        # the same symbol with its (effects) is checked normally
+        ok = klc_utils.run(os.environ["CR_KLC_UTILS"], "symbol", "Custom_Test", "AMP1", SYM_KLC)
+        self.assertTrue(ok.ok, ok.error)
+        # an older file version is not checked either (the pinned checker accepts only its own)
+        old = klc_utils.run(os.environ["CR_KLC_UTILS"], "symbol", "Custom_Test", "AMP1",
+                            SYM_KLC.replace("(version 20251024)", "(version 20241209)"))
+        self.assertFalse(old.ok)
+        self.assertIn('could not parse the item: Version of symbol file is "20241209"', old.error)
+
+
+# A fake kicad-library-utils: klc-check/check_*.py behave as FAKE_KLC_MODE says (comma list, one
+# entry per attempt; the last repeats). Attempts are counted in FAKE_KLC_COUNTER.
+FAKE_CHECKER = r"""
+import os, signal, sys, time
+args = sys.argv[1:]
+junit = args[args.index("--junit") + 1]
+cnt = os.environ["FAKE_KLC_COUNTER"]
+n = int(open(cnt).read()) if os.path.exists(cnt) else 0
+open(cnt, "w").write(str(n + 1))
+modes = os.environ["FAKE_KLC_MODE"].split(",")
+mode = modes[min(n, len(modes) - 1)]
+CASE = '<testcase name="X"/>'
+FAIL = ('<testcase name="X - Errors"><failure message="F5.3" type="FAILURE">F5.3: Courtyard layer requirements'
+        '\n    https://klc.kicad.org/footprint/f5/f5.3/\n    Missing courtyard</failure></testcase>')
+def report(body):
+    open(junit, "w").write(f'<?xml version="1.0"?><testsuites><testsuite name="KLC">{body}</testsuite></testsuites>')
+if mode == "pass":
+    report(CASE); sys.exit(0)
+if mode == "errors":
+    report(FAIL); sys.exit(3)
+if mode == "crash":
+    print('Traceback (most recent call last):\n  File "x.py", line 1, in <module>\nIndexError: list index out of range',
+          file=sys.stderr)
+    sys.exit(1)
+if mode == "parse":
+    print('Could not parse library: x.kicad_sym. (Version of symbol file is "20241209", not "20251024")')
+    report(""); sys.exit(0)
+if mode == "empty":          # the check_symbol.py worker race: results lost, exit 0, no test case
+    report(""); sys.exit(0)
+if mode == "inconsistent":   # errors in the report but exit 0
+    report(FAIL); sys.exit(0)
+if mode == "noreport":
+    sys.exit(0)
+if mode == "garbage":
+    open(junit, "w").write("<testsuites><testsuite"); sys.exit(0)
+if mode == "killed":
+    print("partial output", file=sys.stderr); sys.stderr.flush()
+    os.kill(os.getpid(), signal.SIGKILL)
+if mode == "hang":
+    time.sleep(30)
+raise SystemExit("unknown mode " + mode)
+"""
+
+
+class KlcFailSafeTests(unittest.TestCase):
+    """klc_utils.run never reports a pass unless the checker demonstrably checked the item."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.klu = os.path.join(self.tmp, "klu")
+        os.makedirs(os.path.join(self.klu, "klc-check"))
+        for script in ("check_footprint.py", "check_symbol.py"):
+            with open(os.path.join(self.klu, "klc-check", script), "w") as f:
+                f.write(FAKE_CHECKER)
+        self.counter = os.path.join(self.tmp, "count")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def run_fake(self, mode, kind="footprint"):
+        from unittest import mock
+        if os.path.exists(self.counter):
+            os.remove(self.counter)
+        with mock.patch.dict(os.environ, {"FAKE_KLC_MODE": mode, "FAKE_KLC_COUNTER": self.counter}):
+            r = klc_utils.run(self.klu, kind, "Custom_Test", "X", FP_OK)
+        calls = int(open(self.counter).read()) if os.path.exists(self.counter) else 0
+        self.assertEqual(calls, r.attempts)
+        return r
+
+    def test_real_results_not_retried(self):
+        r = self.run_fake("pass")
+        self.assertTrue(r.ok)
+        self.assertEqual((r.findings, r.attempts, r.retried_because), ([], 1, None))
+        r = self.run_fake("errors", "symbol")
+        self.assertTrue(r.ok)
+        self.assertEqual(r.attempts, 1)
+        self.assertIn("Missing courtyard", r.findings[0]["message"])
+
+    def test_crash(self):
+        r = self.run_fake("crash")
+        self.assertFalse(r.ok)
+        self.assertEqual(r.error, "KLC checker crashed: IndexError: list index out of range")
+        self.assertIn("IndexError", r.stderr_tail)
+        self.assertEqual(r.attempts, 1)              # deterministic: no retry
+
+    def test_could_not_parse(self):
+        r = self.run_fake("parse", "symbol")
+        self.assertFalse(r.ok)
+        self.assertEqual(r.error, 'KLC checker could not parse the item: Version of symbol file is "20241209", '
+                                  'not "20251024"')
+        self.assertEqual(r.attempts, 1)
+
+    def test_timeout(self):
+        from unittest import mock
+        with mock.patch.object(klc_utils, "TIMEOUT_S", 1):
+            r = self.run_fake("hang")
+        self.assertFalse(r.ok)
+        self.assertEqual(r.error, "KLC checker timed out after 1 s")
+        self.assertEqual(r.attempts, 1)
+
+    def test_flakes_retried_once_then_error(self):
+        for mode, reason in (("empty", "reported no result for the item (exit 0, empty report)"),
+                             ("inconsistent", "exit 0 disagrees with its report (1 error(s), 0 warning(s))"),
+                             ("noreport", "wrote no report (exit 0)"),
+                             ("garbage", "KLC report unreadable"),
+                             ("killed", "was killed or exited abnormally (exit -9)")):
+            with self.subTest(mode=mode):
+                r = self.run_fake(mode, "symbol")
+                self.assertFalse(r.ok)
+                self.assertIn(reason, r.error)
+                self.assertTrue(r.error.endswith("(after 2 attempts)"), r.error)
+                self.assertEqual(r.attempts, 2)
+        self.assertIn("partial output", self.run_fake("killed").stderr_tail)
+
+    def test_flake_then_success(self):
+        r = self.run_fake("empty,errors", "symbol")
+        self.assertTrue(r.ok)
+        self.assertEqual(r.attempts, 2)
+        self.assertIn("empty report", r.retried_because)
+        self.assertEqual(len(r.findings), 1)
+        r = self.run_fake("killed,pass")
+        self.assertTrue(r.ok)
+        self.assertEqual((r.findings, r.attempts), ([], 2))
+
+    def test_checks_stage(self):
+        """End to end through `kipr library checks`: status, finding, verdict, summary, severity option."""
+        from unittest import mock
+        out = os.path.join(self.tmp, "out")
+        build_synthetic_out(out)
+        fp = "footprint:Custom_Test:R_0603_1608Metric"
+
+        def stage(mode, *extra):
+            if os.path.exists(self.counter):
+                os.remove(self.counter)
+            with mock.patch.dict(os.environ, {"FAKE_KLC_MODE": mode, "FAKE_KLC_COUNTER": self.counter}):
+                os.environ.pop("CR_KLC_ERROR_SEVERITY", None)
+                self.assertEqual(cr.run(cr.parse_args(["--out", out, "--klc-utils", self.klu, *extra])), 0)
+            with open(os.path.join(out, "review.json")) as f:
+                return json.load(f)
+
+        ok = stage("pass")
+        self.assertEqual(ok["items"][fp]["klc"], {"status": "ok", "attempts": 1})
+        self.assertEqual(ok["items"][fp]["verdict"], "pass")
+        self.assertNotIn("KLC could not check", ok["summary_markdown"])
+
+        bad = stage("crash")
+        e = bad["items"][fp]
+        self.assertEqual(e["klc"]["status"], "error")
+        self.assertEqual(e["klc"]["reason"], "KLC checker crashed: IndexError: list index out of range")
+        self.assertEqual(e["verdict"], "warn")                      # default: not checked = warn
+        f = next(x for x in e["findings"] if x["message"].startswith("KLC could not check this item"))
+        self.assertEqual((f["severity"], f["category"]), ("warning", "klc"))
+        self.assertIn("`IndexError: list index out of range`", f["message"])   # stderr tail
+        chk = next(c for c in e["checks"] if c["name"].startswith("KiCad KLC checker"))
+        self.assertEqual(chk["result"], "error")
+        self.assertIn("**KLC could not check 2 item(s)**", bad["summary_markdown"])   # footprint + symbol
+        md = open(os.path.join(out, "review.md")).read()
+        self.assertIn("KLC could not check this item", md)
+
+        self.assertEqual(stage("crash", "--klc-error-severity", "error")["items"][fp]["verdict"], "fail")
+        self.assertEqual(stage("crash", "--klc-error-severity", "info")["items"][fp]["verdict"], "pass")
+        with mock.patch.dict(os.environ, {"CR_KLC_ERROR_SEVERITY": "bogus", "FAKE_KLC_MODE": "pass",
+                                          "FAKE_KLC_COUNTER": self.counter}):
+            self.assertEqual(cr.run(cr.parse_args(["--out", out, "--klc-utils", self.klu])), 2)
+
+        retried = stage("empty,pass")["items"][fp]
+        self.assertEqual(retried["klc"]["status"], "ok")
+        self.assertEqual(retried["klc"]["attempts"], 2)
+        self.assertIn("retried once", next(c for c in retried["checks"] if c["name"].startswith("KiCad KLC"))["detail"])
 
 
 class SymbolCheckTests(unittest.TestCase):
@@ -324,7 +535,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("path", f)
                 self.assertTrue(f["line"] is None or isinstance(f["line"], int))
             for c in e["checks"]:
-                self.assertIn(c["result"], ("pass", "fail", "unknown"))
+                self.assertIn(c["result"], ("pass", "fail", "unknown", "error"))
 
     def test_checks(self):
         self.assertEqual(cr.run(self.args()), 0)

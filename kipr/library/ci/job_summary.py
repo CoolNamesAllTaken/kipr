@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-from .common import (SEVERITY_RANK, finding_line_no, findings_of, item_review, load_site,
+from .common import (SEVERITY_RANK, finding_line_no, findings_of, item_review, klc_not_checked, load_site,
                      md_inline, overall_verdict, safe_http_url, safe_repo_path, verdict_of)
 
 MAX_ANNOTATIONS = 50        # GitHub's per-job cap
@@ -76,11 +76,13 @@ def summary(site: Path, manifest, review, links: list[tuple[str, str]]) -> str:
                 sev[f["severity"]] += 1
     verdicts = [verdict_of(item_review(review, i.get("id"))) for i in items]
     icon = {"pass": "✅", "warn": "⚠️", "fail": "❌", None: "⚪"}[ov]
+    n_klc = sum(klc_not_checked(item_review(review, i.get("id"))) for i in items)
     lines = [f"## {icon} Component review: {ov or 'not reviewed'}", "",
              f"**{len(items)}** changed component(s): " + ", ".join(f"{v} {k}" for k, v in counts.items() if v)
              + (f" · verdicts: {verdicts.count('fail')} fail, {verdicts.count('warn')} warn, "
                 f"{verdicts.count('pass')} pass" if review else "")
-             + f" · findings: {sev['error']} error(s), {sev['warning']} warning(s), {sev['info']} info", ""]
+             + f" · findings: {sev['error']} error(s), {sev['warning']} warning(s), {sev['info']} info"
+             + (f" · **KLC could not check {n_klc} item(s)**" if n_klc else ""), ""]
     good = [(n, safe_http_url(u)) for n, u in links]
     good = [(n, u) for n, u in good if u]
     if good:

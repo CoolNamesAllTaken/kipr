@@ -99,6 +99,28 @@ class TestContent(Base):
         self.assertNotIn(".kicad_sym:0", page)
         self.assertEqual(page.count("lib_sch/Custom_Audio.kicad_sym#L5\">lib_sch/Custom_Audio.kicad_sym</a>"), 2)
 
+    def test_klc_not_checked(self):
+        rid = "symbol:Custom_Audio:NS4168"
+        self.r["items"][rid]["klc"] = {"status": "error", "reason": "KLC checker crashed: IndexError", "attempts": 1}
+        self.r["items"][rid]["findings"].append(
+            {"severity": "warning", "category": "klc", "path": "lib_sch/Custom_Audio.kicad_sym",
+             "message": "KLC could not check this item: KLC checker crashed: IndexError.\nChecker output (last lines):\n`IndexError: x`"})
+        self.r["items"][rid]["checks"] = [{"name": "KiCad KLC checker (kicad-library-utils)", "result": "error",
+                                           "detail": "KLC checker crashed: IndexError"}]
+        self.save()
+        page = self.page()
+        self.assertEqual(audit(page).problems, [])
+        sec = page[page.index('id="c-symbol__Custom_Audio__NS4168"'):]
+        sec = sec[: sec.index("</section>")]
+        self.assertIn('<span class="pill klc-err" title="KLC checker crashed: IndexError">KLC not checked</span>', sec)
+        self.assertIn('<tr class="ck-error"><td>error</td>', sec)
+        self.assertIn("<code>IndexError: x</code>", sec)
+        self.assertEqual(page.count("KLC not checked</span>"), 2)          # its section + the summary table
+        self.assertIn("<b>1</b>KLC could not check</div>", page)
+        # items without a klc error carry no marker
+        other = page[page.index('id="c-footprint__Custom_Buzzer_Beeper'):]
+        self.assertNotIn("klc-err", other[: other.index("</section>")])
+
     def test_statuses(self):
         # make the modified item's twin deleted, with a text diff
         it = dict(self.m["items"][0])
@@ -179,7 +201,7 @@ class TestEscaping(Base):
         self.r["items"][rid] = {"verdict": XSS, "summary": XSS, "findings": [
             {"severity": XSS, "category": XSS, "message": XSS, "suggestion": XSS, "path": XSS, "line": XSS},
             {"severity": "error", "category": "klc", "message": "**" + XSS + "**", "path": "lib_fp/a b.kicad_mod", "line": 3}],
-            "checks": [{"name": XSS, "result": XSS, "detail": XSS}]}
+            "checks": [{"name": XSS, "result": XSS, "detail": XSS}], "klc": {"status": "error", "reason": XSS}}
         self.r["pr_findings"] = [{"severity": "warning", "category": XSS, "message": XSS, "path": XSS}]
         self.m["generated_at"] = XSS
         self.m["kicad_version"] = XSS

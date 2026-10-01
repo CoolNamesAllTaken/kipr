@@ -195,6 +195,21 @@ class TestReview(Tmp):
         self.assertNotIn("@someone", body)
         self.assertEqual(body.count("<details>"), body.count("</details>"))
 
+    def test_comment_klc_not_checked(self):
+        review = json.loads((self.site / "review.json").read_text())
+        rid = "symbol:Custom_Audio:NS4168"
+        review["items"][rid]["klc"] = {"status": "error", "reason": "KLC checker crashed", "attempts": 1}
+        (self.site / "review.json").write_text(json.dumps(review))
+        manifest, review = self.load()
+        ctx = Ctx(self.site, REPO, 8, HEAD, "https://pantsforbirds.github.io/kicad-libs/", PAGES)
+        body = build_comment(ctx, manifest, review)
+        row = next(l for l in body.splitlines() if l.startswith("|") and "NS4168" in l)
+        self.assertIn("<br>⚠️ KLC not checked |", row)
+        self.assertEqual(body.count("KLC not checked"), 2)    # table row + details summary
+        out = self.tmp / "summary.md"
+        job_summary.main(["--out", str(self.site), "--summary", str(out)])
+        self.assertIn("**KLC could not check 1 item(s)**", out.read_text())
+
     def test_comment_without_review_and_missing_images(self):
         (self.site / "review.json").unlink()
         for p in self.site.rglob("*.png"):
