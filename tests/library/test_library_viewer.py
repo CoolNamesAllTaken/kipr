@@ -137,6 +137,14 @@ class ScreenshotTests(unittest.TestCase):
         self.check(rendered_site(), "rendered-file", "--mode", "file")
 
 
+@unittest.skipUnless(HAVE_CDN, "needs playwright + chromium and cdn.jsdelivr.net (three.js, occt-import-js)")
+class ColorTests(unittest.TestCase):
+    def test_step_colors_read_like_kicad(self):
+        """The RP2040-Zero board colour (STEP 0.090/0.224/0.420) is a clear mid blue from the top and the bottom."""
+        r = run_tool("color_check.py")
+        self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
+
+
 @unittest.skipUnless(HAVE_PW, "needs playwright + chromium (python -m playwright install chromium)")
 class XssTests(unittest.TestCase):
     def check(self, site: Path, *extra):

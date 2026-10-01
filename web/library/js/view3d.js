@@ -24,8 +24,9 @@ const OVERLAY_COLORS = { head: 0x22c3ff, base: 0xff3d9a };
 
 let libPromise = null;
 function loadLibs() {
-  libPromise ??= Promise.all([import(THREE_URL), import(`${THREE_ADDONS}controls/OrbitControls.js/+esm`)])
-    .then(([THREE, oc]) => ({ THREE, OrbitControls: oc.OrbitControls }));
+  libPromise ??= Promise.all([import(THREE_URL), import(`${THREE_ADDONS}controls/OrbitControls.js/+esm`),
+    import(`${THREE_ADDONS}environments/RoomEnvironment.js/+esm`)])
+    .then(([THREE, oc, re]) => ({ THREE, OrbitControls: oc.OrbitControls, RoomEnvironment: re.RoomEnvironment }));
   return libPromise;
 }
 
@@ -40,8 +41,8 @@ export const MODEL_LOADERS = {
       if (m.normal && m.normal.length === m.position.length) g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
       g.setIndex(new THREE.BufferAttribute(m.index, 1));
       if (!g.attributes.normal) g.computeVertexNormals();
-      const color = m.color ? new THREE.Color(m.color[0], m.color[1], m.color[2]) : new THREE.Color(0x9a9ca3);
-      const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.15, roughness: 0.55, side: THREE.DoubleSide });
+      const color = stepColor(THREE, m.color);
+      const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide });
       group.add(new THREE.Mesh(g, mat));
     }
     return group;
@@ -49,19 +50,52 @@ export const MODEL_LOADERS = {
 };
 MODEL_LOADERS.stp = MODEL_LOADERS.step;
 
+/**
+ * three.js colour for a STEP colour from occt-import-js. OpenCascade hands back linear RGB (it decodes the file's
+ * COLOUR_RGB values as sRGB). KiCad's 3D viewer uses the file's values unconverted as its shading colour, which is
+ * what model authors tune for (the RP2040-Zero board 0.09/0.22/0.42 reads mid-blue there), so do the same: re-encode
+ * to the file's values and use those as linear working-space values.
+ */
+export function stepColor(THREE, rgb) {
+  if (!rgb) return new THREE.Color(0xb4b6bc);
+  return new THREE.Color(rgb[0], rgb[1], rgb[2]).convertLinearToSRGB();
+}
+
 export function modelLoaderFor(url) {
   const ext = String(url).split('?')[0].split('.').pop().toLowerCase();
   return MODEL_LOADERS[ext] || null;
 }
 
+/** Vertical two-stop gradient (top, bottom) like KiCad's 3D viewer background. */
+function gradientTexture(THREE, [top, bottom]) {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, c.height);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, c.width, c.height);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 export async function create3DViewer(container, { dark = false, onStatus = () => {} } = {}) {
-  const { THREE, OrbitControls } = await loadLibs();
+  const { THREE, OrbitControls, RoomEnvironment } = await loadLibs();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setScissorTest(true);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
   container.append(renderer.domElement);
+  // Generated studio environment (no download) so metal pads and connector shells have something to reflect.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
   const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 5000);
@@ -71,6 +105,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
   controls.screenSpacePanning = true;
 
   const bg = new THREE.Color(dark ? 0x1b1d22 : 0xe9ecf0);
+  const bgTexture = gradientTexture(THREE, dark ? ['#3a3d4a', '#15161b'] : ['#d2d4ea', '#8a8ca6']);
   const sides = { head: null, base: null }; // {scene, root}
   const visible = Object.fromEntries(GROUPS.map((g) => [g.name, !g.defaultOff]));
   const present = new Set();
@@ -81,14 +116,18 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
 
   function makeScene() {
     const scene = new THREE.Scene();
-    scene.background = bg;
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a44, 1.5));
-    const key = new THREE.DirectionalLight(0xffffff, 2.0);
+    scene.background = bgTexture;
+    scene.environment = envMap;
+    scene.environmentIntensity = 0.15;
+    // KiCad-like: even fill from every side, a key from above and a headlight that follows the camera
+    // (set in render()), so the Bottom view is lit as well as the Top.
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const key = new THREE.DirectionalLight(0xffffff, 0.35);
     key.position.set(40, 80, 50);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.7);
-    fill.position.set(-50, -30, -40);
-    scene.add(fill);
+    const head = new THREE.DirectionalLight(0xffffff, 1.4);
+    scene.add(head, head.target);
+    scene.userData.headlight = head;
     // Board frame (KiCad 3D: z up out of the board) -> three.js y-up
     const root = new THREE.Group();
     root.rotation.x = -Math.PI / 2;
@@ -219,6 +258,9 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
       camera.aspect = width / h;
       camera.updateProjectionMatrix();
       if (clearDepth) renderer.clearDepth();
+      const head = s.scene.userData.headlight;
+      head.position.copy(camera.position);
+      head.target.position.copy(controls.target);
       renderer.render(s.scene, camera);
     };
     renderer.autoClear = false;
@@ -285,6 +327,8 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
       stopped = true;
       cancelAnimationFrame(raf);
       controls.dispose();
+      envMap.dispose();
+      bgTexture.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     },
