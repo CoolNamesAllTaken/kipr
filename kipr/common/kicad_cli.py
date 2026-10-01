@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 
 
@@ -51,6 +52,48 @@ def version(kicad_cli: str) -> str | None:
     """``kicad-cli version`` output (e.g. ``10.0.1``), or None if it cannot run."""
     r = run(kicad_cli, "version", timeout=60)
     return r.stdout.strip() or None if r.ok else None
+
+
+def upgrade_text(kicad_cli: str, kind: str, text: str, filename: str | None = None,
+                 timeout: float = 300) -> tuple[str | None, str]:
+    """Re-save one library file with KiCad's own loader/writer: ``kicad-cli sym upgrade`` (kind
+    ``"symbol"``, a whole ``.kicad_sym``) or ``fp upgrade`` (kind ``"footprint"``, one
+    ``.kicad_mod``). ``--force`` re-saves even a file that is already at the current version.
+
+    Works on temporary copies only. ``filename`` is the footprint's file name: KiCad names the
+    footprint after it, so only its directory part is dropped. Returns ``(upgraded text, "")``
+    or ``(None, error message)``; never raises for a failing kicad-cli.
+    """
+    if kind not in ("symbol", "footprint"):
+        raise ValueError(f"kind must be 'symbol' or 'footprint', not {kind!r}")
+    with tempfile.TemporaryDirectory(prefix="kipr_upgrade_") as d:
+        if kind == "symbol":
+            src, dst = os.path.join(d, "in.kicad_sym"), os.path.join(d, "out.kicad_sym")
+            args = ("sym", "upgrade", "--force", "--output", dst, src)
+            path = src
+        else:
+            name = os.path.basename(filename or "")
+            if name in ("", ".", "..") or not name.endswith(".kicad_mod"):
+                name = (name if name not in ("", ".", "..") else "footprint") + ".kicad_mod"
+            src, dst = os.path.join(d, "in.pretty"), os.path.join(d, "out.pretty")
+            os.makedirs(src)
+            path = os.path.join(src, name)
+            args = ("fp", "upgrade", "--force", "--output", dst, src)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        r = run(kicad_cli, *args, timeout=timeout)
+        if kind == "symbol":
+            out = dst if r.ok and os.path.isfile(dst) else None
+        else:
+            mods = sorted(f for f in os.listdir(dst) if f.endswith(".kicad_mod")) if r.ok and os.path.isdir(dst) else []
+            out = os.path.join(dst, mods[0]) if len(mods) == 1 else None
+        if out is None:
+            what = f"kicad-cli {args[0]} upgrade"
+            if not r.ok:
+                return None, f"{what} failed (exit {r.returncode})" + (f": {r.message[:500]}" if r.message else "")
+            return None, f"{what} wrote no output" + (f": {r.message[:500]}" if r.message else "")
+        with open(out, encoding="utf-8") as fh:
+            return fh.read(), ""
 
 
 class KicadCli:
