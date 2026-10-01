@@ -44,6 +44,7 @@ Useful options of the end-to-end run (see `kipr library --help`):
   severity of the "KLC could not check this item" finding, so whether an item the KLC checker
   could not check is `fail`, `warn` (default) or left to its other findings. See
   [When the KLC checker fails](#when-the-klc-checker-fails).
+- `--no-reencode-check`, `--kicad-cli PATH`: see [Re-encoded by KiCad vs. edited](#re-encoded-by-kicad-vs-edited).
 - `--fetch-stock-models [--stock-models-dir DIR]`: download `${KICADn_3DMODEL_DIR}` models from
   kicad-packages3D at the tag pinned in `kipr/library/render/stock_models_tag.txt`.
 - `--no-3d`, `--no-preview`, `--png-size`, `--repo-name owner/repo` (default
@@ -95,7 +96,99 @@ changed.
   the privileged publish job, which never runs KiCad on PR data, re-checks the same copy as
   data. A copy whose sha256 doesn't match the source is ignored.
 
-The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs.
+### Re-encoded by KiCad vs. edited
+
+A symbol library is one file, so a designer who edits one symbol in a newer KiCad re-saves all
+of them in the new format (`(show_name no)`, `(do_not_autoplace no)`, `(hide yes)` moved out of
+`(effects)`, …), and a footprint opened and saved in a newer KiCad changes text everywhere. The
+render step tells such **re-encoded** parts from real edits (`kipr/library/render/reencode.py`).
+It is deliberately conservative: a real edit shown as re-encoded would hide it from review, so
+when in doubt a part stays `modified`.
+
+For each `modified` symbol or footprint present at base and head (not ones changed only through
+a 3D model file or a parent symbol):
+
+1. **Reference upgrade (the criterion).** The base file is upgraded with `kicad-cli sym upgrade`
+   / `fp upgrade --force`, i.e. KiCad's own loader and writer (the code the editors save with),
+   and the part in the result is compared with the part at head. The comparison ignores only
+   whitespace, number spelling, `uuid`s (KiCad generates fresh ones when it loads an old file)
+   and the file header. It is only used when kicad-cli writes the head's file format (same
+   `version`), i.e. it is the KiCad the head was saved with. On kicad-libs PR #13 the KiCad 10.0.6
+   upgrade of the base was byte-identical to what the KiCad 10 symbol editor wrote, so no
+   editor-specific defaults are needed.
+2. **Semantic comparison (the safety net).** Both sides are compared field by field after the
+   format normalisations below and nothing else: pins (number, name, type, shape, position,
+   length, orientation, visibility, fonts), graphics, properties (value, position, visibility,
+   effects), units/body styles, flags (`in_bom`, `on_board`, `power`, `exclude_from_sim`, …),
+   `pin_names`/`pin_numbers`. Anything without a rule must match exactly. Footprints are compared
+   on the version-independent model of kipr's footprint parser (pads, graphics, texts, zones,
+   properties, attributes, 3D models, embedded files).
+
+A part is `re-encoded` only if (1) says identical **and** (2) agrees. If (2) finds a difference
+that KiCad's upgrade does not, the part stays `modified` (with a note). Without a usable
+kicad-cli (none on `PATH`, `$KIPR_KICAD_CLI` / `$KICAD_CLI` / `--kicad-cli`, or one that writes
+another format than the head), a **symbol** may still be `re-encoded` when (2) agrees, the base
+and head renders are pixel identical and, if a kicad-cli of another version is available,
+re-saving base and head with it gives identical results; a **footprint** then always stays
+`modified`. `--no-reencode-check` turns the check off.
+
+| Normalisation | Applies to | Why it cannot hide an edit |
+|---|---|---|
+| `whitespace` | both | KiCad gives whitespace no meaning outside strings |
+| `numbers` | both | `1` = `1.0` = `1.000000`, `-0` = `0`; values rounded to 1e-6 (KiCad stores 1e-4 mm in symbols, 1e-6 mm in footprints) |
+| `uuid` | both | identity, not content; KiCad generates uuids for objects that had none |
+| `header` | both | `version`/`generator`/`generator_version` are file-level; reported as the library note |
+| `property-id` | semantic | `(id N)` of KiCad 6/7 fields; KiCad 8 identifies fields by name |
+| `flag-spelling` | semantic | bare `hide`/`bold`/`italic` (KiCad 6/7) = `(hide yes)`/`(bold yes)`/`(italic yes)` |
+| `hide-location` | semantic | `(effects (hide yes))` (KiCad ≤ 9) and the field's own `(hide yes)` (KiCad 10) are one flag |
+| `defaults` | semantic | `(hide no)`, `(bold no)`, `(italic no)`, `(show_name no)`, `(do_not_autoplace no)`, `(exclude_from_sim no)`, `(in_bom yes)`, `(on_board yes)`, `(in_pos_files yes)`, `(duplicate_pin_numbers_are_jumpers no)`, `(embedded_fonts no)` are KiCad's defaults; a non-default value is always compared |
+| `default-color` | semantic | `(color 0 0 0 0)` in a stroke/fill means "default colour"; KiCad 8+ omits it |
+| `ki-description` | semantic | KiCad 8 turned `ki_description` into the `Description` field (only when there is no non-empty `Description`; the text, position and effects are still compared) |
+| `empty-description` | semantic | KiCad 8 adds an empty `Description` field to every symbol; an empty field draws nothing |
+| `arc-direction` | semantic | an arc start→mid→end is the arc end→mid→start (KiCad 8 reverses some); all three points are compared |
+| `item-order` | semantic | KiCad sorts graphic items and pins when it saves; point lists (`pts`) and atoms keep their order |
+| `fp-name` | footprint net | KiCad names a footprint after its file (same file at base and head) |
+| `fp-empty-props` | footprint net | empty `Footprint`/`Datasheet`/`Description` properties = absent |
+| `fp-pad-layers` | footprint net | a pad's layer list is a set |
+| `fp-arc-direction` | footprint net | as `arc-direction` |
+| `fp-text-angle` | footprint net | text angles modulo 360° (`-180` = `180`) |
+| `fp-text-vars` | footprint net | `%R`/`%V` (KiCad 5) = `${REFERENCE}`/`${VALUE}` |
+| `fp-unlocked` | footprint net | the `unlocked` editing flag of texts (KiCad 8 changed its default) only affects editing |
+| `fp-attr-tht` | footprint net | no footprint type in `attr` (KiCad 5) means through-hole |
+| `fp-closed-poly` | footprint net | a zone outline whose last point repeats the first |
+
+The `fp-*` rules only decide how often the footprint safety net raises a false alarm: a footprint
+is never `re-encoded` without KiCad's reference upgrade. Each rule has a test in
+`tests/library/test_library_reencode.py` showing what it equates and what it still tells apart.
+
+Validated on kicad-libs: PR #13 (AD8314, BLB01, LM73100RPWR re-encoded; nothing else modified)
+and the whole history of `main` (`tests/library/reencode_history.py REPO --rev main` compares
+every changed part with a KiCad round trip of both sides): no part called re-encoded that KiCad
+sees as different. Known false alarm: KiCad 6 → 7 recomputed some arc mid points (by 3 µm), so
+such parts in KiCad 6 files stay `modified`.
+
+Output (additive to the formats):
+
+- `manifest.json` items: `status: "re-encoded"` and `reencode` = `{reencoded, method
+  ("reference-upgrade" | "semantic+render" | "semantic"), explanation ("file format upgraded
+  20231120 → 20251024 by KiCad 10.0; no content change"), base_format, head_format,
+  base/head_generator_version, kicad_cli_version, differences [...], note?}`. Modified parts get
+  the same record with `reencoded: false` and the list of what differs from KiCad's upgrade of
+  the base (or from the normalised base).
+- `manifest.json` `reencoded_files`: library files whose format version changed, with a `note`
+  ("Custom_RF_Amplifier.kicad_sym was re-saved by a newer KiCad (format 20231120 → 20251024,
+  KiCad 8.0 → KiCad 10.0)") and the ids of their re-encoded and modified parts.
+- Re-encoded parts are not checked (no `review.json` entry), not counted as changes, and left out
+  of the overall verdict, the check run, annotations and inline comments. The PR comment, job
+  summary, HTML report and viewer list them collapsed ("3 symbols re-encoded by KiCad, no
+  changes"), with the library notes; the viewer and report still show each one's raw text diff.
+  A modified part in a re-saved file shows "Changed beyond the file format upgrade" with the list.
+- Like the item list itself, the status comes from the unprivileged render job: the publish stage
+  cannot re-check it (it has no PR checkout), so a PR that controls that job can hide a part
+  either way.
+
+The data formats (`manifest.json` schema 1, `review.json` schema 1) are unchanged from kicad-libs
+apart from the additive fields above and the KLC status.
 The viewer is documented in [`web/library/README.md`](../web/library/README.md).
 
 ## GitHub Actions
@@ -267,7 +360,7 @@ kipr library ci post-review --site /tmp/cr-site --repo PantsForBirds/kicad-libs 
 | `kipr/common/sexpr.py` | s-expression parser with source spans (KiCad 5–10, `\|base64\|` data) |
 | `kipr/common/git.py`, `kipr/common/kicad_cli.py` | read-only git access; finding/running kicad-cli |
 | `kipr/library/layout.py` | the configurable library directories |
-| `kipr/library/render/` | change detection, footprint/symbol SVG renderers, PNG/diff, 3D (GLB, STEP copies, stock models) |
+| `kipr/library/render/` | change detection, re-encode detection (`reencode.py`), footprint/symbol SVG renderers, PNG/diff, 3D (GLB, STEP copies, stock models) |
 | `kipr/library/checks/` | KLC-style rules (`kicad_checks.py`), official KLC checker glue (`klc_utils.py`) |
 | `kipr/library/report.py`, `kipr/library/site.py` | the HTML report; copies the viewer + file:// support into OUT |
 | `kipr/library/ci/` | GitHub glue (above) |
@@ -281,7 +374,14 @@ pip install -e ".[3d,test]" && python -m playwright install chromium
 python -m pytest tests/library          # python + node + headless Chromium (browser tests skip without playwright)
 KIPR_SHOTS_DIR=/tmp/shots python -m pytest tests/library/test_library_viewer.py   # keep the screenshots
 CR_KLC_UTILS=/path/to/kicad-library-utils python -m pytest tests/library -k klc   # the real KLC checker
+KIPR_KICAD_CLI=/path/to/kicad-cli KIPR_TEST_KICAD_LIBS=/path/to/kicad-libs \
+    python -m pytest tests/library/test_library_reencode.py      # re-encode tests against real KiCad 10 + kicad-libs PR #13
 ```
+
+The re-encode tests replay committed KiCad 10.0.6 output (`tests/library/fixtures/reencode`)
+through a fake kicad-cli, so they need no KiCad; with a real KiCad 10 kicad-cli they also check
+the fixtures against it, and with `KIPR_TEST_KICAD_LIBS` (a kicad-libs clone with
+`git fetch origin pull/13/head:pr13`) they run PR #13.
 
 Fixtures are public kicad-libs parts (`tests/library/fixtures/kicad-libs`, MIT);
 `tests/library/fixture_repo.py DIR` builds a two-commit repository from them with added,

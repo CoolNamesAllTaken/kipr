@@ -31,6 +31,7 @@ from .. import layout as layoutmod
 from . import kicad_checks as kc
 from . import klc_utils
 
+REENCODED = "re-encoded"   # manifest status of a part only re-saved by a newer KiCad
 SEV_ORDER = {"error": 0, "warning": 1, "info": 2}
 VERDICT_ORDER = {"fail": 0, "warn": 1, "pass": 2}
 GENERATOR = "deterministic checks + KLC"
@@ -360,6 +361,16 @@ def datasheet_ref(item: Item, out_dir: str) -> str | None:
 # outputs
 # ---------------------------------------------------------------------------
 
+def reencoded_phrase(items) -> str:
+    """'3 symbols re-encoded by KiCad, no changes' for a list of Items (or manifest dicts)."""
+    kinds: dict[str, int] = {}
+    for i in items:
+        k = i.kind if isinstance(i, Item) else str(i.get("kind") or "part")
+        kinds[k] = kinds.get(k, 0) + 1
+    what = " and ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted(kinds.items()))
+    return f"{what} re-encoded by KiCad, no changes"
+
+
 def det_summary(item: Item) -> str:
     n = {s: sum(f["severity"] == s for f in item.findings) for s in SEV_ORDER}
     if item.status == "deleted":
@@ -455,6 +466,9 @@ def run(args) -> int:
     items = [Item(r, out_dir, repo) for r in manifest.get("items") or [] if isinstance(r, dict)]
     if args.only:
         items = [i for i in items if any(s in i.id for s in args.only)]
+    # parts only re-encoded by a newer KiCad have no change to review: no checks, no verdict
+    reencoded = [i for i in items if i.status == REENCODED]
+    items = [i for i in items if i.status != REENCODED]
     klu_dir = args.klc_utils if klc_utils.available(args.klc_utils) else None
     if args.klc_utils and not klu_dir:
         print(f"checks: warning: --klc-utils {args.klc_utils} is not a kicad-library-utils checkout; skipping KLC checker",
@@ -487,6 +501,8 @@ def run(args) -> int:
             summary.append(f"**KLC could not check {len(unchecked)} item(s)**; see their findings.")
     if pr_findings:
         summary.append(f"{len(pr_findings)} PR-level finding(s) (unreferenced 3D model files).")
+    if reencoded:
+        summary.append(f"{reencoded_phrase(reencoded)} (not reviewed).")
     review = {"schema": 1, "generator": GENERATOR if klu_dir else "deterministic checks", "generated_at": _now(),
               "summary_markdown": " ".join(summary), "items": review_items,
               # additive to the contract: findings not tied to one item

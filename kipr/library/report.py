@@ -28,7 +28,8 @@ import urllib.parse
 from pathlib import Path
 
 from .ci.common import (KLC_NOT_CHECKED, SEVERITY_RANK, VERDICT_RANK, check_repo, check_sha, finding_line_no,
-                        klc_not_checked, load_json, safe_http_url, safe_repo_path, safe_site_file, safe_slug)
+                        klc_not_checked, load_json, reencode_explanation, safe_http_url, safe_repo_path,
+                        safe_site_file, safe_slug, REENCODED)
 from .ci.sanitize_site import svg_is_safe
 
 try:
@@ -475,6 +476,47 @@ def text_diff_section(site: Path, item: dict, slug: str) -> str:
             f'{" (truncated)" if cut else ""}</summary><pre>{chr(10).join(lines)}</pre></details>')
 
 
+def reencoded_section(ctx: Ctx, manifest: dict, items: list[dict]) -> str:
+    """Collapsed: parts only re-encoded by a newer KiCad, library notes, each part's raw diff."""
+    files = [f for f in manifest.get("reencoded_files") or [] if isinstance(f, dict)] \
+        if isinstance(manifest.get("reencoded_files"), list) else []
+    notes = [f["note"] for f in files if isinstance(f.get("note"), str)]
+    if not items and not notes:
+        return ""
+    kinds: dict[str, int] = {}
+    for i in items:
+        k = i.get("kind") if i.get("kind") in ("symbol", "footprint") else "part"
+        kinds[k] = kinds.get(k, 0) + 1
+    title = (" and ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted(kinds.items()))
+             + " re-encoded by KiCad, no changes") if items else "Library files re-saved by a newer KiCad"
+    out = [f'<details class="reenc" id="re-encoded"><summary><h3>♻ {esc(title)}</h3></summary>']
+    if notes:
+        out.append("<ul>" + "".join(f"<li>{esc(n)}</li>" for n in notes[:50]) + "</ul>")
+    for it in items:
+        slug = safe_slug(it.get("slug")) or "invalid"
+        out.append(f'<div class="comp" id="{slug_id(slug)}"><p><b>{esc(it.get("library"))}:<wbr>{esc(it.get("name"))}</b> '
+                   f'<span class="pill">{esc(it.get("kind"))}</span> <span class="pill st-re-encoded">re-encoded</span> '
+                   f'{esc(reencode_explanation(it))}</p>{text_diff_section(ctx.site, it, slug)}</div>')
+    out.append("</details>")
+    return "".join(out)
+
+
+def reencode_differences(item: dict) -> str:
+    """For a modified part in a file re-saved by another KiCad: what differs beyond the format upgrade."""
+    r = item.get("reencode")
+    if not isinstance(r, dict) or r.get("reencoded") or not isinstance(r.get("differences"), list):
+        return ""
+    if r.get("base_format") == r.get("head_format"):
+        return ""
+    diffs = [d for d in r["differences"] if isinstance(d, str)][:60]
+    basis = ("KiCad's own upgrade of the base" if r.get("method") == "reference-upgrade"
+             else "the base, after the documented format normalisations")
+    return (f'<details class="reenc-diff" open><summary>Changed beyond the file format upgrade '
+            f'{esc(r.get("base_format"))} → {esc(r.get("head_format"))} ({len(diffs)}; compared with {esc(basis)})'
+            f'</summary><ul>' + "".join(f"<li><code>{esc(d)}</code></li>" for d in diffs) + "</ul>"
+            + (f'<p class="muted">{esc(r.get("note"))}</p>' if isinstance(r.get("note"), str) else "") + "</details>")
+
+
 def component_section(ctx: Ctx, imgs: Images, item: dict, lv) -> str:
     slug = safe_slug(item.get("slug")) or "invalid"
     iid = item.get("id") if isinstance(item.get("id"), str) else ""
@@ -547,6 +589,7 @@ def component_section(ctx: Ctx, imgs: Images, item: dict, lv) -> str:
                       f'<td>{inline_md(c.get("detail"), 500)}</td></tr>' for c in checks[:100])
         out.append(f'<details><summary>Checks ({len(checks)})</summary><div class="tw"><table class="rows">'
                    f'<thead><tr><th>result</th><th>check</th><th>detail</th></tr></thead><tbody>{trs}</tbody></table></div></details>')
+    out.append(reencode_differences(item))
     out.append(text_diff_section(ctx.site, item, slug))
     out.append("</section>")
     return "".join(out)
@@ -632,6 +675,7 @@ pre .add{color:var(--addfg);background:var(--add);display:inline-block;min-width
 pre .del{color:var(--delfg);background:var(--del);display:inline-block;min-width:100%}
 pre .hunk{color:var(--link)}pre .meta{color:var(--muted)}
 tr.bad td{background:var(--del)}tr.ck-fail td,tr.ck-error td{color:var(--fail)}
+details.reenc summary h3{display:inline}.pill.st-re-encoded{color:var(--muted)}
 .pill.klc-err{border-color:var(--fail);color:var(--fail);font-weight:600}
 footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:8px}
 """
@@ -651,6 +695,8 @@ def build(site: Path, level: int = 0, server: str = "https://github.com", now: s
     if not isinstance(manifest, dict):
         manifest = {}
     items = [i for i in manifest.get("items") or [] if isinstance(i, dict)] if isinstance(manifest.get("items"), list) else []
+    reencoded = [i for i in items if i.get("status") == REENCODED]   # not changes: listed apart, not rated
+    items = [i for i in items if i.get("status") != REENCODED]
     review = load_json(site / "review.json")
     if not isinstance(review, dict):
         review = None
@@ -726,6 +772,7 @@ def build(site: Path, level: int = 0, server: str = "https://github.com", now: s
     h.append(summary_table(ctx, items) if items else '<p class="muted">No footprints or symbols changed.</p>')
     for it in items:
         h.append(component_section(ctx, imgs, it, lv))
+    h.append(reencoded_section(ctx, manifest, reencoded))
     stamp = now or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     failed = sorted(set(imgs.failed))
     h.append("<footer>")

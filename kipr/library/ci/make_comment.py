@@ -18,6 +18,7 @@ import urllib.parse
 from pathlib import Path
 
 from .common import (KLC_NOT_CHECKED, MARKER, SEVERITY_RANK, check_repo, klc_not_checked, check_sha, finding_line_no, findings_of, generator_of, item_review, load_site,
+                     reencode_explanation, reencoded_file_notes, reencoded_summary,
                      md_block, md_code, md_inline, overall_verdict, parse_pr_number, safe_http_url,
                      safe_repo_path, safe_site_file, safe_slug, verdict_of)
 
@@ -26,7 +27,7 @@ IMG_WIDTH = 240
 VERDICT_ICON = {"pass": "✅", "warn": "⚠️", "fail": "❌", None: "⚪"}
 VERDICT_TEXT = {"pass": "pass", "warn": "warn", "fail": "fail", None: "—"}
 SEVERITY_ICON = {"error": "🔴", "warning": "🟠", "info": "🔵"}
-STATUS_TEXT = {"added": "🆕 added", "modified": "✏️ modified", "deleted": "🗑️ deleted"}
+STATUS_TEXT = {"added": "🆕 added", "modified": "✏️ modified", "deleted": "🗑️ deleted", "re-encoded": "♻️ re-encoded"}
 
 
 def finding_key(f: dict) -> str:
@@ -155,6 +156,33 @@ def details_block(ctx: Ctx, item: dict, review, inlined: set[str]) -> str:
     return "\n".join(lines)
 
 
+def reencoded_section(ctx: Ctx, manifest: dict) -> list[str]:
+    """Collapsed list of the parts only re-encoded by a newer KiCad, plus the library-level notes."""
+    items = manifest.get("reencoded_items") or []
+    notes = reencoded_file_notes(manifest)
+    if not items and not notes:
+        return []
+    title = reencoded_summary(manifest) or "Library files re-saved by a newer KiCad"
+    lines = ["", f"<details><summary>♻️ {md_inline(title, 120)}</summary>", ""]
+    lines += [f"- {md_inline(n, 300)}" for n in notes[:20]]
+    if notes:
+        lines.append("")
+    for i in items[:50]:
+        slug = safe_slug(i.get("slug"))
+        name = md_inline(item_label(i), 100)
+        comp = f"[{name}]({ctx.viewer}#{slug})" if slug else name
+        lines.append(f"- {comp} <sub>{md_inline(i.get('kind'), 20)}</sub>: {md_inline(reencode_explanation(i), 200)}")
+    if len(items) > 50:
+        lines.append(f"- … {len(items) - 50} more in the viewer")
+    ref = all(isinstance(i.get("reencode"), dict) and i["reencode"].get("method") == "reference-upgrade"
+              for i in items)
+    lines += ["", ("Each of these is identical to KiCad's own upgrade of the base version. " if items and ref else
+                   "Each of these has the same content as the base (KiCad's upgrade of the base, or field-by-field "
+                   "plus pixel-identical renders where kicad-cli was not available). " if items else "")
+              + "The viewer still shows the raw text diff.", "", "</details>"]
+    return lines
+
+
 def pr_findings_of(review) -> list[dict]:
     fs = review.get("pr_findings") if review else None
     out = [f for f in fs if isinstance(f, dict) and isinstance(f.get("message"), str) and f["message"].strip()] \
@@ -220,6 +248,7 @@ def build_comment(ctx: Ctx, manifest: dict, review, *, artifact_url: str | None 
     head += [" · ".join(links), "",
              f"{n} changed component{'s' if n != 1 else ''} ({what or 'none'}) at {md_code(ctx.head_sha[:10])}. "
              f"Overall verdict: **{VERDICT_TEXT[ov] if ov else 'not reviewed'}**."
+             + (f" Not counted: {md_inline(reencoded_summary(manifest), 120)}." if manifest.get("reencoded_items") else "")
              + (f" {n_inline} finding{'s' if n_inline != 1 else ''} posted as inline review comments." if n_inline else ""),
              ""]
     if note:
@@ -245,6 +274,7 @@ def build_comment(ctx: Ctx, manifest: dict, review, *, artifact_url: str | None 
         table_len += len(table[-1])
     if not items:
         table = ["_No footprint or symbol changes were found in this PR._"]
+    table += reencoded_section(ctx, manifest)
 
     generator = md_inline(generator_of(review), 60)
     foot = [""]
