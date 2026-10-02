@@ -85,6 +85,7 @@ input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--bo
 .status-unchanged, .status-minor { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
 .badge.sev-error { background: var(--del); color: #fff; }
 .badge.sev-warning { background: #d4a72c; color: #1c1c1c; }
+.badge.sev-font-dependent { background: var(--chg-bg); color: var(--warn); border-color: var(--warn); }
 .badge.sev-info, .badge.sev-exclusion { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
 .badge[class*="kind-"] { background: var(--panel-2); color: var(--muted); border-color: var(--border); text-transform: none; }
 .badge[class*="delta-"] { background: var(--panel-2); color: var(--text); border-color: var(--border); }

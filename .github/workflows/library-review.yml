@@ -67,6 +67,14 @@ on:
         description: also export reference SVGs with kicad-cli (items/<slug>/kicad_cli_<side>.svg)
         type: boolean
         default: false
+      fonts:
+        description: with use-kicad-cli, directories in the repository with font files (.ttf/.otf/.ttc) for text in outline fonts (space/comma/newline separated)
+        type: string
+        default: ""
+      fetch-fonts:
+        description: with use-kicad-cli, download fonts that are still missing from Google Fonts (google/fonts at the commit pinned in kipr; OFL/Apache families only), cached between runs
+        type: boolean
+        default: true
       retention-days:
         type: number
         default: 30
@@ -140,7 +148,8 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" - <<'PY' >> "$GITHUB_OUTPUT"
           import hashlib, pathlib, kipr.library as L
           d = pathlib.Path(L.__file__).parent
-          for key, f in (("stock_key", "render/stock_models_tag.txt"), ("klc_key", "ci/klc_utils.ref")):
+          for key, f in (("stock_key", "render/stock_models_tag.txt"), ("klc_key", "ci/klc_utils.ref"),
+                         ("fonts_key", "../common/google_fonts_ref.txt")):
               print(f"{key}={hashlib.sha256((d / f).read_bytes()).hexdigest()[:16]}")
           PY
           "$RUNNER_TEMP/venv/bin/kipr" library --help > /dev/null
@@ -156,18 +165,39 @@ jobs:
           restore-keys: |
             kicad-stock-3d-${{ steps.kipr.outputs.stock_key }}-
 
+      - name: Restore font cache
+        if: inputs.use-kicad-cli && inputs.fetch-fonts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kipr-fonts
+          key: kipr-fonts-${{ steps.kipr.outputs.fonts_key }}-${{ github.run_id }}
+          restore-keys: |
+            kipr-fonts-${{ steps.kipr.outputs.fonts_key }}-
+
       - name: Render changed components
         env:
           MERGE_BASE: ${{ steps.base.outputs.merge_base }}
           FETCH_STOCK: ${{ inputs.fetch-stock-models }}
           USE_KICAD_CLI: ${{ inputs.use-kicad-cli }}
+          FONTS: ${{ inputs.fonts }}
+          FETCH_FONTS: ${{ inputs.fetch-fonts }}
         run: |
           extra=()
           if [ "$FETCH_STOCK" = "true" ]; then
             # layout DIR/<tag>/<Lib>.3dshapes/...; https-only from gitlab.com, 25 MB/file, 300 MB total
             extra+=(--fetch-stock-models --stock-models-dir "$RUNNER_TEMP/kicad-3d")
           fi
-          if [ "$USE_KICAD_CLI" = "true" ]; then extra+=(--use-kicad-cli); fi
+          if [ "$USE_KICAD_CLI" = "true" ]; then
+            extra+=(--use-kicad-cli --font-cache "$RUNNER_TEMP/kipr-fonts")
+            set -f
+            # shellcheck disable=SC2086
+            for f in ${FONTS//,/ }; do
+              case "$f" in /*|..|../*|*/../*|*/..) echo "::error::fonts: $f must be a path inside the repository"; exit 1 ;; esac
+              extra+=(--fonts "$f")
+            done
+            set +f
+            if [ "$FETCH_FONTS" != "true" ]; then extra+=(--no-fetch-fonts); fi
+          fi
           if [ -n "$PR_NUMBER" ]; then extra+=(--pr "$PR_NUMBER"); fi
           kipr library render --repo . --base "$MERGE_BASE" --head "$HEAD_SHA" --out "$OUT" \
             --lib-fp "$LIB_FP" --lib-sch "$LIB_SCH" --lib-3d "$LIB_3D" --datasheets "$DATASHEETS" "${extra[@]}"

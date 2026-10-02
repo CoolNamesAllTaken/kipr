@@ -19,7 +19,8 @@ import re
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, d, grid_findings, grid_mil, load_review, lst, safe_http_url, safe_repo_path, text)
+from .common import (CHECK_KINDS, d, grid_findings, grid_mil, load_review, lst, missing_fonts, safe_http_url,
+                     safe_repo_path, text)
 from .make_comment import build_comment
 
 MAX_ANNOTATIONS = 50
@@ -103,6 +104,12 @@ def annotations(doc: dict, repo_dir: Path | None = None) -> list[str]:
             rows += [("warning", "grid", safe_repo_path(text(p.get("path"))) or "", name, dict(f, _mil=grid_mil(p)))
                      for f in grid_findings(p)]
     out = []
+    faces = missing_fonts(doc)
+    if faces:  # one run-level warning, not tied to a file
+        out.append("::warning title=" + _prop("Fonts missing in CI") + "::" + _data(
+            f"Font(s) {', '.join(repr(f[:60]) for f in faces)} not available to kicad-cli; KiCad substituted them, so "
+            "silkscreen text sizes and text-dependent DRC results may differ from the designer's machine. "
+            "Pass the font files with the `fonts` input."))
     for level, kind, pdir, name, v in rows[:MAX_ANNOTATIONS]:
         if kind == "grid":
             out.append(_grid_annotation(v, name))
@@ -111,7 +118,8 @@ def annotations(doc: dict, repo_dir: Path | None = None) -> list[str]:
         props = []
         if path:
             props += [f"file={_prop(path)}", f"line={line}"]
-        props.append("title=" + _prop(f"New {kind.upper()} {level}: {text(v.get('type'))[:40]} ({name})"[:120]))
+        fd = " [font-dependent]" if lst(v.get("font_dependent")) else ""
+        props.append("title=" + _prop(f"New {kind.upper()} {level}: {text(v.get('type'))[:40]}{fd} ({name})"[:120]))
         items = "; ".join(i for i in lst(v.get("items"))[:4] if isinstance(i, str))
         msg = re.sub(r"\s+", " ", f"{text(v.get('description'))}. {items}").strip()[:900]
         pos = lst(v.get("pos_mm"))

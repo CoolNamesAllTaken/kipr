@@ -19,6 +19,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from kipr.common import fonts
 from kipr.common.kicad_cli import KicadCli
 
 CACHE_VERSION = "1"
@@ -50,6 +51,7 @@ class JobResult:
     message: str = ""
     seconds: float = 0.0
     cached: bool = False
+    font_substitutions: dict = field(default_factory=dict)  # {face: substitute} kicad-cli reported
 
 
 def side_jobs(board_file: str | None, sch_file: str | None, layers: list[str], step: bool = False,
@@ -123,6 +125,10 @@ class Exporter:
     def __init__(self, cli: KicadCli, cache_dir: str, jobs: int = 4):
         self.cli = cli
         self.cache_dir = cache_dir
+        # set before the first submit: environment for every kicad-cli run (the fonts' FONTCONFIG_FILE)
+        # and what it changes in the outputs (part of every cache key)
+        self.env: dict[str, str] = {}
+        self.env_salt = ""
         os.makedirs(cache_dir, exist_ok=True)
         self.pool = ThreadPoolExecutor(max_workers=max(1, jobs))
         self._inflight: dict[str, Future] = {}
@@ -139,6 +145,8 @@ class Exporter:
                  f"{job.isolated_libs}\0".encode())
         if salt:
             h.update(f"salt\0{salt}\0".encode())
+        if self.env_salt:
+            h.update(f"env\0{self.env_salt}\0".encode())
         for p in sorted(blobs):
             if p.endswith(job.inputs) or posixpath.basename(p) in job.inputs:
                 h.update(f"{p}\0{blobs[p]}\0".encode())
@@ -163,21 +171,23 @@ class Exporter:
                 os.utime(manifest)
             except OSError:
                 pass
-            return JobResult(job.name, True, final, m["files"], m.get("message", ""), 0.0, cached=True)
+            return JobResult(job.name, True, final, m["files"], m.get("message", ""), 0.0, cached=True,
+                             font_substitutions=m.get("font_substitutions") or {})
         tmp = tempfile.mkdtemp(prefix=f".{key}-", dir=self.cache_dir)
         opts = [(o[0], o[1].replace("{out}", tmp)) if isinstance(o, tuple) else o for o in job.options]
         t0 = time.monotonic()
-        env, home = None, None
+        env, home = dict(self.env) or None, None
         if job.isolated_libs:
             home = isolated_home(self.cache_dir)
             # HOME/XDG for a plain kicad-cli, KIPR_KICAD_HOME for the kipr-tools wrapper
-            env = {"HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config"), "KIPR_KICAD_HOME": home}
+            env = {**self.env, "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config"), "KIPR_KICAD_HOME": home}
         try:
             ok, msg, rc = self.cli.run(job.cmd, opts, os.path.join(side_root, job.target), cwd=side_root, env=env)
         finally:
             if home:
                 shutil.rmtree(home, ignore_errors=True)
         dt = time.monotonic() - t0
+        subs = fonts.substitutions(msg)
         files = sorted(os.path.relpath(os.path.join(d, f), tmp) for d, _, fs in os.walk(tmp) for f in fs)
         if job.output != "dir":
             ok = (ok or rc in job.ok_codes) and job.output in files
@@ -185,14 +195,15 @@ class Exporter:
             ok = False
         if not ok:
             shutil.rmtree(tmp, ignore_errors=True)
-            return JobResult(job.name, False, None, [], msg[-2000:] or f"exit code {rc}", dt)
+            return JobResult(job.name, False, None, [], msg[-2000:] or f"exit code {rc}", dt, font_substitutions=subs)
         with open(os.path.join(tmp, ".kipr-job.json"), "w") as fh:
-            json.dump({"job": job.name, "files": files, "message": msg[-2000:], "seconds": dt}, fh)
+            json.dump({"job": job.name, "files": files, "message": msg[-2000:], "seconds": dt,
+                       "font_substitutions": subs}, fh)
         try:
             os.replace(tmp, final)
         except OSError:  # another process won the race
             shutil.rmtree(tmp, ignore_errors=True)
-        return JobResult(job.name, True, final, files, msg[-2000:], dt)
+        return JobResult(job.name, True, final, files, msg[-2000:], dt, font_substitutions=subs)
 
 
 # --- mapping kicad-cli file names to layers / sheets -----------------------------------

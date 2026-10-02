@@ -132,6 +132,13 @@ export function createNetlistView(project, container, ctx) {
 
 const SEV_ORDER = { error: 0, warning: 1, info: 2, exclusion: 3 };
 
+/** "font-dependent" badge for a violation whose items are text in a font kicad-cli didn't have. */
+function fontBadge(r) {
+  const faces = arr(r.font_dependent).filter((x) => typeof x === 'string');
+  if (!faces.length) return null;
+  return [' ', badge('sev', 'font-dependent', `text in ${faces.join(', ')}, which was not available: KiCad substituted another font`)];
+}
+
 export function createChecksView(project, container, ctx) {
   const checks = obj(project.checks) || {};
   let any = false;
@@ -161,11 +168,11 @@ export function createChecksView(project, container, ctx) {
       rows: [...newRows, ...fixedRows], ctx: { ...ctx, route: { ...ctx.route, params: {} }, setRoute: () => {} }, emptyText: 'No new or fixed violations.',
       rowClass: (r) => (r.status === 'new' ? 'row-removed' : 'row-added'),
       statuses: ['new', 'fixed'],
-      hay: (r) => `${r.severity} ${r.type} ${r.description} ${arr(r.items).join(' ')} ${r.sheet || ''}`,
+      hay: (r) => `${r.severity} ${r.type} ${r.description} ${arr(r.items).join(' ')} ${r.sheet || ''}${arr(r.font_dependent).length ? ' font-dependent' : ''}`,
       columns: [
         { title: '', get: (r) => badge('status', r.status), sort: (r) => r.status },
         { title: 'Severity', get: (r) => badge('sev', r.severity), sort: (r) => SEV_ORDER[r.severity] ?? 9 },
-        { title: 'Type', get: (r) => el('code', {}, String(r.type ?? '')), sort: (r) => String(r.type ?? '') },
+        { title: 'Type', get: (r) => [el('code', {}, String(r.type ?? '')), fontBadge(r)], sort: (r) => String(r.type ?? '') },
         { title: 'Description', get: (r) => [String(r.description ?? ''), arr(r.items).length ? el('ul', { class: 'items' }, arr(r.items).map((i) => el('li', {}, String(i)))) : null] },
         { title: 'Where', get: where },
       ],

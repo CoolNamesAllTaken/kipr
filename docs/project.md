@@ -122,6 +122,37 @@ CI, as warning annotations on the item's line of the `.kicad_sch` file.
 KiCad 10's own ERC has a similar `endpoint_off_grid` warning (pins and wire ends only, one per
 symbol, on the project's connection grid); new ones also appear in the ERC delta.
 
+### Fonts
+
+KiCad text can use any installed outline font (`(font (face "Poppins"))`). kicad-cli looks the
+face up with fontconfig; when it is not installed it substitutes another font (`Font 'Poppins' not
+found; substituting 'DejaVu Sans Bold'`), the text gets a different size, and the silkscreen
+plots, renders, 3D export and text-dependent DRC results (`silk_edge_clearance`, `silk_overlap`,
+text clearance, …) no longer match the designer's machine. Before the first export `kipr project`
+therefore:
+
+1. collects every face used by the changed projects' `.kicad_pcb`, `.kicad_sch` and `.kicad_wks`
+   files, both sides (footprints and symbols are embedded in them). Fonts embedded in the file
+   itself (KiCad 10 `(embedded_files (file … (type font)))`) are used by kicad-cli and need
+   nothing; the font file's own names decide which faces they cover;
+2. checks each remaining face with `fc-match` against the fontconfig kicad-cli will use
+   (`$FONTCONFIG_FILE`, else `/etc/fonts/fonts.conf`);
+3. installs the missing ones into a private directory, exposed to kicad-cli through a generated
+   `FONTCONFIG_FILE` that includes the previous configuration: all font files under each
+   `--fonts DIR` (repeatable; fonts committed to the repository), then, unless `--no-fetch-fonts`,
+   the family from [Google Fonts](https://github.com/google/fonts) at the commit pinned in
+   `kipr/common/google_fonts_ref.txt`: `ofl/<family>/` or `apache/<family>/` only (the
+   METADATA.pb license must agree), every style the family has, cached in `--font-cache`
+   (default `$KIPR_CACHE_DIR/fonts` or `~/.cache/kipr/fonts`). A face like `Poppins ExtraBold`
+   maps to `ofl/poppins` (only style words are dropped). Nothing else is ever downloaded.
+
+The installed fonts are part of every export's cache key. A face that is still missing (and any
+face kicad-cli reports as substituted, whatever fc-match said) is listed in `fonts.missing`, and
+the job summary, report, viewer and PR comment show one warning ("Font 'Poppins' is not
+available in CI; KiCad substituted it, …"). DRC violations whose items are text in such a face
+are marked `font_dependent` (a *font-dependent* badge). Each face's status (`system`, `provided`,
+`fetched`, `embedded`, `missing`) is in the JSON ([contract](CONTRACT-project.md#fonts)).
+
 Typical cost: the two public KiCad demo boards of the fixture repo take under a minute cold
 (mostly ERC/DRC) and ~3 s with a warm cache. A 4-layer, 160-component board with a 3.5 MB `.kicad_pcb` took 52 s cold
 (24 s with `--fast-checks`, 6 s warm) and produced 33 MB of output (0.6 MB JSON).
@@ -181,6 +212,8 @@ Security notes (same as the library review):
 | `projects` | all | project globs (space/comma/newline separated), as `--projects` |
 | `fast-checks` | `false` | `--fast-checks` (skip global libraries in ERC/DRC) |
 | `significant-fields` | `""` | `--significant-fields` (which fields count as real changes; empty = part numbers) |
+| `fonts` | – | directories in the repository with font files (`.ttf`/`.otf`/`.ttc`) for kicad-cli, as `--fonts` (see [Fonts](#fonts)) |
+| `fetch-fonts` | `true` | download faces that are still missing from Google Fonts (pinned google/fonts commit, OFL/Apache only), cached with `actions/cache`; `false` = `--no-fetch-fonts` |
 | `step` | `false` | also export STEP models |
 | `grid-check` | `changed` | `--grid-check` (schematic connection grid: `changed`, `all` or `off`) |
 | `sch-grid-mil` | `50` | `--sch-grid-mil` (the grid in mil) |
@@ -318,6 +351,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 
 ```sh
 pytest tests/project                                              # unit tests, no KiCad needed
+KIPR_KICAD_CLI=/path/to/kicad-cli pytest tests/project/test_fonts_kicad.py   # fonts with a real kicad-cli
 bash tests/project/fixtures/build.sh /tmp/fx                      # fixture repo from KiCad's demos (needs KiCad)
 KIPR_FIXTURES=/tmp/fx KIPR_KICAD_CLI=/path/to/kicad-cli pytest tests/project   # + end-to-end
 bash tests/web-project/run_all.sh [--real OUT]                    # viewer, site, report (node + Chromium)

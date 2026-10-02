@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, grid_findings, grid_line, grid_mil,
+from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, font_warning, grid_findings, grid_line, grid_mil,
                      load_review, md_inline, new_violations, safe_http_url, summary_table, text, truncate, violation_line)
 
 MAX_COMMENT = 60000  # GitHub's hard limit is 65536 characters
@@ -54,6 +54,9 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
         lines += ["", summary_table(doc)]
     if note:
         lines += ["", f"> [!NOTE]\n> {md_inline(note, 300)}"]
+    fw = font_warning(doc)
+    if fw:
+        lines += ["", "> [!WARNING]", f"> {fw}"]
     errs = [md_inline(e, 300) for e in doc.get("errors") or [] if isinstance(e, str)]
     if errs:
         lines += ["", "> [!WARNING]"] + [f"> {e}" for e in errs[:5]]

@@ -62,6 +62,7 @@ p/<slug>/checks/{erc,drc}.{base,head}.json   raw kicad-cli ERC/DRC reports (--se
   "head": {"sha": "…", "ref": "feature", "short": "def5678"},
   "repo": {"url": "https://github.com/o/r", "blob": "https://github.com/o/r/blob/{sha}/{path}"},  // nulls if not GitHub
   "projects": [ /* Project, one per changed .kicad_pro directory */ ],
+  "fonts": Fonts | null,                                              // null without kicad-cli exports
   "errors": ["kicad-cli not found: …"]                                 // run-level problems
 }
 ```
@@ -87,13 +88,16 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
                              "minor": 105},  // minor: true components (see PcbChange); not in "changed"
               "nets_changed": 4,
               "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0},       // null when the check could not run
-              "grid": {"count": 1, "points": 23}},   // checks.grid count/points; null when off or no schematic
+              "grid": {"count": 1, "points": 23},    // checks.grid count/points; null when off or no schematic
+              "fonts_missing": 1},                   // len(fonts.missing)
   "schematic": Schematic | null,
   "pcb": Pcb | null,
   "pcba3d": Pcba3d | null,
   "bom": Bom | null,
   "netlist": Netlist | null,
   "checks": {"erc": CheckDelta | null, "drc": CheckDelta | null, "grid": Grid | null},
+  "fonts": {"faces": ["Poppins"], "missing": ["Poppins"],   // faces this project uses / kicad-cli didn't have
+            "warning": "Font 'Poppins' is not available in CI; …"} | null,   // null: no outline fonts (or no exports)
   "info": {"base": {"title": "…", "rev": "E", "date": "…", "company": "…", "comment1": "…"}, "head": {…}},  // title blocks
   "errors": ["kicad-cli glb failed for head: …"],   // non-fatal problems, shown in the UI
   "timings_s": {"checkout": 0.4, "parse": 7.9, "diff": 0.03, "export_wait": 71.0, "assemble": 5.0, "total": 84.4},
@@ -325,7 +329,8 @@ changed name are not reported.
           "uuids": ["…"],               // KiCad uuids of the items (locate them in the files)
           "pos_mm": [x, y],             // first item's position; board mm (DRC) or sheet mm (ERC)
           "sheet": "/",                 // ERC: sheet path as KiCad prints it; DRC: null
-          "category": "violation"}],    // violation | unconnected | parity (DRC schematic parity)
+          "category": "violation",      // violation | unconnected | parity (DRC schematic parity)
+          "font_dependent": ["Poppins"]}],   // DRC only, when present: items include text in a missing face
  "fixed": [ … ],
  "report": {"base": "p/<slug>/checks/drc.base.json", "head": "…"},
  "pos_scale_fixed": 100,                // present when ERC positions were corrected (see below)
@@ -341,6 +346,28 @@ on real boards (~30-50 s per check and side). `--fast-checks` runs them with emp
 tables instead (~2-6 s) and drops the library violation types (`lib_footprint_issues`,
 `lib_footprint_mismatch`, `footprint_link_issues`, `lib_symbol_issues`, `lib_symbol_mismatch`);
 the delta then says `"libraries": "project"`.
+
+DRC deltas also have `"font_dependent": N` (violations marked) when a face the board uses was
+missing; new violations are matched against the head board's text items, fixed ones against
+base's (by uuid, else by the quoted text in the item description).
+
+### Fonts
+
+The run-level `fonts` object (see [docs/project.md](project.md#fonts)):
+
+```jsonc
+{"faces": [{"face": "Poppins",
+            "status": "fetched",        // system | provided (--fonts) | fetched | embedded | missing | unknown (no fc-match)
+            "files": ["head:projects/…/x.kicad_pcb"],   // <side>:<path> of the files using it
+            "embedded_in": ["head:…"],                  // when other files embed it (they need nothing)
+            "family": "Poppins", "license": "OFL", "source": "google/fonts@9710da1eacb3:ofl/poppins",  // fetched only
+            "substitute": "DejaVu Sans Bold"}],         // missing: what kicad-cli used instead (when it said)
+ "missing": ["…"],                      // faces kicad-cli had to substitute
+ "warning": "Font '…' is not available in CI; …" | null,
+ "errors": ["cannot download font '…' from Google Fonts: …"],
+ "checked": true,                       // false: fc-match unavailable, availability known only from kicad-cli
+ "fetch": true}                         // Google Fonts downloads were allowed
+```
 
 ### Grid
 

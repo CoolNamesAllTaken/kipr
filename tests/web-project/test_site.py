@@ -203,6 +203,10 @@ class ReportTest(unittest.TestCase):
         self.assertIn("<h4>root/power</h4>", self.html)
         self.assertIn("boards/demo_board/demo_board.kicad_sch:412", self.html)
         self.assertIn("3 of 3 pins off the 50 mil grid", self.html)
+        # a missing font: one warning, the DRC row marked
+        self.assertEqual(self.html.count("<b>Fonts:</b>"), 1)
+        self.assertIn("is not available in CI; KiCad substituted it", self.html)
+        self.assertIn(">font-dependent</span>", self.html)
         if report.Image is not None and report.cairosvg is not None:
             # base / head / diff for 4 changed sheets of demo_board, 1 + 1 sheets of the others, 6 changed layers
             self.assertGreaterEqual(self.html.count("data:image/png"), 3 * 4)
