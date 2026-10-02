@@ -97,9 +97,9 @@ def shots_dir(name: str) -> Path:
     return base / name
 
 
-def run_tool(script: str, *args) -> subprocess.CompletedProcess:
+def run_tool(script: str, *args, timeout=1800) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(VIEWER_TESTS / script), *args], capture_output=True, text=True,
-                          cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT)}, timeout=1800)
+                          cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT)}, timeout=timeout)
 
 
 class NodeUnitTests(unittest.TestCase):
@@ -135,6 +135,14 @@ class ScreenshotTests(unittest.TestCase):
 
     def test_rendered_file(self):
         self.check(rendered_site(), "rendered-file", "--mode", "file")
+
+
+@unittest.skipUnless(HAVE_CDN, "needs playwright + chromium and cdn.jsdelivr.net (three.js, occt-import-js)")
+class ColorTests(unittest.TestCase):
+    def test_step_colors_read_like_kicad(self):
+        """The RP2040-Zero board colour (STEP 0.090/0.224/0.420) is a clear mid blue from the top and the bottom."""
+        r = run_tool("color_check.py", timeout=300)
+        self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
 
 
 @unittest.skipUnless(HAVE_PW, "needs playwright + chromium (python -m playwright install chromium)")

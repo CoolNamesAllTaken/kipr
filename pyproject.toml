@@ -21,7 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 # library review: server-side GLB + 3D preview PNGs (skipped with a warning when missing)
 3d = ["trimesh>=4.0", "shapely>=2.0", "mapbox_earcut>=1.0", "cascadio>=0.1"]
-test = ["pytest>=7", "playwright>=1.45"]
+test = ["pytest>=7", "pytest-timeout>=2.1", "playwright>=1.45"]
 
 [project.scripts]
 kipr = "kipr.cli:main"

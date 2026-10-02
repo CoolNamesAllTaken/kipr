@@ -11,7 +11,7 @@ import { imageSrc } from './util.js';
 
 export const PALETTE = {
   mask: '#1d5b34', copperUnderMask: '#2f7d45', exposedCopper: '#d6b25a', fr4Edge: '#bfb07a',
-  silk: '#f4f4ee', fab: '#a9adb5', courtyard: '#ff4fd8', pad: 0xd9b458,
+  silk: '#f4f4ee', fab: '#a9adb5', courtyard: '#ff4fd8', pad: 0xe9b934,
 };
 const DECAL_Z = 0.045; // above pads (0.035) so decals are not hidden by copper
 const MAX_TEXTURE_PX = 4096;
@@ -179,8 +179,11 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
   plane(faces.fabBottom, -BOARD_THICKNESS - DECAL_Z - 0.005, 'fab', { transparent: true, bottom: true });
 
   // --- copper pads and plated barrels
-  const padMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.85, roughness: 0.35 });
-  const barrelMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.85, roughness: 0.4, side: THREE.DoubleSide });
+  // The copper is KiCad's footprint data: when a STEP body touches it (castellated module, pads at the same z),
+  // let the copper win the depth test instead of z-fighting. Rendering only; the geometry stays where KiCad puts it.
+  const copper = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 };
+  const padMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.4, ...copper });
+  const barrelMat = new THREE.MeshStandardMaterial({ color: PALETTE.pad, metalness: 0.5, roughness: 0.45, side: THREE.DoubleSide, ...copper });
   let padCount = 0;
   for (const pad of pads) {
     const sides = padCopperSides(pad);
