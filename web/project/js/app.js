@@ -180,6 +180,8 @@ function renderOverview(unknownSlug) {
     main.append(el('details', { class: 'notice' }, el('summary', {}, `${runErrors.length} problem${runErrors.length > 1 ? 's' : ''} while generating this review`),
       el('ul', {}, runErrors.map((e) => el('li', {}, e)))));
   }
+  const fontNote = fontWarning(state.review);
+  if (fontNote) main.append(fontNote);
   if (!state.projects.length) { main.append(el('p', { class: 'muted' }, 'No KiCad projects changed between these commits.')); return; }
   const cols = ['Project', 'Status', 'Sheets', 'Layers', 'Comp. +', 'Comp. −', 'Moved', 'Changed', 'Nets', 'ERC new', 'DRC new', 'Off grid', 'Problems'];
   const n = (v) => (typeof v === 'number' ? String(v) : '');
@@ -196,6 +198,17 @@ function renderOverview(unknownSlug) {
   main.append(el('section', { class: 'card' }, el('div', { class: 'scroll-x' }, el('table', { class: 'grid overview' },
     el('thead', {}, el('tr', {}, cols.map((t) => el('th', { scope: 'col' }, t)))), el('tbody', {}, rows)))));
   main.append(el('p', { class: 'hint' }, 'Press ? for keyboard shortcuts.'));
+}
+
+/** Notice for fonts.missing (faces kicad-cli substituted) of the review or of one project, or null. */
+export function fontWarning(holder) {
+  const faces = arr(obj(obj(holder)?.fonts)?.missing).filter((x) => typeof x === 'string' && x).slice(0, 20);
+  if (!faces.length) return null;
+  const one = faces.length === 1;
+  return el('div', { class: 'notice font-warning', role: 'note' }, el('b', {}, 'Fonts: '),
+    `Font${one ? '' : 's'} ${faces.map((f) => `'${f}'`).join(', ')} ${one ? 'is' : 'are'} not available in CI; KiCad substituted ${one ? 'it' : 'them'}, `
+    + 'so silkscreen text sizes and text-dependent DRC results (silk_edge_clearance, silk_overlap, text clearance…) may differ from '
+    + "the designer's machine. DRC violations involving that text are marked font-dependent.");
 }
 
 // --- project page -------------------------------------------------------------------------------------
@@ -216,6 +229,8 @@ function renderProject(p, r) {
   if (errors.length) {
     main.append(el('details', { class: 'notice' }, el('summary', {}, `${errors.length} export problem${errors.length > 1 ? 's' : ''}`), el('ul', {}, errors.map((e) => el('li', {}, e)))));
   }
+  const fontNote = fontWarning(p);
+  if (fontNote) main.append(fontNote);
   const tabBar = el('div', { class: 'tabs', role: 'tablist' });
   TABS.forEach(([t, label], i) => {
     const count = tabCount(p, t);

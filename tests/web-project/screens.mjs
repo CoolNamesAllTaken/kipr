@@ -116,6 +116,14 @@ for (const theme of THEMES) {
       shots.push(file);
     }
     if (!isMock) { await ctx.close(); continue; }
+    // a missing font: one notice on the overview and the project, a badge on the font-dependent DRC row
+    for (const hash of ['#/', `${P}/checks`]) {
+      await page.goto(base + hash);
+      await settle(page);
+      const n = await page.locator('.font-warning').count();
+      if (n !== 1) problems.push(`${tag} ${hash}: ${n} font warnings, expected 1`);
+    }
+    if (await page.locator('.badge.sev-font-dependent').count() !== 1) problems.push(`${tag}: no font-dependent badge on the DRC row`);
     // interactions: next change, help overlay, measure tool
     await page.goto(base + `${P}/schematic/root?mode=side`);
     await settle(page);

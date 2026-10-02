@@ -414,7 +414,8 @@ def demo_board(out: Path) -> dict:
                     "report": {"base": None, "head": None}},
             "drc": {"base_count": 5, "head_count": 6,
                     "new": [{"severity": "error", "type": "clearance", "description": "Clearance violation (0.15 mm < 0.2 mm)", "items": ["Track /SDA", "Pad C2.1"], "pos_mm": [135.3, 91.6]},
-                            {"severity": "warning", "type": "silk_overlap", "description": "Silkscreen overlap", "items": ["U1 silk", "R2 silk"], "pos_mm": [124.0, 84.0]}],
+                            {"severity": "warning", "type": "silk_overlap", "description": "Silkscreen overlap", "items": ["U1 silk", "PCB text 'SENSORS' on F.Silkscreen"], "pos_mm": [124.0, 84.0],
+                             "font_dependent": ["Poppins"]}],
                     "fixed": [{"severity": "warning", "type": "track_dangling", "description": "Track has unconnected end", "items": ["Track /OLD"], "pos_mm": [126.0, 86.0]}],
                     "report": {"base": None, "head": None}},
             # schematic items off the 50 mil grid (kipr.project.grid): one symbol with its pins + a wire, one label
@@ -436,6 +437,7 @@ def demo_board(out: Path) -> dict:
                           "detail": "off the 50 mil grid at (200, 130) (x -0.66 y +0.54 mm)"},
                      ]},
         },
+        "fonts": {"faces": ["Poppins"], "missing": ["Poppins"], "warning": "Font 'Poppins' is not available in CI; …"},
         "errors": ["kicad-cli: STEP export skipped (mock)"],
     }
 
@@ -521,6 +523,10 @@ def make(out: Path) -> dict:
         "head": {"sha": "4444444ddddddd5555555eeeeeee6666666fffff", "ref": "feature/sensors", "short": "4444444"},
         "repo": {"url": "https://github.com/example/boards", "blob": "https://github.com/example/boards/blob/{sha}/{path}"},
         "projects": [demo_board(out), sensor_breakout(out), old_adapter(out)],
+        "fonts": {"faces": [{"face": "Poppins", "status": "missing", "files": ["head:boards/demo_board/demo_board.kicad_pcb"],
+                             "substitute": "DejaVu Sans Bold"}],
+                  "missing": ["Poppins"], "warning": "Font 'Poppins' is not available in CI; …", "errors": [], "checked": True,
+                  "fetch": True},
     }
     (out / "project-review.json").write_text(json.dumps(review, indent=1))
     return review

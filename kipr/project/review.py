@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from .. import __version__
 from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, models, pcb, sch
+from ..common import fonts as fonts_mod
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
 from ..common.kicad_cli import KicadCli
@@ -59,6 +60,8 @@ class ProjectReview:
                  exporter: export.Exporter | None, step: bool, glb: bool, log, fast_checks: bool = False,
                  model_dirs: list[str] | None = None, grid_check: str = "changed", grid_mil: float = 50.0):
         self.git, self.proj, self.slug, self.out = git, proj, slug, out
+        self.fonts: fonts_mod.FontSetup | None = None  # shared by all projects of the run (see _run)
+        self.checked_out = False
         self.grid_check, self.grid_mil = grid_check, grid_mil
         self.tmp, self.exporter, self.step, self.glb, self.log = tmp, exporter, step, glb, log
         self.fast_checks = fast_checks
@@ -84,6 +87,7 @@ class ProjectReview:
 
     # -- stages ----------------------------------------------------------------------------
     def checkout_and_parse(self):
+        self.checked_out = True
         t0 = time.monotonic()
         for s in self.sides.values():
             pro = self.proj.base_pro if s.name == "base" else self.proj.head_pro
@@ -106,6 +110,44 @@ class ProjectReview:
                 s.pcb = stem + ".kicad_pcb"
                 self.model_fallback(s)
         self.timings["checkout"] = time.monotonic() - t0
+
+    def font_texts(self) -> dict[str, str]:
+        """{"<side>:<path>": text} of the checked-out boards, schematics and drawing sheets (what
+        kicad-cli lays out text from)."""
+        out = {}
+        for s in self.sides.values():
+            if s.root is None:
+                continue
+            for p in sorted(s.blobs):
+                if p.endswith((".kicad_pcb", ".kicad_sch", ".kicad_wks")):
+                    try:
+                        with open(os.path.join(s.root, p), encoding="utf-8", errors="replace") as fh:
+                            out[f"{s.name}:{p}"] = fh.read()
+                    except OSError:
+                        pass
+        return out
+
+    def font_section(self) -> dict | None:
+        """fonts: the faces this project's files use and the ones kicad-cli had to substitute."""
+        if self.fonts is None:
+            return None
+        for s in self.sides.values():
+            for r in s.results.values():
+                for face, sub in r.font_substitutions.items():
+                    self.fonts.mark_missing(face, sub)
+        mine = [f for f, v in self.fonts.faces.items()
+                if any(x.split(":", 1)[0] in SIDES and self._in_project(x.split(":", 1)[1]) for x in v.get("files", []))]
+        for s in self.sides.values():
+            for r in s.results.values():
+                mine += [f for f in r.font_substitutions if f not in mine]
+        if not mine:
+            return None
+        missing = sorted(f for f in mine if self.fonts.faces.get(f, {}).get("status") == "missing")
+        return {"faces": sorted(mine), "missing": missing,
+                "warning": fonts_mod.warning_text(missing) or None}
+
+    def _in_project(self, path: str) -> bool:
+        return any(path in s.blobs for s in self.sides.values())
 
     def model_fallback(self, s: Side):
         """Point the export checkout's board at X.step when it names a missing X.wrl (and so on);
@@ -427,7 +469,9 @@ class ProjectReview:
         res["head_count"] = len(nets.get("head") or {})
         return res
 
-    def checks(self):
+    def checks(self, font_missing=()):
+        """ERC/DRC deltas. DRC violations with text in a face from `font_missing` (not available to
+        kicad-cli) get font_dependent: [faces]."""
         out = {}
         for kind in ("erc", "drc"):
             parsed, report = {}, {}
@@ -460,6 +504,16 @@ class ProjectReview:
                 continue
             d = diff_net.check_delta(parsed.get("base"), parsed.get("head"))
             d["report"] = report
+            if kind == "drc" and font_missing:
+                n = 0
+                for side, key in (("head", "new"), ("base", "fixed")):
+                    s = self.sides[side]
+                    if s.pcb_text and d[key]:
+                        try:
+                            n += fonts_mod.mark_font_dependent(d[key], fonts_mod.text_index(s.pcb_text, font_missing))
+                        except Exception as e:  # noqa: BLE001
+                            self.err(f"cannot match DRC items to font faces ({side}): {e}")
+                d["font_dependent"] = n
             if scaled:
                 d["pos_scale_fixed"] = 100
             if self.fast_checks:
@@ -479,7 +533,8 @@ class ProjectReview:
     # -- main ------------------------------------------------------------------------------
     def run(self) -> dict:
         t0 = time.monotonic()
-        self.checkout_and_parse()
+        if not self.checked_out:  # _run checks every project out first (fonts), then runs them
+            self.checkout_and_parse()
         self.start_exports()
         self.parse()
         b, h = self.sides["base"], self.sides["head"]
@@ -498,7 +553,8 @@ class ProjectReview:
         p3d = self.pcba3d(components)
         bom = self.bom()
         net = self.netlist()
-        checks = self.checks()
+        fonts = self.font_section()
+        checks = self.checks((fonts or {}).get("missing") or ())
         checks["grid"] = self.grid()
         self.timings["assemble"] = time.monotonic() - t2
         self.timings["total"] = time.monotonic() - t0
@@ -522,9 +578,10 @@ class ProjectReview:
             "erc": {"new": len(checks["erc"]["new"]), "fixed": len(checks["erc"]["fixed"])} if checks.get("erc") else None,
             "drc": {"new": len(checks["drc"]["new"]), "fixed": len(checks["drc"]["fixed"])} if checks.get("drc") else None,
             "grid": {"count": checks["grid"]["count"], "points": checks["grid"]["points"]} if checks.get("grid") else None,
+            "fonts_missing": len((fonts or {}).get("missing") or []),
         }
         doc.update({"schematic": schematic, "pcb": pcbs, "pcba3d": p3d, "bom": bom, "netlist": net,
-                    "checks": checks, "info": self.info(), "errors": self.errors,
+                    "checks": checks, "fonts": fonts, "info": self.info(), "errors": self.errors,
                     "timings_s": {k: round(v, 3) for k, v in self.timings.items()},
                     "exports": self.export_stats()})
         return doc
@@ -560,9 +617,12 @@ def unique_slug(name: str, used: set) -> str:
 def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str | None = None,
         jobs: int = 4, cache_dir: str | None = None, step: bool = False, glb: bool = True,
         repo_url: str | None = None, no_export: bool = False, fast_checks: bool = False, log=print,
-        significant_fields: str | None = None, grid_check: str = "changed", grid_mil: float = 50.0) -> dict:
+        significant_fields: str | None = None, grid_check: str = "changed", grid_mil: float = 50.0,
+        font_dirs=(), fetch_fonts: bool = True, font_cache: str | None = None) -> dict:
     """`significant_fields`: see kipr.project.classify (None = the defaults). `grid_check`:
-    changed | all | off, `grid_mil`: the schematic connection grid (see kipr.project.grid)."""
+    changed | all | off, `grid_mil`: the schematic connection grid (see kipr.project.grid).
+    `font_dirs`: font files for kicad-cli; `fetch_fonts`: download faces that are still missing
+    from Google Fonts into `font_cache` (see kipr.common.fonts)."""
     if grid_check not in grid.MODES:
         raise ValueError(f"grid_check must be one of {', '.join(grid.MODES)}")
     if not grid_mil > 0:
@@ -571,13 +631,15 @@ def run(repo: str, base: str, head: str, out: str, patterns=None, kicad_cli: str
     prev = classify.set_active(cfg)
     try:
         return _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url,
-                    no_export, fast_checks, log, cfg, grid_check, grid_mil)
+                    no_export, fast_checks, log, cfg, grid_check, grid_mil, list(font_dirs or ()), fetch_fonts,
+                    font_cache)
     finally:
         classify.set_active(prev)
 
 
 def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb, repo_url, no_export,
-         fast_checks, log, cfg, grid_check="changed", grid_mil=50.0) -> dict:
+         fast_checks, log, cfg, grid_check="changed", grid_mil=50.0, font_dirs=(), fetch_fonts=True,
+         font_cache=None) -> dict:
     git = Git(repo)
     shas = {"base": git.rev(base), "head": git.rev(head)}
     os.makedirs(out, exist_ok=True)
@@ -606,26 +668,57 @@ def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb,
         "projects": [],
         "errors": top_errors,
     }
+    for d in font_dirs:
+        if not os.path.exists(d):
+            top_errors.append(f"font directory {d} does not exist")
     tmp = tempfile.mkdtemp(prefix="kipr-project-")
     used: set = set()
+    font_setup = None
     try:
+        reviews = []
         for proj in projects:
             slug = unique_slug(proj.name, used)
-            log(f"- {proj.path or '.'} ({proj.status}) -> p/{slug}")
             pr = ProjectReview(git, proj, slug, out, tmp, shas, exporter, step, glb, log, fast_checks, model_dirs,
                                grid_check, grid_mil)
+            try:
+                pr.checkout_and_parse()
+            except Exception:  # noqa: BLE001  run() reports it
+                pr.checked_out = False
+            reviews.append(pr)
+        if exporter:
+            # every face the changed projects use must be installed before the first export
+            texts = {}
+            for pr in reviews:
+                texts.update(pr.font_texts())
+            need, embedded = fonts_mod.needed_faces(texts)
+            font_setup = fonts_mod.setup(need, embedded, os.path.join(tmp, ".fonts"),
+                                         [d for d in font_dirs if os.path.exists(d)], fetch_fonts, font_cache, log)
+            exporter.env, exporter.env_salt = font_setup.env, font_setup.fingerprint
+            for face, v in sorted(font_setup.faces.items()):
+                log(f"font '{face}': {v['status']}")
+        for pr in reviews:
+            pr.fonts = font_setup
+            proj, slug = pr.proj, pr.slug
+            log(f"- {proj.path or '.'} ({proj.status}) -> p/{slug}")
             try:
                 doc["projects"].append(pr.run())
             except Exception as e:  # noqa: BLE001  never crash the whole review for one project
                 traceback.print_exc()
                 doc["projects"].append({"slug": slug, "name": proj.name, "path": proj.path, "status": proj.status,
                                         "summary": None, "schematic": None, "pcb": None, "pcba3d": None,
-                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None},
+                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None}, "fonts": None,
                                         "errors": pr.errors + [f"internal error: {e!r}"]})
     finally:
         if exporter:
             exporter.close()
         shutil.rmtree(tmp, ignore_errors=True)
+    if font_setup is not None:
+        doc["fonts"] = font_setup.report()
+        doc["fonts"]["warning"] = fonts_mod.warning_text(font_setup.missing()) or None
+        doc["fonts"]["fetch"] = bool(fetch_fonts)
+        top_errors.extend(font_setup.errors)
+    else:
+        doc["fonts"] = None
     with open(os.path.join(out, "project-review.json"), "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, ensure_ascii=False)
     return doc

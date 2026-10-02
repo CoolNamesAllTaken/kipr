@@ -52,6 +52,14 @@ on:
         description: schematic connection grid in mil
         type: number
         default: 50
+      fonts:
+        description: directories in the repository with font files (.ttf/.otf/.ttc) for kicad-cli, e.g. the fonts the boards' text uses (space/comma/newline separated; empty = none)
+        type: string
+        default: ""
+      fetch-fonts:
+        description: download fonts the boards use that are still missing from Google Fonts (github.com/google/fonts at the commit pinned in kipr; OFL/Apache families only), cached between runs
+        type: boolean
+        default: true
       step:
         description: also export STEP models of the boards
         type: boolean
@@ -125,7 +133,7 @@ jobs:
             [ -e "$HOME/.config/kicad/10.0/$t" ] || cp "/usr/share/kicad/template/$t" "$HOME/.config/kicad/10.0/$t" || true
           done
           git --version; python3 --version; kicad-cli version
-          { echo "OUT=$RUNNER_TEMP/kipr-out"; echo "CACHE=$RUNNER_TEMP/kipr-cache"; } >> "$GITHUB_ENV"
+          { echo "OUT=$RUNNER_TEMP/kipr-out"; echo "CACHE=$RUNNER_TEMP/kipr-cache"; echo "FONT_CACHE=$RUNNER_TEMP/kipr-fonts"; } >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:
@@ -208,6 +216,10 @@ jobs:
           fi
           key=$( { kicad-cli version; echo "$KICAD_IMAGE"; echo "$libs"; } | sha256sum | cut -c1-16)
           echo "cache_key=$key" >> "$GITHUB_OUTPUT"
+          # downloaded fonts: keyed by the google/fonts commit this kipr pins (the export keys include the
+          # fonts that were installed, see kipr.common.fonts)
+          fonts_ref=$("$RUNNER_TEMP/venv/bin/python" -c 'from kipr.common.fonts import google_fonts_ref; print(google_fonts_ref())')
+          echo "fonts_key=${fonts_ref:0:12}" >> "$GITHUB_OUTPUT"
 
       # kicad-cli exports keyed by the git blobs they read: unchanged files (usually the whole base
       # side on a PR's 2nd run) are not exported again. PR caches are only visible to that PR.
@@ -219,6 +231,15 @@ jobs:
           restore-keys: |
             kipr-project-exports-${{ steps.kipr.outputs.cache_key }}-
 
+      - name: Restore font cache
+        if: inputs.fetch-fonts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kipr-fonts
+          key: kipr-fonts-${{ steps.kipr.outputs.fonts_key }}-${{ github.run_id }}
+          restore-keys: |
+            kipr-fonts-${{ steps.kipr.outputs.fonts_key }}-
+
       - name: Review changed projects
         env:
           MERGE_BASE: ${{ steps.base.outputs.merge_base }}
@@ -229,13 +250,22 @@ jobs:
           SCH_GRID_MIL: ${{ inputs.sch-grid-mil }}
           STEP: ${{ inputs.step }}
           JOBS: ${{ inputs.jobs }}
+          FONTS: ${{ inputs.fonts }}
+          FETCH_FONTS: ${{ inputs.fetch-fonts }}
         run: |
           touch "$RUNNER_TEMP/run-stamp"
           args=(--repo . --base "$MERGE_BASE" --head "$HEAD_SHA" --out "$OUT" --cache-dir "$CACHE" --jobs "$JOBS")
           set -f   # split the globs on whitespace/commas but pass them to kipr unexpanded
           # shellcheck disable=SC2086
           for g in ${PROJECTS//,/ }; do args+=(--projects "$g"); done
+          # shellcheck disable=SC2086
+          for f in ${FONTS//,/ }; do
+            case "$f" in /*|..|../*|*/../*|*/..) echo "::error::fonts: $f must be a path inside the repository"; exit 1 ;; esac
+            args+=(--fonts "$f")
+          done
           set +f
+          args+=(--font-cache "$FONT_CACHE")
+          if [ "$FETCH_FONTS" != "true" ]; then args+=(--no-fetch-fonts); fi
           if [ "$FAST" = "true" ]; then args+=(--fast-checks); fi
           if [ "$STEP" = "true" ]; then args+=(--step); fi
           if [ -n "$SIGNIFICANT_FIELDS" ]; then args+=(--significant-fields "$SIGNIFICANT_FIELDS"); fi

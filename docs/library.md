@@ -21,7 +21,12 @@ python3 cr-out/serve.py          # or open cr-out/index.html; cr-out/component-r
 ```
 
 Needs Python 3.10+, the system cairo library (`libcairo2`) and ideally DejaVu fonts.
-`kicad-cli` is optional (`--use-kicad-cli` adds reference SVGs exported by KiCad).
+`kicad-cli` is optional (`--use-kicad-cli` adds reference SVGs exported by KiCad). Text in an
+outline font (`(face "…")`) needs that font in kicad-cli's fontconfig: the faces of the changed
+items are installed first from `--fonts DIR` and Google Fonts, exactly as in the
+[project review](project.md#fonts); an item whose face is still missing gets a warning, and
+`manifest.json` has a `fonts` report. (The built-in renderer ignores the face and draws text as SVG
+text in a fixed font, so its renders are approximate either way.)
 
 `kipr library` runs the four stages below. Each is also a subcommand:
 
@@ -249,6 +254,8 @@ Security notes:
 | `klc` | `true` | run the official KLC checker (cached) |
 | `klc-error-severity` | `warning` | severity of "KLC could not check this item" (`error`, `warning`, `info`) |
 | `use-kicad-cli` | `false` | also export reference SVGs with kicad-cli |
+| `fonts` | – | with `use-kicad-cli`: directories in the repository with font files for text in outline fonts (`--fonts`) |
+| `fetch-fonts` | `true` | with `use-kicad-cli`: download missing faces from Google Fonts (pinned google/fonts commit, OFL/Apache only; `--no-fetch-fonts` to disable) |
 | `retention-days` | `30` | artifact retention |
 
 `library-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`, `lib-3d` (finding

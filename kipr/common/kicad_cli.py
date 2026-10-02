@@ -39,10 +39,13 @@ def find(explicit: str | None = None) -> str | None:
     return shutil.which("kicad-cli")
 
 
-def run(kicad_cli: str, *args, timeout: float | None = None, cwd: str | None = None) -> Result:
-    """Run ``kicad-cli args...``; never raises for a failing command (see ``Result.ok``)."""
+def run(kicad_cli: str, *args, timeout: float | None = None, cwd: str | None = None,
+        env: dict | None = None) -> Result:
+    """Run ``kicad-cli args...`` (``env`` is added to the environment); never raises for a failing
+    command (see ``Result.ok``)."""
     try:
-        r = subprocess.run([kicad_cli, *args], capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        r = subprocess.run([kicad_cli, *args], capture_output=True, text=True, timeout=timeout, cwd=cwd,
+                           env={**os.environ, **env} if env else None)
     except (OSError, subprocess.TimeoutExpired) as e:
         return Result(False, -1, "", str(e))
     return Result(r.returncode == 0, r.returncode, r.stdout, r.stderr)

@@ -840,6 +840,12 @@ def add_arguments(ap):
     ap.add_argument("--glb-max-mb", type=float, default=5.0, help="re-tessellate coarser above this size")
     ap.add_argument("--use-kicad-cli", action="store_true",
                     help="(optional) also export reference SVGs with kicad-cli if it is on PATH")
+    ap.add_argument("--fonts", action="append", default=[], metavar="DIR",
+                    help="font files (.ttf/.otf/.ttc) for --use-kicad-cli, for text in outline fonts; repeatable")
+    ap.add_argument("--no-fetch-fonts", dest="fetch_fonts", action="store_false",
+                    help="with --use-kicad-cli: don't download missing fonts from Google Fonts (google/fonts at a "
+                         "pinned commit, OFL/Apache families only)")
+    ap.add_argument("--font-cache", help="downloaded fonts (default: $KIPR_CACHE_DIR/fonts or ~/.cache/kipr/fonts)")
     ap.add_argument("--no-reencode-check", action="store_true",
                     help="don't tell KiCad re-encodes from edits (see docs/library.md); every changed part "
                          "is then 'modified'")
@@ -891,6 +897,7 @@ def run(args):
                             "status": it.status, "path": it.path, "warnings": it.warnings + [f"render failed: {e}"]})
         log(f"  {it.status:8s} {it.id}  ({time.time() - t:.1f}s)")
 
+    fonts_report = None
     if args.use_kicad_cli:
         from kipr.common import kicad_cli as kicad_cli_mod
         kc = kicad_cli_mod.find(getattr(args, "kicad_cli", None))
@@ -898,7 +905,9 @@ def run(args):
             log("--use-kicad-cli: kicad-cli not found; built-in renderer only")
         else:
             from . import kicad_cli_export
-            kicad_cli_export.export(kc, git, head_sha, merge_base, items, entries, out)
+            fonts_report = kicad_cli_export.export(kc, git, head_sha, merge_base, items, entries, out,
+                                                   font_dirs=args.fonts, fetch_fonts=args.fetch_fonts,
+                                                   font_cache=args.font_cache, log=log)
 
     manifest = {
         "schema": 1,
@@ -913,6 +922,7 @@ def run(args):
         "changed_3d_files": sorted(changed_models),
         "unreferenced_changed_3d_files": sorted(changed_models - referenced_models(git, head_sha)),
         "reencoded_files": reencoded_files(items, entries),
+        "fonts": fonts_report,
         "items": entries,
     }
     write(os.path.join(out, "manifest.json"), json.dumps(manifest, indent=2, ensure_ascii=False))

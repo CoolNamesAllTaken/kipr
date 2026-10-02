@@ -94,6 +94,25 @@ def grid_line(f: dict, mil: str = "50") -> str:
             + (f" {code(who, 60)}" if who else "") + (f" on {sheet}" if sheet else "") + (f": {det}" if det else ""))
 
 
+def missing_fonts(doc: dict) -> list[str]:
+    """fonts.missing: faces kicad-cli had to substitute (strings only, at most 20)."""
+    return [f for f in lst(d(doc.get("fonts")).get("missing")) if isinstance(f, str) and f][:20]
+
+
+def font_warning(doc: dict) -> str:
+    """The missing-font warning as escaped markdown ("" when every face was available)."""
+    faces = missing_fonts(doc)
+    if not faces:
+        return ""
+    one = len(faces) == 1
+    names = ", ".join(f"'{md_inline(f, 60)}'" for f in faces)
+    return (f"Font{'' if one else 's'} {names} {'is' if one else 'are'} not available in CI; KiCad substituted "
+            f"{'it' if one else 'them'}, so silkscreen text sizes and text-dependent DRC results "
+            "(silk_edge_clearance, silk_overlap, text clearance…) may differ from the designer's machine. "
+            "DRC violations involving that text are marked *font-dependent*. Commit the font files and pass "
+            "them with the <code>fonts</code> workflow input.")
+
+
 def summary_table(doc: dict) -> str:
     """One markdown table row per project (all values escaped)."""
     rows = ["| Project | Status | Sheets | Layers | Components | Nets | ERC new / fixed | DRC new / fixed | Off grid | Notes |",
@@ -172,5 +191,7 @@ def violation_line(v: dict, kind: str) -> str:
     at = ""
     if len(pos) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in pos):
         at = f" @ ({pos[0]:.2f}, {pos[1]:.2f}) mm"
+    faces = [f for f in lst(v.get("font_dependent")) if isinstance(f, str)][:3]
+    fd = f" ⚠️ *font-dependent* ({', '.join(md_inline(f, 40) for f in faces)} missing)" if faces else ""
     return (f"- {icon} {kind.upper()} {code(text(v.get('type')), 40)}: "
-            f"{md_inline(text(v.get('description')), 160)}{at}" + (f" — {items}" if items else ""))
+            f"{md_inline(text(v.get('description')), 160)}{at}" + (f" — {items}" if items else "") + fd)

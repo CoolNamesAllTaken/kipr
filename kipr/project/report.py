@@ -481,7 +481,10 @@ def checks_section(checks) -> str:
             for v in (d(x) for x in lst(items)):
                 pos = v.get("pos_mm")
                 at = ", ".join(f"{x:g}" for x in pos) if isinstance(pos, list) and len(pos) == 2 and all(num(x) is not None for x in pos) else ""
-                rows.append([status_badge(st), esc(v.get("severity")), f"<code>{esc(v.get('type'))}</code>", esc(v.get("description")),
+                faces = [f for f in lst(v.get("font_dependent")) if isinstance(f, str)]
+                fd = (f' <span class="b s-modified" title="text in a font that was not available ({esc(", ".join(faces))})">'
+                      'font-dependent</span>') if faces else ""
+                rows.append([status_badge(st), esc(v.get("severity")), f"<code>{esc(v.get('type'))}</code>{fd}", esc(v.get("description")),
                              esc("; ".join(str(x) for x in lst(v.get("items")))), esc(at + (f" {v.get('sheet')}" if v.get("sheet") else ""))])
         out.append(f"<h3>{label} <span class=\"muted\">{esc(fmt(c.get('base_count')))} → {esc(fmt(c.get('head_count')))}</span></h3>"
                    + table(["", "Severity", "Type", "Description", "Items", "Where"], rows))
@@ -545,6 +548,19 @@ th{color:var(--muted);font-size:12px}.b{display:inline-block;padding:0 7px;borde
 """
 
 
+def font_warning(review) -> str:
+    """Plain-text warning for fonts.missing ("" when none)."""
+    faces = [f for f in lst(d(d(review).get("fonts")).get("missing")) if isinstance(f, str) and f][:20]
+    if not faces:
+        return ""
+    one = len(faces) == 1
+    names = ", ".join(f"'{f}'" for f in faces)
+    return (f"Font{'' if one else 's'} {names} {'is' if one else 'are'} not available in CI; "
+            f"KiCad substituted {'it' if one else 'them'}, so silkscreen text sizes and text-dependent DRC results "
+            "(silk_edge_clearance, silk_overlap, text clearance…) may differ from the designer's machine. DRC violations "
+            "involving that text are marked font-dependent.")
+
+
 def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tuple[str, Images]:
     review = load_json(out / "project-review.json")
     imgs = Images(out)
@@ -571,6 +587,9 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
              f"{' · KiCad ' + esc(tool.get('kicad')) if tool.get('kicad') else ''} · generated {esc(_dt.datetime.now(_dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))}</p>"]
     if note:
         parts.append(f'<p class="note">{esc(note)}.</p>')
+    fw = font_warning(review)
+    if fw:
+        parts.append(f'<p class="note"><b>Fonts:</b> {esc(fw)}</p>')
     if not imgs.can_raster:
         parts.append('<p class="note">Pillow and cairosvg are not installed: the SVG exports are shown as they are, without diff images.</p>')
     parts.append('<p class="legend"><span><i class="k" style="background:rgb(225,40,40)"></i>removed (base only)</span>'
