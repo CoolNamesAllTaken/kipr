@@ -136,6 +136,10 @@ class ScreenshotTests(unittest.TestCase):
     def test_rendered_file(self):
         self.check(rendered_site(), "rendered-file", "--mode", "file")
 
+    def test_stage_fills_window(self):
+        r = run_tool("stage_height.py", "--site", str(mock_site()), "--shots", str(shots_dir("stage-height")))
+        self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
+
 
 @unittest.skipUnless(HAVE_CDN, "needs playwright + chromium and cdn.jsdelivr.net (three.js, occt-import-js)")
 class ColorTests(unittest.TestCase):
