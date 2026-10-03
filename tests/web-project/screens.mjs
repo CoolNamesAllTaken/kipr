@@ -148,9 +148,57 @@ for (const theme of THEMES) {
       await page.screenshot({ path: path.join(a.shots, `pcb-measure.${theme}.${sizeName}.png`) });
     }
     await checkBoxes(page, tag, `${theme}.${sizeName}`);
+    if (a.mode !== 'file') await checkDocLayer(page, tag, `${theme}.${sizeName}`);
     await ctx.close();
   }
 }
+/**
+ * A fab note on Dwgs.User 50 mm outside the board (make_mock NOTE_*): off by default and outside the
+ * board frame; once the layer is ticked the frame covers it and its strokes are drawn (pixels in the
+ * head canvas); the per-layer diff of Dwgs.User frames it too and shows the added line.
+ */
+async function checkDocLayer(page, tag, suffix) {
+  const NOTE = { x: 210, y: 80, w: 30, h: 14 };
+  const world = () => page.locator('.stage-wrap').getAttribute('data-world').then((v) => (v || '0,0,0,0').split(',').map(Number));
+  const covers = ([x, y, w, h]) => x <= NOTE.x && y <= NOTE.y && x + w >= NOTE.x + NOTE.w && y + h >= NOTE.y + NOTE.h;
+  // max alpha of `sel`'s canvas in a 1.5 mm square around KiCad point (x, y); the canvas spans the frame
+  const inkAt = (sel, x, y) => world().then((wb) => page.evaluate(([sel, wb, x, y]) => {
+    const c = document.querySelector(sel);
+    if (!c) return -1;
+    const [wx, wy, ww, wh] = wb;
+    const sx = c.width / ww; const sy = c.height / wh;
+    const px = Math.round((x - wx) * sx); const py = Math.round((y - wy) * sy);
+    const r = Math.max(2, Math.round(0.75 * sx));
+    const d = c.getContext('2d').getImageData(Math.max(0, px - r), Math.max(0, py - r), 2 * r, 2 * r).data;
+    let m = 0;
+    for (let i = 3; i < d.length; i += 4) m = Math.max(m, d[i]);
+    return m;
+  }, [sel, wb, x, y]));
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout?view=layers&mode=side`);
+  await settle(page);
+  if (covers(await world())) problems.push(`${tag} doc layer: the frame covers the note with Dwgs.User off (${await world()})`);
+  await page.locator('#ly-Dwgs_User').check();
+  await settle(page);
+  await page.waitForTimeout(500);
+  if (!covers(await world())) problems.push(`${tag} doc layer: frame ${await world()} does not cover the note after ticking Dwgs.User`);
+  const ink = await inkAt('.pane:nth-child(2) .layer-canvas', NOTE.x + 15, NOTE.y);
+  if (!(ink > 64)) problems.push(`${tag} doc layer: no note pixels in the head pane (alpha ${ink})`);
+  await page.screenshot({ path: path.join(a.shots, `doc-layer-on.${suffix}.png`) });
+  await page.locator('#ly-Dwgs_User').uncheck(); // back to the default for the next run
+  await settle(page);
+  if (covers(await world())) problems.push(`${tag} doc layer: frame still covers the note after unticking`);
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout/Dwgs.User?view=layers&mode=diff`);
+  await settle(page);
+  await page.waitForTimeout(500);
+  if (!covers(await world())) problems.push(`${tag} doc layer diff: frame ${await world()} does not cover the note`);
+  const added = await inkAt('.diff-canvas', NOTE.x + 15, NOTE.y + 12);
+  if (!(added > 64)) problems.push(`${tag} doc layer diff: the added note line is not drawn (alpha ${added})`);
+  if (!/Dwgs\.User: [1-9]\d* changed area/.test(await page.locator('.legend').textContent())) problems.push(`${tag} doc layer diff: no changed area found`);
+  await page.screenshot({ path: path.join(a.shots, `doc-layer-diff.${suffix}.png`) });
+}
+
 /**
  * The Boxes toggle (key b): change boxes on / off in every compare mode of the schematic and layout,
  * kept in the URL (boxes=0) and across reloads (localStorage), a selected change still flashes its

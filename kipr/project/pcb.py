@@ -177,6 +177,11 @@ def layer_kind(name: str) -> str:
             "Cuts": "outline"}.get(suffix, "user")
 
 
+# Documentation layers (fab notes, drawings, comments, User.N, Margin): drawn anywhere on the page, so
+# the viewer and report frame them by their own extents instead of the board outline
+DOC_KINDS = ("fab", "user")
+
+
 def layer_side(name: str) -> str:
     if name.startswith("F."):
         return "top"

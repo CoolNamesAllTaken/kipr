@@ -211,6 +211,32 @@ class ReportTest(unittest.TestCase):
             # base / head / diff for 4 changed sheets of demo_board, 1 + 1 sheets of the others, 6 changed layers
             self.assertGreaterEqual(self.html.count("data:image/png"), 3 * 4)
 
+    def test_doc_layer_images_not_cropped_to_board(self):
+        """A Dwgs.User note 50 mm right of the board (make_mock NOTE_*) is in the report's layer images."""
+        review = json.loads((self.out / "project-review.json").read_text())
+        pcb = next(p for p in review["projects"] if p["slug"] == "demo_board")["pcb"]
+        dwgs = next(l for l in pcb["layers"] if l["id"] == "Dwgs.User")
+        fcu = next(l for l in pcb["layers"] if l["id"] == "F.Cu")
+        board = report.board_crop(pcb)
+        self.assertEqual(report.layer_crop(pcb, fcu), board)  # board layers: the board
+        x, y, w, h = report.layer_crop(pcb, dwgs)
+        nx, ny, nw, nh = dwgs["extent_mm"]
+        self.assertTrue(x <= board[0] and y <= board[1] and x + w >= nx + nw + 2 and y + h >= ny + nh + 2, (x, y, w, h))
+        self.assertGreater(nx, board[0] + board[2])  # really outside the board crop
+        if report.Image is None or report.cairosvg is None:
+            self.skipTest("needs Pillow + cairosvg")
+        import base64, io
+        from PIL import Image
+        sec = self.html.split("<h4>Dwgs.User", 1)[1].split("<h4>", 1)[0]
+        uris = re.findall(r'src="data:image/png;base64,([^"]+)"', sec)
+        self.assertEqual(len(uris), 3)  # base, head, diff
+        head = Image.open(io.BytesIO(base64.b64decode(uris[1]))).convert("RGBA")
+        s = head.width / w
+        # the note's frame, top edge, 15 mm in: not the background
+        px, py = int((nx + 15 - x) * s), int((ny - y) * s)
+        patch = [head.getpixel((i, j)) for i in range(px - 3, px + 4) for j in range(py - 3, py + 4)]
+        self.assertTrue(any(sum(c[:3]) > 200 for c in patch), patch[:5])
+
     def test_size_cap_drops_images(self):
         small = report.make_report(self.out, self.tmp / "small.html", max_mb=0.01).read_text()  # smaller than the page without images: last level
         self.assertNotIn("data:image", small)

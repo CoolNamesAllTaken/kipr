@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHash, formatHash, TABS } from '../../web/project/js/route.js';
 import { inkMask, alphaMask, dilate, diffMasks, paintDiff, regions } from '../../web/project/js/inkdiff.js';
 import {
-  sortLayers, copperIndex, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
+  sortLayers, copperIndex, isDocLayer, docExtent, frameBox, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
 import { fitTransform, zoomAbout } from '../../web/project/js/panzoom.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
@@ -143,6 +143,20 @@ test('board: inner copper in physical order (4, 6, 10 and 32 layers)', () => {
   const ten = [...sortLayers(shuffled(stack(12)))].reverse().map((l) => l.id);
   assert.ok(ten.indexOf('In9.Cu') < ten.indexOf('In10.Cu') && ten.indexOf('In2.Cu') < ten.indexOf('In10.Cu'));
   assert.deepEqual(['F.Cu', 'In1.Cu', 'In10.Cu', 'B.Cu', 'F.SilkS', 'In1.User'].map(copperIndex), [0, 1, 10, 1000, null, null]);
+});
+
+test('board: documentation layers are framed by their own extents', () => {
+  const dwgs = { id: 'Dwgs.User', kind: 'user', side: 'none', extent_mm: [210, 80, 30, 14] };
+  const fab = { id: 'F.Fab', kind: 'fab', side: 'top', extent_mm: [90, 60, 5, 5] };
+  const silk = { id: 'F.SilkS', kind: 'silk', side: 'top', extent_mm: [0, 0, 500, 500] };
+  assert.deepEqual([dwgs, fab, silk].map(isDocLayer), [true, true, false]);
+  assert.equal(docExtent(silk), null); // board layers never grow the frame
+  assert.equal(docExtent({ id: 'Cmts.User', kind: 'user' }), null);
+  const board = { x: 98, y: 68, w: 64, h: 44 };
+  assert.deepEqual(frameBox(board, []), board);
+  assert.deepEqual(frameBox(board, [null]), board);
+  assert.deepEqual(frameBox(board, [docExtent(dwgs)]), { x: 98, y: 68, w: 144, h: 44 });
+  assert.deepEqual(frameBox(board, [docExtent(dwgs), docExtent(fab)]), { x: 88, y: 58, w: 154, h: 54 });
 });
 
 test('board: realistic face picks that side', () => {

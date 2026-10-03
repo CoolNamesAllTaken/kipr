@@ -357,6 +357,18 @@ class ProjectReview:
             e["status"] = status
             e["semantic_changes"] = sum(1 for c in changes if lid in (c.get("layers") or [])
                                         or lid in (c.get("holes") or []))
+            if kind in pcb.DOC_KINDS:
+                # notes and drawings often sit outside the board: where they are, for the frame and report crop
+                ext = []
+                for sn in SIDES:
+                    f = sources(sn)
+                    if f:
+                        try:
+                            with open(os.path.join(self.out, f), encoding="utf-8", errors="replace") as fh:
+                                ext.append(export.gerber_extent(fh.read(), board.get("gerber_origin_mm") or (0, 0)))
+                        except OSError:
+                            pass
+                e["extent_mm"] = export.union_box(ext)
             for sn in SIDES:
                 fs = files.get(sn)
                 if fs is None or (sn == "base" and status == "added") or (sn == "head" and status == "removed"):

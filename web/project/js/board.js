@@ -89,6 +89,21 @@ export function sortLayers(layers) {
   return [...layers].sort((a, b) => layerRank(a) - layerRank(b) || a.id.localeCompare(b.id));
 }
 
+/** Documentation layers (fab, Dwgs/Cmts/Eco/User.N, Margin): drawn anywhere on the page, framed by their own extents. */
+export function isDocLayer(l) {
+  return l?.kind === 'fab' || l?.kind === 'user';
+}
+
+/** A doc layer's extent_mm (KiCad mm box of what it draws, both sides), or null. */
+export function docExtent(l) {
+  return isDocLayer(l) ? bbox(l.extent_mm) : null;
+}
+
+/** The stage frame: the board box (already with its margin) grown to cover `extents` (+2 mm each). */
+export function frameBox(boardBox, extents = []) {
+  return union([boardBox, ...extents.filter(Boolean).map((e) => grow(e, 2))]);
+}
+
 /** Layers shown by default in the per-layer view: copper, silk, outline, drills. */
 export function defaultOn(l) {
   return ['copper', 'silk', 'outline', 'drill'].includes(l.kind);

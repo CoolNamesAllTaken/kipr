@@ -9,7 +9,7 @@ import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
 import { comparePanes } from './compare.js';
 import {
-  layerList, sortLayers, defaultOn, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
+  layerList, sortLayers, defaultOn, docExtent, frameBox, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
   layerColor, cssColor, grow, union,
 } from './board.js';
 import { renderGerbers, renderFace, renderLayerDiff, gerberUnavailableReason } from './gerber.js';
@@ -178,13 +178,22 @@ export function createLayoutView(project, container, ctx) {
   }
 
   // --- world box
-  function worldBox() {
+  function boardBox() {
     // base and head outlines can differ (a board that grew): frame both
     const b = union([boardRect(pcb), boardRect({ board: obj(obj(pcb.board)?.base) }), boardRect({ board: obj(obj(pcb.board)?.head) })]);
     if (b) return grow(b, Math.max(2, Math.max(b.w, b.h) * 0.03));
     const u = union([...svgBoxes.values()]) || union(changeItems.map((c) => c.box));
     return u ? grow(u, 2) : { x: 0, y: 0, w: 100, h: 80 };
   }
+  // The board, plus the documentation layers on show (fab notes and drawings often sit outside the
+  // outline): the visible ones in the Layers view, the diffed one in Diff. Board layers alone: the board.
+  function worldBox() {
+    const ext = [];
+    if (view === 'layers' && mode !== 'diff') for (const l of layers) if (layerVisible.get(l.id)) ext.push(docExtent(l));
+    if (mode === 'diff') ext.push(docExtent(focus || pickDiffLayer(layers, view)));
+    return frameBox(boardBox(), ext);
+  }
+  const boxKey = (b) => [b.x, b.y, b.w, b.h].map((v) => v.toFixed(3)).join(',');
 
   // --- content: gerber canvases or SVG stacks
   function layerSetFor(side) {
@@ -271,9 +280,9 @@ export function createLayoutView(project, container, ctx) {
   // --- per-layer diff
   const diffCache = new Map();
   function computeDiff(layer) {
-    const key = `${layer.id}|${useGl ? renderR : 'svg'}`;
+    const box = worldBox();
+    const key = `${layer.id}|${useGl ? renderR : 'svg'}|${boxKey(box)}`;
     if (!diffCache.has(key)) {
-      const box = worldBox();
       let p;
       if (useGl) {
         const r = renderR;
@@ -309,6 +318,7 @@ export function createLayoutView(project, container, ctx) {
     for (const c of modeCleanups.splice(0)) c();
     clear(extra); clear(legendBox);
     if (!stage) return;
+    if (boxKey(worldBox()) !== boxKey(stage.box)) { buildStage(); return; } // a doc layer came or went: new frame
     clear(stageWrap);
     stageWrap.className = `stage-wrap board${m === 'side' ? ' split' : ''}${view === 'layers' ? ' dark' : ''}`;
     let panes;
@@ -349,15 +359,19 @@ export function createLayoutView(project, container, ctx) {
   function buildStage() {
     const old = stage;
     const keep = old ? { ...old.view } : null;
+    const box = worldBox();
+    const sameBox = old && boxKey(old.box) === boxKey(box);
     stage?.destroy();
-    stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
+    if (old && !sameBox) renderR = 0; // a bigger / smaller area: pick the resolution again
+    stage = createStage({ box, readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
     stage.observe(stageWrap);
+    stageWrap.dataset.world = boxKey(box); // KiCad mm x,y,w,h of the frame (for tests and scripts)
     stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     stage.onMeasure((t) => { measureOut.textContent = t; });
     stage.onTransform(resharpen);
     if (!renderR) renderR = wantR();
     setMode(mode);
-    if (keep && old && old.flip === stage.flip) { Object.assign(stage.view, keep); stage.apply(); }
+    if (keep && sameBox && old.flip === stage.flip) { Object.assign(stage.view, keep); stage.apply(); }
   }
 
   function setView(v) {
