@@ -85,8 +85,11 @@ export function layerRank(l) {
   return 350 + k;
 }
 
+const natural = new Intl.Collator('en', { numeric: true });
+
+/** Paint order (layerRank); equal ranks in reverse natural order, so the list (reversed) reads User.1, User.2, … User.10. */
 export function sortLayers(layers) {
-  return [...layers].sort((a, b) => layerRank(a) - layerRank(b) || a.id.localeCompare(b.id));
+  return [...layers].sort((a, b) => layerRank(a) - layerRank(b) || natural.compare(b.id, a.id));
 }
 
 /** Documentation layers (fab, Dwgs/Cmts/Eco/User.N, Margin): drawn anywhere on the page, framed by their own extents. */

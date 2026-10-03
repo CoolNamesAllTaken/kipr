@@ -143,6 +143,8 @@ test('board: inner copper in physical order (4, 6, 10 and 32 layers)', () => {
   const ten = [...sortLayers(shuffled(stack(12)))].reverse().map((l) => l.id);
   assert.ok(ten.indexOf('In9.Cu') < ten.indexOf('In10.Cu') && ten.indexOf('In2.Cu') < ten.indexOf('In10.Cu'));
   assert.deepEqual(['F.Cu', 'In1.Cu', 'In10.Cu', 'B.Cu', 'F.SilkS', 'In1.User'].map(copperIndex), [0, 1, 10, 1000, null, null]);
+  const users = ['User.10', 'User.2', 'User.1', 'Dwgs.User', 'Cmts.User'].map((id) => L(id, 'user', 'none'));
+  assert.deepEqual([...sortLayers(users)].reverse().map((l) => l.id), ['Cmts.User', 'Dwgs.User', 'User.1', 'User.2', 'User.10']);
 });
 
 test('board: documentation layers are framed by their own extents', () => {

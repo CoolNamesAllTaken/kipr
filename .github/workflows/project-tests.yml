@@ -114,7 +114,7 @@ jobs:
           KIPR_REQUIRE_INTEGRATION: "1"
           KIPR_FONTS_NETWORK: "1"          # test_fonts_kicad: the real Google Fonts download must work
           KICAD_PYTHON: /usr/bin/python3   # pcbnew, to embed a font in a board
-        run: python -m pytest tests/project/test_integration_fixtures.py tests/project/test_fonts_kicad.py -q -rs
+        run: python -m pytest tests/project/test_integration_fixtures.py tests/project/test_fonts_kicad.py tests/project/test_doc_layers_kicad.py -q -rs
       - name: kipr project on the fixtures (review + site + report)
         run: |
           cd "$RUNNER_TEMP"
