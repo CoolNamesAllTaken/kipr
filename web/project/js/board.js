@@ -58,7 +58,19 @@ export function layerList(pcb) {
   return arr(obj(pcb)?.layers).filter((l) => obj(l) && typeof l.id === 'string' && l.id.length < 80);
 }
 
-/** Stack order bottom -> top: back side, inner, front, then outline and drills on top. */
+/** Physical copper index top -> bottom: F.Cu 0, In<n>.Cu n (numeric: In10 after In9), B.Cu last; null if not copper. */
+export function copperIndex(id) {
+  if (id === 'F.Cu') return 0;
+  if (id === 'B.Cu') return 1000;
+  const n = /^In(\d+)\.Cu$/.exec(id);
+  return n ? +n[1] : null;
+}
+
+/**
+ * Paint order bottom -> top: back side, inner copper from the bottom up (In<n> ... In2, In1: KiCad numbers
+ * inner layers in stack order from the top), front, then outline and drills on top. Lists show it reversed
+ * (top of the stack first).
+ */
 export function layerRank(l) {
   const kindRank = { copper: 0, mask: 1, paste: 2, silk: 3, fab: 4, courtyard: 5, user: 6 };
   if (l.kind === 'outline') return 400;
@@ -66,8 +78,8 @@ export function layerRank(l) {
   const k = kindRank[l.kind] ?? 6;
   if (l.side === 'bottom') return 100 + (6 - k);
   if (l.side === 'inner') {
-    const n = /^In(\d+)\./.exec(l.id);
-    return 200 + (n ? +n[1] : 50) / 100;
+    const n = copperIndex(l.id);
+    return 200 + (n !== null && n < 999 ? (999 - n) / 10 : 0);
   }
   if (l.side === 'top') return 300 + k;
   return 350 + k;

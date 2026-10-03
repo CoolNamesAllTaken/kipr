@@ -3,11 +3,12 @@
 // From file:// ES modules can't load, so there it is pcba3d/pcba3d.bundle.js (a classic script built by
 // pcba3d/build_offline.mjs, run by site.py) setting window.KIPR_PCBA3D = {mountPcba3d}; it loads its own
 // data packs. If the module (or, offline, its bundle) is missing, show a placeholder.
-import { el, clear, OFFLINE, loadOfflineBundle } from './util.js';
+import { el, clear, OFFLINE, loadOfflineBundle, fillViewport } from './util.js';
 
 export function createPcba3dView(project, container) {
   const host = el('div', { class: 'pcba3d-host' });
   container.append(host);
+  const stopFill = fillViewport(host);
   let handle = null;
   let destroyed = false;
   const placeholder = (...msg) => clear(host).append(el('div', { class: 'empty' }, ...msg));
@@ -43,7 +44,7 @@ export function createPcba3dView(project, container) {
       });
   }
   return {
-    destroy() { destroyed = true; try { handle?.destroy?.(); } catch { /* module teardown errors are not ours */ } },
+    destroy() { destroyed = true; stopFill(); try { handle?.destroy?.(); } catch { /* module teardown errors are not ours */ } },
     focusRef(ref) { handle?.focus?.(ref); },
   };
 }

@@ -335,6 +335,7 @@ class ProjectReview:
                 for ly in s.board.layers:
                     if ly["name"] not in order:
                         order.append(ly["name"])
+        order = pcb.stack_order(order)  # a layer only one side has would land after the other's B.Cu
         present = {s.name: {ly["name"] for ly in s.board.layers} if s.board else set() for s in (b, h)}
         layers = []
 

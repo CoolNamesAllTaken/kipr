@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHash, formatHash, TABS } from '../../web/project/js/route.js';
 import { inkMask, alphaMask, dilate, diffMasks, paintDiff, regions } from '../../web/project/js/inkdiff.js';
 import {
-  sortLayers, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
+  sortLayers, copperIndex, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
 import { fitTransform, zoomAbout } from '../../web/project/js/panzoom.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
@@ -116,6 +116,33 @@ const LAYERS = [L('F.SilkS', 'silk', 'top'), L('Edge.Cuts', 'outline', 'none'), 
 
 test('board: layer stack order back -> inner -> front -> outline -> drills', () => {
   assert.deepEqual(sortLayers(LAYERS).map((l) => l.id), ['B.SilkS', 'B.Cu', 'In1.Cu', 'F.Cu', 'F.Mask', 'F.SilkS', 'Edge.Cuts', 'PTH']);
+});
+
+// a board's layers as the backend lists them (header order), for an n-layer stack
+function stack(n) {
+  const inner = Array.from({ length: n - 2 }, (_, i) => L(`In${i + 1}.Cu`, 'copper', 'inner'));
+  return [L('F.Cu', 'copper', 'top'), ...inner, L('B.Cu', 'copper', 'bottom'), L('F.Mask', 'mask', 'top'), L('B.Mask', 'mask', 'bottom'),
+    L('F.SilkS', 'silk', 'top'), L('B.SilkS', 'silk', 'bottom'), L('Edge.Cuts', 'outline', 'none')];
+}
+const copperOf = (ls) => ls.filter((l) => l.kind === 'copper').map((l) => l.id);
+const shuffled = (ls) => [...ls].reverse().sort((a, b) => (a.id.length % 3) - (b.id.length % 3));
+
+test('board: inner copper in physical order (4, 6, 10 and 32 layers)', () => {
+  for (const n of [4, 6, 10, 32]) {
+    const top = ['F.Cu', ...Array.from({ length: n - 2 }, (_, i) => `In${i + 1}.Cu`), 'B.Cu'];
+    const sorted = sortLayers(shuffled(stack(n)));
+    // paint order: B.Cu first, then In<n-2> ... In1, F.Cu last
+    assert.deepEqual(copperOf(sorted), [...top].reverse(), `paint order, ${n} layers`);
+    // the layer list shows the stack top -> bottom
+    const list = [...sorted].reverse().map((l) => l.id);
+    assert.deepEqual(list.filter((id) => id.endsWith('.Cu')), top, `list order, ${n} layers`);
+    assert.deepEqual(list.slice(0, 3), ['Edge.Cuts', 'F.SilkS', 'F.Mask'], `list starts with the front, ${n} layers`);
+    assert.deepEqual(list.slice(-2), ['B.Mask', 'B.SilkS'], `list ends with the back, ${n} layers`);
+  }
+  // numeric, not lexical: In10 below In9, In2 above In10
+  const ten = [...sortLayers(shuffled(stack(12)))].reverse().map((l) => l.id);
+  assert.ok(ten.indexOf('In9.Cu') < ten.indexOf('In10.Cu') && ten.indexOf('In2.Cu') < ten.indexOf('In10.Cu'));
+  assert.deepEqual(['F.Cu', 'In1.Cu', 'In10.Cu', 'B.Cu', 'F.SilkS', 'In1.User'].map(copperIndex), [0, 1, 10, 1000, null, null]);
 });
 
 test('board: realistic face picks that side', () => {

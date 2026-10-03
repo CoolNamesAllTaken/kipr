@@ -1,5 +1,5 @@
 // Schematic diff: per-sheet list, side-by-side / ink diff / onion skin / swipe, change list that zooms.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam, fillViewport } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
@@ -104,6 +104,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
   const stageWrap = el('div', { class: 'stage-wrap paper' }, el('div', { class: 'loading' }, 'Loading sheet…'));
   const legendBox = el('div', { class: 'legend' });
   mainBox.append(title, toolbar, stageWrap, legendBox);
+  const stopFill = fillViewport(stageWrap, { until: mainBox, watch: [title, toolbar, legendBox] });
 
   // --- change list: contract changes; if there are none, the pixel diff's regions
   const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null });
@@ -237,7 +238,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
 
   return {
     get mode() { return mode; },
-    destroy() { destroyed = true; resharpen.cancel(); for (const c of cleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; resharpen.cancel(); stopFill(); for (const c of cleanups) c(); stage?.destroy(); },
     onParams(p) {
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
       const ci = Number.parseInt(p.c, 10);

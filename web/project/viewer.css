@@ -61,6 +61,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 #layout { flex: 1; display: flex; min-height: 0; }
 #sidebar { width: 270px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--panel); min-height: 0; }
 #main { flex: 1; overflow: auto; padding: 14px 18px 40px; min-width: 0; }
+#main:has(.stage-wrap, .pcba3d-host) { padding-bottom: 14px; } /* the stage ends near the window's bottom edge */
 .filter { padding: 10px; border-bottom: 1px solid var(--border); }
 input[type="search"] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
 #project-list { overflow: auto; flex: 1; padding-bottom: 20px; }
@@ -124,13 +125,22 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 .warn-text { color: var(--warn); }
 
 /* diff views: sheets/layers | stage | changes */
-.diff-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) 280px; gap: 12px; align-items: start; }
-@media (max-width: 1200px) { .diff-grid { grid-template-columns: 190px minmax(0, 1fr); } .diff-changes { grid-column: 1 / -1; } }
-@media (max-width: 760px) { .diff-grid { grid-template-columns: minmax(0, 1fr); } .side-col { order: 2; } .diff-changes { order: 3; } }
+/* The stage column sets the row height (its stage fills the window, see fillViewport); the side and change
+   columns take that height (contain: size: their content doesn't grow the row) and scroll on their own. */
+.diff-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) 280px; gap: 12px; align-items: stretch; }
+.diff-grid > .side-col, .diff-grid > .diff-changes { contain: size; overflow: auto; }
+@media (max-width: 1200px) {
+  .diff-grid { grid-template-columns: 190px minmax(0, 1fr); }
+  .diff-grid > .diff-changes { grid-column: 1 / -1; contain: none; max-height: 50vh; }
+}
+@media (max-width: 760px) {
+  .diff-grid { grid-template-columns: minmax(0, 1fr); }
+  .diff-grid > .side-col { order: 2; contain: none; max-height: 40vh; }
+  .diff-changes { order: 3; }
+}
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
 .card h3 { margin: 0 0 8px; font-size: 14px; }
-.side-col { max-height: calc(100vh - 170px); overflow: auto; padding: 8px; }
-@media (max-width: 760px) { .side-col { max-height: none; } }
+.side-col { padding: 8px; }
 .side-list { display: flex; flex-direction: column; gap: 2px; }
 .side-item { display: block; width: 100%; text-align: left; font: inherit; color: var(--text); background: none; border: 0; border-left: 3px solid transparent; padding: 5px 8px; border-radius: 0 6px 6px 0; cursor: pointer; }
 .side-item:hover { background: var(--panel-2); }
@@ -148,9 +158,10 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 .readout.measure { color: var(--text); font-weight: 600; }
 @media (max-width: 760px) { .readout:not(.measure) { display: none; } }
 
-.stage-wrap { height: min(66vh, 720px); min-height: 300px; display: grid; grid-template-columns: 1fr; gap: 6px; }
+/* --fill-h: the window height left below the stage's top (fillViewport); phones scroll the page instead */
+.stage-wrap { height: var(--fill-h, 66vh); min-height: 360px; display: grid; grid-template-columns: 1fr; gap: 6px; }
 .stage-wrap.split { grid-template-columns: 1fr 1fr; }
-@media (max-width: 760px) { .stage-wrap { height: 58vh; } .stage-wrap.split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+@media (max-width: 760px) { .stage-wrap { height: 62vh; height: 62svh; } .stage-wrap.split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
 .pane { position: relative; overflow: hidden; border-radius: 6px; cursor: grab; touch-action: none; user-select: none; border: 1px solid var(--border); }
 .pane.grabbing { cursor: grabbing; }
 .pane.measuring { cursor: crosshair; }
@@ -186,8 +197,6 @@ svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .key.removed::before { background: rgb(225, 40, 40); } .key.added::before { background: rgb(30, 175, 70); } .key.common::before { background: rgba(128, 128, 128, .5); }
 
 /* change list */
-.diff-changes { max-height: calc(100vh - 170px); overflow: auto; }
-@media (max-width: 1200px) { .diff-changes { max-height: 50vh; } }
 .change-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .change-head h3 { margin: 0; }
 .change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -216,7 +225,8 @@ svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .swatch { width: 10px; height: 10px; border-radius: 2px; background: #888; display: inline-block; flex: none; }
 
 /* 3D */
-.pcba3d-host { height: 70vh; min-height: 360px; position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pcba3d-host { height: var(--fill-h, 70vh); min-height: 360px; position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+@media (max-width: 760px) { .pcba3d-host { height: 70vh; height: 70svh; } }
 
 /* tables */
 .scroll-x { overflow-x: auto; }

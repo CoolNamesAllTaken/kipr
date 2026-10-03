@@ -25,6 +25,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   const H = box.h * PX_PER_MM;
   let panes = [];
   let fitted = false;
+  let autoFit = false; // still the fitted view (not panned or zoomed since): re-fit when the panes resize
   let marks = [];
   let hl = null;
   let hlSides = null; // {base, head}: per-pane highlight for things that moved
@@ -68,7 +69,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   function setPanes(list) {
     panes = list;
     drawOverlay();
-    if (!fitted) fit(); else apply();
+    if (!fitted || autoFit) fit(); else apply();
   }
 
   function apply() {
@@ -91,6 +92,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     const { pw, ph } = paneSize();
     Object.assign(view, fitTransform({ x: 0, y: 0, w: W, h: H }, pw, ph, 0.02));
     fitted = true;
+    autoFit = true;
     apply();
   }
 
@@ -104,6 +106,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     const { pw, ph } = paneSize();
     Object.assign(view, fitTransform({ x: x0, y: y0, w: w * PX_PER_MM, h: h * PX_PER_MM }, pw, ph, pad));
     fitted = true;
+    autoFit = false;
     apply();
   }
 
@@ -163,6 +166,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     let moved = 0;
     p.addEventListener('wheel', (e) => {
       e.preventDefault();
+      autoFit = false;
       const r = p.getBoundingClientRect();
       Object.assign(view, zoomAbout(view, e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0015))));
       apply();
@@ -181,6 +185,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
       if (!prev) return;
       if (pointers.size === 1) {
         moved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+        if (e.clientX !== prev.x || e.clientY !== prev.y) autoFit = false;
         view.tx += e.clientX - prev.x;
         view.ty += e.clientY - prev.y;
         apply();
@@ -190,6 +195,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
         const [a, b] = [...pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (pinchDist) {
+          autoFit = false;
           const r = p.getBoundingClientRect();
           Object.assign(view, zoomAbout(view, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, d / pinchDist));
           apply();
@@ -217,7 +223,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     p.addEventListener('dblclick', () => fit());
   }
 
-  const ro = new ResizeObserver(() => { if (fitted) apply(); });
+  const ro = new ResizeObserver(() => { if (autoFit) fit(); else if (fitted) apply(); });
   cleanup.push(() => ro.disconnect());
 
   return {

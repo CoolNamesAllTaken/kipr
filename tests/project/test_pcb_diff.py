@@ -206,3 +206,12 @@ def test_changes_ordered_by_significance_with_groups():
     assert [(c["kind"], c.get("ref"), c.get("group")) for c in changes] == [
         ("footprint", "R1", None), ("footprint", "R2", None), ("track", None, "routing"), ("footprint", "R3", "properties")]
     assert [diff_pcb.significance(c)[0] for c in changes] == sorted(diff_pcb.significance(c)[0] for c in changes)
+
+
+def test_stack_order_is_physical_and_numeric():
+    assert [pcb.copper_index(n) for n in ("F.Cu", "In1.Cu", "In10.Cu", "B.Cu", "F.SilkS")] == [0, 1, 10, 1000, None]
+    # head (4 layers) then base (6 layers) merged: In3/In4 must not end up below B.Cu
+    merged = ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu", "F.Mask", "B.Mask", "Edge.Cuts", "In3.Cu", "In4.Cu"]
+    assert pcb.stack_order(merged) == ["F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu", "F.Mask", "B.Mask", "Edge.Cuts"]
+    names = ["F.Cu", "B.Cu", "F.SilkS"] + [f"In{i}.Cu" for i in range(10, 0, -1)]
+    assert pcb.stack_order(names) == ["F.Cu"] + [f"In{i}.Cu" for i in range(1, 11)] + ["B.Cu", "F.SilkS"]

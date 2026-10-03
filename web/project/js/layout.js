@@ -1,7 +1,7 @@
 // Layout diff: gerber-rendered board (realistic top/bottom faces and a per-layer view), layer toggles,
 // per-layer pixel diff, side-by-side / onion / swipe, change list that zooms, measure tool.
 // Without WebGL2 (or from file://) it falls back to the per-layer SVG exports.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam, fillViewport } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
@@ -87,10 +87,12 @@ export function createLayoutView(project, container, ctx) {
   const legendBox = el('div', { class: 'legend' });
   const layerPanel = el('div', { class: 'layer-panel' });
   const changeBox = el('div', { class: 'diff-changes card' });
+  const mainCol = el('div', { class: 'diff-main' }, toolbar, note, stageWrap, legendBox);
   container.append(el('div', { class: 'diff-grid' },
     el('div', { class: 'side-col card' }, el('h3', {}, 'Layers'), layerPanel),
-    el('div', { class: 'diff-main' }, toolbar, note, stageWrap, legendBox),
+    mainCol,
     changeBox));
+  const stopFill = fillViewport(stageWrap, { until: mainCol, watch: [toolbar, note, legendBox] });
   if (noGl && hasGerbers) { note.hidden = false; note.textContent = noGl; }
   if (!hasGerbers) { note.hidden = false; note.textContent = 'No gerbers in this export; showing the per-layer SVGs.'; }
 
@@ -396,7 +398,7 @@ export function createLayoutView(project, container, ctx) {
   });
 
   return {
-    destroy() { destroyed = true; resharpen.cancel(); for (const c of modeCleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; resharpen.cancel(); stopFill(); for (const c of modeCleanups) c(); stage?.destroy(); },
     onParams(p) {
       if (p.view && p.view !== view && VIEWS.some(([v]) => v === p.view)) setView(p.view);
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);

@@ -266,3 +266,32 @@ export function debounce(fn, ms) {
   d.cancel = () => clearTimeout(t);
   return d;
 }
+
+/**
+ * Size `target` (a diff stage) to fill the scroller's viewport below it: sets --fill-h (px) on it, at
+ * least `min`. `until` is the box whose bottom should meet the viewport bottom (what follows the stage
+ * inside it, e.g. the legend, stays visible); `scroller` defaults to #main; `watch` are elements above the stage whose height can
+ * change (toolbars that wrap, notices). The stylesheet decides where --fill-h applies (not on phones,
+ * where the page scrolls). Returns a function that stops it.
+ */
+export function fillViewport(target, { scroller = null, until = target, min = 360, watch = [] } = {}) {
+  scroller ||= target.closest('#main') || document.scrollingElement;
+  let raf = 0;
+  const px = (v) => Number.parseFloat(v) || 0;
+  const update = () => {
+    raf = 0;
+    if (!target.isConnected) return;
+    const r = target.getBoundingClientRect();
+    const u = until.getBoundingClientRect();
+    // offset of the stage inside the scroller as if it were scrolled to the top
+    const top = r.top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    const below = u.bottom + px(getComputedStyle(until).marginBottom) - r.bottom;
+    const h = `${Math.max(min, Math.floor(scroller.clientHeight - top - below - px(getComputedStyle(scroller).paddingBottom)))}px`;
+    if (target.style.getPropertyValue('--fill-h') !== h) target.style.setProperty('--fill-h', h);
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
+  const ro = new ResizeObserver(schedule);
+  for (const w of [scroller, ...watch]) if (w) ro.observe(w);
+  update();
+  return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+}
