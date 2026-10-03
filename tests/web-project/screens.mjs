@@ -147,9 +147,73 @@ for (const theme of THEMES) {
       if (!/d \d+\.\d+ mm/.test(txt || '')) problems.push(`${tag}: measure tool shows "${txt}"`);
       await page.screenshot({ path: path.join(a.shots, `pcb-measure.${theme}.${sizeName}.png`) });
     }
+    await checkBoxes(page, tag, `${theme}.${sizeName}`);
     await ctx.close();
   }
 }
+/**
+ * The Boxes toggle (key b): change boxes on / off in every compare mode of the schematic and layout,
+ * kept in the URL (boxes=0) and across reloads (localStorage), a selected change still flashes its
+ * outline for about a second, and the 3D Markers checkbox follows.
+ */
+async function checkBoxes(page, tag, suffix) {
+  const marks = () => page.locator('svg.overlay .mark').count();
+  const shot = (name) => page.screenshot({ path: path.join(a.shots, `${name}.${suffix}.png`) });
+  await page.goto(base + `${P}/schematic/root?mode=side`);
+  await settle(page);
+  if (!(await marks())) problems.push(`${tag} boxes: no change boxes by default`);
+  if (await page.locator('.boxes-toggle[aria-pressed="true"]').count() !== 1) problems.push(`${tag} boxes: toggle not pressed by default`);
+  await shot('boxes-on-sch');
+  await page.keyboard.press('b');
+  await page.waitForTimeout(100);
+  if (await marks()) problems.push(`${tag} boxes: 'b' left ${await marks()} boxes`);
+  if (!page.url().includes('boxes=0')) problems.push(`${tag} boxes: hidden but not in the URL (${page.url()})`);
+  await shot('boxes-off-sch');
+  // a change in the list still zooms there and flashes its outline, which goes away
+  const before = await page.locator('.readout.zoom').textContent();
+  await page.locator('.change').first().click();
+  await page.waitForTimeout(150);
+  if (await page.locator('svg.overlay .hl.flash').count() < 1) problems.push(`${tag} boxes: no flash on a selected change`);
+  if ((await page.locator('.readout.zoom').textContent()) === before) problems.push(`${tag} boxes: selecting a change did not zoom`);
+  await shot('boxes-off-flash');
+  await page.waitForTimeout(1300);
+  if (await page.locator('svg.overlay .hl').count()) problems.push(`${tag} boxes: the flash outline stayed`);
+  // every compare mode, schematic and layout, plus a head-only project: still hidden (localStorage, no URL param)
+  for (const hash of [`${P}/schematic/root?mode=diff`, `${P}/schematic/root?mode=onion`, `${P}/schematic/root?mode=swipe`,
+    `${P}/layout?view=top&mode=side`, `${P}/layout/F.Cu?view=top&mode=diff`, `${P}/layout?view=layers&mode=onion`, `${P}/layout?view=top&mode=swipe`,
+    '#/p/sensor_breakout/layout?view=top&mode=single', '#/p/sensor_breakout/schematic']) {
+    await page.goto('about:blank');
+    await page.goto(base + hash);
+    await settle(page);
+    if (await marks()) problems.push(`${tag} boxes: ${await marks()} boxes while hidden at ${hash}`);
+    if (!page.url().includes('boxes=0')) problems.push(`${tag} boxes: no boxes=0 in the URL at ${hash}`);
+  }
+  await shot('boxes-off-pcb');
+  if (hasPcba3d) {
+    await page.goto(base + `${P}/pcba3d`);
+    await page.waitForFunction(() => document.querySelector('.pcba3d-host')?.dataset.ready !== undefined, null, { timeout: 180000 }).catch(() => {});
+    if (await page.locator('input[data-toggle="markers"]').isChecked()) problems.push(`${tag} boxes: 3D Markers still on while boxes are hidden`);
+    await page.locator('input[data-toggle="markers"]').click(); // turning Markers on shows the boxes again
+  } else {
+    await page.goto(base + `${P}/layout?view=top&mode=side`);
+    await settle(page);
+    await page.keyboard.press('b');
+  }
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout?view=top&mode=side`);
+  await settle(page);
+  if (!(await marks())) problems.push(`${tag} boxes: not back on after turning them on again`);
+  if (page.url().includes('boxes=')) problems.push(`${tag} boxes: shown but the URL has ${page.url()}`);
+  await shot('boxes-on-pcb');
+  // a deep link with boxes=0 hides them in a fresh browser (no stored choice)
+  const ctx2 = await browser.newContext({ viewport: page.viewportSize() });
+  const p2 = await ctx2.newPage();
+  await p2.goto(base + `${P}/layout?view=top&mode=side&boxes=0`);
+  await settle(p2);
+  if (await p2.locator('svg.overlay .mark').count()) problems.push(`${tag} boxes: boxes=0 deep link shows boxes`);
+  await ctx2.close();
+}
+
 await browser.close();
 server?.close();
 console.log(`screens: ${shots.length} screenshots in ${a.shots}`);

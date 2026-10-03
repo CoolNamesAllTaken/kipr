@@ -291,3 +291,37 @@ test('grid findings: per-sheet groups and links to the spot on the sheet', () =>
   assert.equal(parseAtParam('1,2,3'), null);
   assert.equal(parseAtParam('1e3,2'), null);
 });
+
+// --- boxes toggle --------------------------------------------------------------------------------------
+
+test('boxes: default shown, toggle remembered, deep link wins without being remembered', async () => {
+  const { boxesShown, setBoxesShown, toggleBoxes, boxesFromParams, boxesParam, onBoxes, resetBoxes } = await import('../../web/project/js/boxes.js');
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+  try {
+    resetBoxes();
+    assert.equal(boxesShown(), true);
+    assert.equal(boxesParam(), null);
+    const seen = [];
+    onBoxes((on) => seen.push(on));
+    toggleBoxes();
+    assert.equal(boxesShown(), false);
+    assert.equal(boxesParam(), '0');
+    assert.equal(store.get('kipr.boxes'), '0');
+    resetBoxes(); // a new page load
+    assert.equal(boxesShown(), false);
+    assert.equal(boxesFromParams({ boxes: '1' }), true); // a link with boxes=1
+    assert.equal(store.get('kipr.boxes'), '0', 'a link does not change the remembered choice');
+    assert.equal(boxesFromParams({}), true, 'no param: keep the current choice');
+    assert.deepEqual(seen, [false]);
+    // storage that throws (private mode, blocked site data): still works, just not remembered
+    globalThis.localStorage = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+    resetBoxes();
+    assert.equal(boxesShown(), true);
+    setBoxesShown(false);
+    assert.equal(boxesShown(), false);
+  } finally {
+    delete globalThis.localStorage;
+    resetBoxes();
+  }
+});

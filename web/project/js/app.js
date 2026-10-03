@@ -6,6 +6,7 @@ import { initTheme, toggleTheme, themeButton } from './theme.js';
 import { createSchematicView } from './schematic.js';
 import { createLayoutView } from './layout.js';
 import { createPcba3dView } from './pcba3d.js';
+import { boxesFromParams, boxesParam, onBoxes } from './boxes.js';
 import { createBomView, createNetlistView, createChecksView } from './tables.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -26,6 +27,7 @@ export function projectsOf(review) {
 
 async function boot() {
   initTheme();
+  onBoxes(() => { if (state.route.slug) setRoute({ params: { ...state.route.params } }); }); // keep boxes=0 in the URL
   try {
     state.review = await fetchJson('project-review.json');
   } catch (e) {
@@ -135,6 +137,9 @@ function setRoute(partial, replace = true) {
     item: 'item' in partial ? partial.item : cur.item,
     params: partial.params ? Object.fromEntries(Object.entries(partial.params).filter(([, v]) => v !== null && v !== undefined && v !== '')) : cur.params,
   };
+  // hidden change boxes ride along in every view's URL (boxes.js)
+  next.params = { ...next.params, boxes: boxesParam() || undefined };
+  if (!next.params.boxes) delete next.params.boxes;
   state.route = next;
   const h = formatHash(next);
   if (h === location.hash) return;
@@ -153,6 +158,7 @@ function route() {
   if (p && !r.tab) r.tab = defaultTab(p);
   const key = p ? `${p.slug}|${r.tab}|${r.item ?? ''}` : null;
   state.route = r;
+  boxesFromParams(r.params);
   if (p && key === state.viewKey && state.view) {
     state.view.onParams?.(r.params);
     return;
@@ -166,6 +172,8 @@ function route() {
   document.querySelector('.item-link.active')?.scrollIntoView({ block: 'nearest' });
   if (p) renderProject(p, r);
   else renderOverview(r.slug);
+  // hidden boxes (remembered from an earlier visit) go into the URL too, so a copied link keeps them
+  if (p && (r.params.boxes || null) !== boxesParam()) setRoute({ params: { ...state.route.params } });
 }
 
 // --- overview -----------------------------------------------------------------------------------------
@@ -276,6 +284,7 @@ const SHORTCUTS = [
   ['v', 'cycle board view (top, bottom, layers)'],
   ['f', 'fit to view (double-click also works)'],
   ['r', 'measure tool (layout)'],
+  ['b', 'show / hide the boxes around changes (schematic, layout; Markers in 3D)'],
   ['t', 'toggle dark / light theme'],
   ['/', 'focus the filter'],
   ['Esc', 'clear highlight / close this help'],

@@ -184,7 +184,9 @@ svg.overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .6);
 svg.overlay .mark.outline { fill: none; }
 svg.overlay .hl { fill: none; stroke: var(--hl); stroke-width: calc(var(--px) * 3px); animation: pulse 1.2s ease-in-out 3; }
 @keyframes pulse { 50% { stroke-width: calc(var(--px) * 7px); stroke-opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { svg.overlay .hl { animation: none; } }
+svg.overlay .hl.flash { animation: flash 1s ease-out 1 forwards; } /* boxes hidden: outline the selected change briefly */
+@keyframes flash { 0%, 60% { stroke-opacity: 1; } 100% { stroke-opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { svg.overlay .hl, svg.overlay .hl.flash { animation: none; } }
 svg.overlay .measure-line { stroke: #00e5ff; stroke-width: calc(var(--px) * 2px); }
 svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
 .missing-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #8b949e; font-size: 20px; border: 2px dashed #8b949e; padding: 16px 20px; border-radius: 8px; white-space: nowrap; }

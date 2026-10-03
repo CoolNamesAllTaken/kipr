@@ -19,7 +19,9 @@ export function zoomAbout(v, px, py, factor, minS = 0.02, maxS = 2000) {
   return { s, tx: px - (px - v.tx) * f, ty: py - (py - v.ty) * f };
 }
 
-export function createStage({ box, readout = null, zoomLabel = null, flip = false }) {
+export const FLASH_MS = 1000; // with the boxes hidden, a selected change is outlined this long
+
+export function createStage({ box, readout = null, zoomLabel = null, flip = false, boxes = true }) {
   const view = { tx: 0, ty: 0, s: 1 };
   const W = box.w * PX_PER_MM;
   const H = box.h * PX_PER_MM;
@@ -29,6 +31,8 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   let marks = [];
   let hl = null;
   let hlSides = null; // {base, head}: per-pane highlight for things that moved
+  let boxesOn = boxes; // change boxes drawn; off: no marks, and the highlight only flashes
+  let flashTimer = null;
   let measuring = false;
   let measure = [];
   const listeners = new Set();
@@ -121,14 +125,14 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   function drawOverlay() {
     for (const p of panes) {
       const o = clear(p._overlay);
-      for (const m of marks) {
+      for (const m of boxesOn ? marks : []) {
         o.append(svgEl('rect', { x: m.box.x, y: m.box.y, width: Math.max(m.box.w, 0.01), height: Math.max(m.box.h, 0.01), class: `mark ${m.cls || ''}` }));
       }
       const hb = (p._side && hlSides?.[p._side]) || hl;
       if (hb) {
         const hl = hb; // eslint-disable-line no-shadow
         const padMm = Math.max(0.6, Math.min(hl.w, hl.h) * 0.1);
-        o.append(svgEl('rect', { x: hl.x - padMm, y: hl.y - padMm, width: hl.w + 2 * padMm, height: hl.h + 2 * padMm, class: 'hl' }));
+        o.append(svgEl('rect', { x: hl.x - padMm, y: hl.y - padMm, width: hl.w + 2 * padMm, height: hl.h + 2 * padMm, class: boxesOn ? 'hl' : 'hl flash' }));
       }
       if (measure.length) {
         const [a, b] = measure;
@@ -142,7 +146,17 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   }
   function setMarks(list) { marks = list || []; drawOverlay(); }
   /** Highlight box b; `sides` {base, head} overrides it on the base / head pane of a side-by-side view. */
-  function highlight(b, sides = null) { hl = b || null; hlSides = sides; drawOverlay(); }
+  function highlight(b, sides = null) {
+    hl = b || null; hlSides = sides;
+    clearTimeout(flashTimer);
+    if (hl && !boxesOn) flashTimer = setTimeout(() => { hl = null; hlSides = null; drawOverlay(); }, FLASH_MS);
+    drawOverlay();
+  }
+  function setBoxes(on) {
+    boxesOn = !!on;
+    if (!boxesOn) { clearTimeout(flashTimer); hl = null; hlSides = null; }
+    drawOverlay();
+  }
 
   function measureText() {
     if (measure.length < 2) return measuring ? 'click two points' : '';
@@ -224,11 +238,11 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   }
 
   const ro = new ResizeObserver(() => { if (autoFit) fit(); else if (fitted) apply(); });
-  cleanup.push(() => ro.disconnect());
+  cleanup.push(() => ro.disconnect(), () => clearTimeout(flashTimer));
 
   return {
     box, W, H, view, flip,
-    pane, place, setPanes, fit, zoomTo, apply, toMm, setMarks, highlight,
+    pane, place, setPanes, fit, zoomTo, apply, toMm, setMarks, highlight, setBoxes, get boxes() { return boxesOn; },
     observe(container) { ro.observe(container); },
     onTransform(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onMeasure(fn) { measureListeners.add(fn); },

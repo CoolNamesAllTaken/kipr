@@ -1,5 +1,6 @@
-// Tiny shared UI bits: segmented mode bar, labelled slider, diff legend.
+// Tiny shared UI bits: segmented mode bar, labelled slider, diff legend, Boxes toggle.
 import { el } from './util.js';
+import { boxesShown, toggleBoxes, onBoxes } from './boxes.js';
 
 export function createModeBar(modes, current, onPick, label = 'Compare mode') {
   const bar = el('div', { class: 'seg', role: 'tablist', 'aria-label': label });
@@ -16,6 +17,13 @@ export function sliderLabel(left, right, value, onInput, aria, step = 0.01) {
   const s = el('input', { type: 'range', min: 0, max: 1, step, value, 'aria-label': aria });
   s.addEventListener('input', () => onInput(+s.value));
   return el('label', { class: 'slider' }, left, s, right);
+}
+
+/** The 'Boxes' toggle (show / hide the change boxes, key b); onChange(shown) on every change. Call stop() on destroy. */
+export function boxesToggle(onChange) {
+  const btn = el('button', { class: 'btn boxes-toggle', title: 'Show / hide the boxes around changes (b)', 'aria-pressed': String(boxesShown()), onclick: () => toggleBoxes() }, 'Boxes');
+  const stop = onBoxes((on) => { btn.setAttribute('aria-pressed', String(on)); onChange(on); });
+  return { el: btn, stop };
 }
 
 export function legend() {

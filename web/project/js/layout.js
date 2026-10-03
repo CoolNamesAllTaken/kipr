@@ -5,7 +5,8 @@ import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, pa
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
-import { createModeBar, legend } from './widgets.js';
+import { createModeBar, legend, boxesToggle } from './widgets.js';
+import { boxesShown, toggleBoxes } from './boxes.js';
 import { comparePanes } from './compare.js';
 import {
   layerList, sortLayers, defaultOn, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
@@ -79,7 +80,8 @@ export function createLayoutView(project, container, ctx) {
   const viewBar = createModeBar(VIEWS, view, (v) => { setView(v); pushRoute(); }, 'Board view');
   const measureBtn = el('button', { class: 'btn', title: 'Measure distance (r): click two points', 'aria-pressed': 'false', onclick: () => toggleMeasure() }, 'Measure');
   const extra = el('div', { class: 'toolbar-extra' });
-  const toolbar = el('div', { class: 'toolbar' }, viewBar.el, modeBar.el, extra, el('span', { class: 'spacer' }), measureOut, readout, zoomLbl, measureBtn,
+  const boxes = boxesToggle((on) => stage?.setBoxes(on));
+  const toolbar = el('div', { class: 'toolbar' }, viewBar.el, modeBar.el, extra, el('span', { class: 'spacer' }), measureOut, readout, zoomLbl, boxes.el, measureBtn,
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const note = el('div', { class: 'notice small' });
   note.hidden = true;
@@ -348,7 +350,7 @@ export function createLayoutView(project, container, ctx) {
     const old = stage;
     const keep = old ? { ...old.view } : null;
     stage?.destroy();
-    stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, flip: view === 'bottom' });
+    stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
     stage.observe(stageWrap);
     stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     stage.onMeasure((t) => { measureOut.textContent = t; });
@@ -398,7 +400,7 @@ export function createLayoutView(project, container, ctx) {
   });
 
   return {
-    destroy() { destroyed = true; resharpen.cancel(); stopFill(); for (const c of modeCleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; resharpen.cancel(); stopFill(); boxes.stop(); for (const c of modeCleanups) c(); stage?.destroy(); },
     onParams(p) {
       if (p.view && p.view !== view && VIEWS.some(([v]) => v === p.view)) setView(p.view);
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
@@ -411,6 +413,7 @@ export function createLayoutView(project, container, ctx) {
       if (e.key === 'n') { changes.next(); return true; }
       if (e.key === 'p') { changes.prev(); return true; }
       if (e.key === 'f') { stage?.fit(); return true; }
+      if (e.key === 'b') { toggleBoxes(); return true; }
       if (e.key === 'r') { toggleMeasure(); return true; }
       if (e.key === 'v') { const i = VIEWS.findIndex(([v]) => v === view); setView(VIEWS[(i + 1) % VIEWS.length][0]); pushRoute(); return true; }
       if (e.key === 'm') {
