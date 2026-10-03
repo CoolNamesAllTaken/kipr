@@ -33,6 +33,8 @@ python3 "$here/make_mock.py" --out "$mock" --site
 (cd "$root" && python3 -m kipr.project.report --out "$mock")
 echo "== screenshots (http)"
 node "$here/screens.mjs" --site "$mock" --shots "$shots/http" $quick
+echo "== stage fills the window (1920x1080, 2560x1440, 390x844)"
+node "$here/stage_height.mjs" --site "$mock" --shots "$shots/stage"
 echo "== screenshots (file://, like an unzipped artifact)"
 node "$here/screens.mjs" --site "$mock" --shots "$shots/file" --mode file --quick
 echo "== xss"

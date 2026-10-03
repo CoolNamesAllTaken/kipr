@@ -58,7 +58,8 @@ for (const [size, width, height, desktop] of SIZES) {
     await settle(page);
     if (sel === '.pcba3d-host') await page.waitForFunction(() => document.querySelector('.pcba3d-host')?.dataset.ready !== undefined, null, { timeout: 180000 }).catch(() => {});
     const m = await page.evaluate(measure, sel);
-    await page.screenshot({ path: path.join(a.shots, `${name}.${size}.png`), fullPage: !desktop });
+    if (!desktop) await page.locator(sel).first().evaluate((e) => e.scrollIntoView({ block: 'end' })); // the phone layout scrolls #layout
+    await page.screenshot({ path: path.join(a.shots, `${name}.${size}.png`) });
     n++;
     if (!m) { problems.push(`${tag}: no ${sel}`); continue; }
     const info = `top ${m.top.toFixed(0)} h ${m.h.toFixed(0)} vh ${m.vh}`;
