@@ -77,7 +77,7 @@ def board(side: str) -> dict:
     vias = [(150.0, 90.0)] + ([(126.0, 95.0)] if head else [])
     zone_bottom = [(145.0, 74.0), (157.0, 74.0), (157.0, 84.0), (145.0, 84.0)] if head else None
     npth = [(104.0, 74.0, 3.2), (156.0, 74.0, 3.2), (104.0, 106.0, 3.2), (156.0, 106.0, 3.2)]
-    return {"comps": comps, "tracks": {"top": tracks_top, "bottom": tracks_bottom}, "vias": vias,
+    return {"side": side, "comps": comps, "tracks": {"top": tracks_top, "bottom": tracks_bottom}, "vias": vias,
             "zone": {"bottom": zone_bottom}, "npth": npth}
 
 
@@ -155,6 +155,27 @@ def svg_doc(body, w=PAGE[0], h=PAGE[1]):
             f'width="{w}mm" height="{h}mm" viewBox="0 0 {w} {h}">\n{body}</svg>\n')
 
 
+# A fab note on Dwgs.User 50 mm right of the board (KiCad users put notes beside the board, outside the
+# outline): a frame and stroked "NOTE" glyphs; head adds a fourth line under the text.
+NOTE_X, NOTE_Y = BOARD[0] + BOARD[2] + 50, BOARD[1] + 10
+
+
+def note_strokes(side: str) -> list:
+    x, y = NOTE_X, NOTE_Y
+    s = [[(x, y), (x + 30, y), (x + 30, y + 14), (x, y + 14), (x, y)]]            # frame
+    s += [[(x + 2, y + 10), (x + 2, y + 3), (x + 7, y + 10), (x + 7, y + 3)]]      # N
+    s += [[(x + 9, y + 3), (x + 14, y + 3), (x + 14, y + 10), (x + 9, y + 10), (x + 9, y + 3)]]  # O
+    s += [[(x + 16, y + 3), (x + 21, y + 3)], [(x + 18.5, y + 3), (x + 18.5, y + 10)]]          # T
+    s += [[(x + 28, y + 3), (x + 23, y + 3), (x + 23, y + 10), (x + 28, y + 10)], [(x + 23, y + 6.5), (x + 27, y + 6.5)]]  # E
+    if side == "head":
+        s += [[(x + 2, y + 12), (x + 28, y + 12)]]
+    return s
+
+
+def note_extent(sides) -> list:
+    return [NOTE_X, NOTE_Y, 30, 14]
+
+
 def layer_svg(b: dict, layer: str, color: str) -> str:
     """Per-layer SVG in page mode: viewBox units = KiCad mm, like `kicad-cli pcb export svg`."""
     parts = []
@@ -180,6 +201,10 @@ def layer_svg(b: dict, layer: str, color: str) -> str:
         z = b["zone"].get(side)
         if z:
             parts.append(f'<polygon points="{" ".join(f"{x},{y}" for x, y in z)}" fill="{color}" fill-opacity="0.8"/>')
+    if layer == "Dwgs.User":
+        for st in note_strokes(b["side"]):
+            pts = " ".join(f"{x:.4f},{y:.4f}" for x, y in st)
+            parts.append(f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>')
     if layer == "Edge.Cuts":
         x, y, w, h = BOARD
         parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none" stroke="{color}" stroke-width="0.1"/>')
@@ -192,6 +217,10 @@ def layer_gerber(b: dict, layer: str) -> str:
     kind = layer.split(".")[1] if "." in layer else layer
     if layer == "Edge.Cuts":
         g.rect_outline(*BOARD, 0.1)
+        return g.text()
+    if layer == "Dwgs.User":
+        for st in note_strokes(b["side"]):
+            g.path(st, 0.6)
         return g.text()
     for c in b["comps"]:
         on_side = c["side"] == side or c.get("tht")
@@ -231,7 +260,7 @@ LAYERS = [
     ("F.Cu", "copper", "top", "#C83434"), ("B.Cu", "copper", "bottom", "#4D7FC4"),
     ("F.Mask", "mask", "top", "#D864FF"), ("B.Mask", "mask", "bottom", "#02FFEE"),
     ("F.Paste", "paste", "top", "#B4A0A0"), ("F.SilkS", "silk", "top", "#F2EDA1"), ("B.SilkS", "silk", "bottom", "#E8B2A7"),
-    ("Edge.Cuts", "outline", "none", "#D0D200"),
+    ("Edge.Cuts", "outline", "none", "#D0D200"), ("Dwgs.User", "user", "none", "#C2C2C2"),
 ]
 
 
@@ -247,6 +276,8 @@ def write_pcb(out: Path, slug: str, sides: list[str], changed: set[str]) -> dict
             (d / f"{fn}.gbr").write_text(layer_gerber(b, lid))
             (d / f"{fn}.svg").write_text(layer_svg(b, lid, color))
             entry[s] = {"gerber": f"p/{slug}/pcb/{s}/{fn}.gbr", "svg": f"p/{slug}/pcb/{s}/{fn}.svg"}
+        if kind == "user":
+            entry["extent_mm"] = note_extent(sides)
         layers.append(entry)
     for did, plated in (("PTH", True), ("NPTH", False)):
         entry = {"id": did, "kind": "drill", "side": "none", "status": status_for(sides, did in changed), "base": None, "head": None}
@@ -350,7 +381,7 @@ def demo_board(out: Path) -> dict:
             {"kind": "symbol", "ref": "U9", "what": "removed", "bbox_mm": [78, 67, 14, 12]},
         ]),
     ])
-    pcb = write_pcb(out, slug, ["base", "head"], {"F.Cu", "B.Cu", "F.Mask", "F.Paste", "F.SilkS", "PTH"})
+    pcb = write_pcb(out, slug, ["base", "head"], {"F.Cu", "B.Cu", "F.Mask", "F.Paste", "F.SilkS", "PTH", "Dwgs.User"})
     for side in ("base", "head"):
         write_glb(out / "p" / slug / "3d" / f"{side}.glb", board(side))
     pcb["changes"] = [

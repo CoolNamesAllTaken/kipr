@@ -1,14 +1,15 @@
 // Layout diff: gerber-rendered board (realistic top/bottom faces and a per-layer view), layer toggles,
 // per-layer pixel diff, side-by-side / onion / swipe, change list that zooms, measure tool.
 // Without WebGL2 (or from file://) it falls back to the per-layer SVG exports.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam, fillViewport } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
-import { createModeBar, legend } from './widgets.js';
+import { createModeBar, legend, boxesToggle } from './widgets.js';
+import { boxesShown, toggleBoxes } from './boxes.js';
 import { comparePanes } from './compare.js';
 import {
-  layerList, sortLayers, defaultOn, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
+  layerList, sortLayers, defaultOn, docExtent, frameBox, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
   layerColor, cssColor, grow, union,
 } from './board.js';
 import { renderGerbers, renderFace, renderLayerDiff, gerberUnavailableReason } from './gerber.js';
@@ -79,7 +80,8 @@ export function createLayoutView(project, container, ctx) {
   const viewBar = createModeBar(VIEWS, view, (v) => { setView(v); pushRoute(); }, 'Board view');
   const measureBtn = el('button', { class: 'btn', title: 'Measure distance (r): click two points', 'aria-pressed': 'false', onclick: () => toggleMeasure() }, 'Measure');
   const extra = el('div', { class: 'toolbar-extra' });
-  const toolbar = el('div', { class: 'toolbar' }, viewBar.el, modeBar.el, extra, el('span', { class: 'spacer' }), measureOut, readout, zoomLbl, measureBtn,
+  const boxes = boxesToggle((on) => stage?.setBoxes(on));
+  const toolbar = el('div', { class: 'toolbar' }, viewBar.el, modeBar.el, extra, el('span', { class: 'spacer' }), measureOut, readout, zoomLbl, boxes.el, measureBtn,
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const note = el('div', { class: 'notice small' });
   note.hidden = true;
@@ -87,10 +89,12 @@ export function createLayoutView(project, container, ctx) {
   const legendBox = el('div', { class: 'legend' });
   const layerPanel = el('div', { class: 'layer-panel' });
   const changeBox = el('div', { class: 'diff-changes card' });
+  const mainCol = el('div', { class: 'diff-main' }, toolbar, note, stageWrap, legendBox);
   container.append(el('div', { class: 'diff-grid' },
     el('div', { class: 'side-col card' }, el('h3', {}, 'Layers'), layerPanel),
-    el('div', { class: 'diff-main' }, toolbar, note, stageWrap, legendBox),
+    mainCol,
     changeBox));
+  const stopFill = fillViewport(stageWrap, { until: mainCol, watch: [toolbar, note, legendBox] });
   if (noGl && hasGerbers) { note.hidden = false; note.textContent = noGl; }
   if (!hasGerbers) { note.hidden = false; note.textContent = 'No gerbers in this export; showing the per-layer SVGs.'; }
 
@@ -174,13 +178,22 @@ export function createLayoutView(project, container, ctx) {
   }
 
   // --- world box
-  function worldBox() {
+  function boardBox() {
     // base and head outlines can differ (a board that grew): frame both
     const b = union([boardRect(pcb), boardRect({ board: obj(obj(pcb.board)?.base) }), boardRect({ board: obj(obj(pcb.board)?.head) })]);
     if (b) return grow(b, Math.max(2, Math.max(b.w, b.h) * 0.03));
     const u = union([...svgBoxes.values()]) || union(changeItems.map((c) => c.box));
     return u ? grow(u, 2) : { x: 0, y: 0, w: 100, h: 80 };
   }
+  // The board, plus the documentation layers on show (fab notes and drawings often sit outside the
+  // outline): the visible ones in the Layers view, the diffed one in Diff. Board layers alone: the board.
+  function worldBox() {
+    const ext = [];
+    if (view === 'layers' && mode !== 'diff') for (const l of layers) if (layerVisible.get(l.id)) ext.push(docExtent(l));
+    if (mode === 'diff') ext.push(docExtent(focus || pickDiffLayer(layers, view)));
+    return frameBox(boardBox(), ext);
+  }
+  const boxKey = (b) => [b.x, b.y, b.w, b.h].map((v) => v.toFixed(3)).join(',');
 
   // --- content: gerber canvases or SVG stacks
   function layerSetFor(side) {
@@ -267,9 +280,9 @@ export function createLayoutView(project, container, ctx) {
   // --- per-layer diff
   const diffCache = new Map();
   function computeDiff(layer) {
-    const key = `${layer.id}|${useGl ? renderR : 'svg'}`;
+    const box = worldBox();
+    const key = `${layer.id}|${useGl ? renderR : 'svg'}|${boxKey(box)}`;
     if (!diffCache.has(key)) {
-      const box = worldBox();
       let p;
       if (useGl) {
         const r = renderR;
@@ -305,6 +318,7 @@ export function createLayoutView(project, container, ctx) {
     for (const c of modeCleanups.splice(0)) c();
     clear(extra); clear(legendBox);
     if (!stage) return;
+    if (boxKey(worldBox()) !== boxKey(stage.box)) { buildStage(); return; } // a doc layer came or went: new frame
     clear(stageWrap);
     stageWrap.className = `stage-wrap board${m === 'side' ? ' split' : ''}${view === 'layers' ? ' dark' : ''}`;
     let panes;
@@ -345,15 +359,19 @@ export function createLayoutView(project, container, ctx) {
   function buildStage() {
     const old = stage;
     const keep = old ? { ...old.view } : null;
+    const box = worldBox();
+    const sameBox = old && boxKey(old.box) === boxKey(box);
     stage?.destroy();
-    stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, flip: view === 'bottom' });
+    if (old && !sameBox) renderR = 0; // a bigger / smaller area: pick the resolution again
+    stage = createStage({ box, readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
     stage.observe(stageWrap);
+    stageWrap.dataset.world = boxKey(box); // KiCad mm x,y,w,h of the frame (for tests and scripts)
     stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     stage.onMeasure((t) => { measureOut.textContent = t; });
     stage.onTransform(resharpen);
     if (!renderR) renderR = wantR();
     setMode(mode);
-    if (keep && old && old.flip === stage.flip) { Object.assign(stage.view, keep); stage.apply(); }
+    if (keep && sameBox && old.flip === stage.flip) { Object.assign(stage.view, keep); stage.apply(); }
   }
 
   function setView(v) {
@@ -396,7 +414,7 @@ export function createLayoutView(project, container, ctx) {
   });
 
   return {
-    destroy() { destroyed = true; resharpen.cancel(); for (const c of modeCleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; resharpen.cancel(); stopFill(); boxes.stop(); for (const c of modeCleanups) c(); stage?.destroy(); },
     onParams(p) {
       if (p.view && p.view !== view && VIEWS.some(([v]) => v === p.view)) setView(p.view);
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
@@ -409,6 +427,7 @@ export function createLayoutView(project, container, ctx) {
       if (e.key === 'n') { changes.next(); return true; }
       if (e.key === 'p') { changes.prev(); return true; }
       if (e.key === 'f') { stage?.fit(); return true; }
+      if (e.key === 'b') { toggleBoxes(); return true; }
       if (e.key === 'r') { toggleMeasure(); return true; }
       if (e.key === 'v') { const i = VIEWS.findIndex(([v]) => v === view); setView(VIEWS[(i + 1) % VIEWS.length][0]); pushRoute(); return true; }
       if (e.key === 'm') {

@@ -4,7 +4,7 @@
 
 Reads OUT/project-review.json (docs/CONTRACT-project.md) and the SVG exports it names, and writes
 OUT/project-review.html: summary, per changed sheet before / after / ink-diff images with the change
-table, per changed PCB layer before / after / diff images (cropped to the board), and the BOM,
+table, per changed PCB layer before / after / diff images (cropped to the board; documentation layers to the board plus what they draw), and the BOM,
 netlist and ERC/DRC deltas. CSS is inline, every image is a PNG `data:` URI, nothing is loaded from
 the network, all text is escaped, links are https only.
 
@@ -357,6 +357,18 @@ def board_crop(pcb):
     return None
 
 
+def layer_crop(pcb, layer):
+    """Crop for one layer's images: the board box, grown to the layer's own extent_mm (+2 mm) for the
+    documentation layers (fab notes and drawings often sit outside the board)."""
+    crop = board_crop(pcb)
+    e = d(layer).get("extent_mm")
+    if crop is None or not (isinstance(e, list) and len(e) == 4 and all(num(x) is not None for x in e)):
+        return crop
+    x0, y0 = min(crop[0], e[0] - 2), min(crop[1], e[1] - 2)
+    x1, y1 = max(crop[0] + crop[2], e[0] + e[2] + 2), max(crop[1] + crop[3], e[1] + e[3] + 2)
+    return (x0, y0, x1 - x0, y1 - y0)
+
+
 def changed_layers(pcb) -> list:
     layers = [d(l) for l in lst(d(pcb).get("layers"))]
     return [l for l in layers if l.get("status") not in (None, "unchanged") and l.get("kind") != "drill"]
@@ -375,8 +387,8 @@ def wanted_images(projects, width_sheet: int, width_layer: int) -> list:
             for s in changed_sheets(p.get("schematic")):
                 out += [(s.get("base"), slug, width_sheet, None), (s.get("head"), slug, width_sheet, None)]
         if width_layer > 0:
-            crop = board_crop(p.get("pcb"))
             for l in changed_layers(p.get("pcb")):
+                crop = layer_crop(p.get("pcb"), l)
                 out += [(d(l.get(side)).get("svg"), slug, width_layer, crop) for side in ("base", "head")]
     return out
 
@@ -426,12 +438,11 @@ def pcb_section(imgs, slug, pcb, width) -> str:
             out.append(f'<details class="minor"><summary><span class="b s-minor">{esc(group)}</span> {len(rows)} {esc(title)}</summary>'
                        + table(CHANGE_HEAD, change_rows(rows)) + "</details>")
     out += minor_blocks([c for c in allc if c.get("minor")])
-    crop = board_crop(pcb)
     changed = changed_layers(pcb)
     if changed and width > 0:
         for l in changed:
             out.append(f'<h4>{esc(l.get("id"))} {status_badge(l.get("status"))}</h4>')
-            out.append(triple(imgs, slug, d(l.get("base")).get("svg"), d(l.get("head")).get("svg"), width, crop, "alpha",
+            out.append(triple(imgs, slug, d(l.get("base")).get("svg"), d(l.get("head")).get("svg"), width, layer_crop(pcb, l), "alpha",
                               (14, 17, 22, 255), f"layer {l.get('id')}"))
     elif changed:
         out.append(f'<p class="muted">Changed layers: {esc(", ".join(str(l.get("id")) for l in changed))}</p>')

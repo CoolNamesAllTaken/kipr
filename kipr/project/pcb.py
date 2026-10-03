@@ -8,6 +8,7 @@ already mirrored, so no extra mirror is needed).
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 from . import geom
@@ -176,6 +177,11 @@ def layer_kind(name: str) -> str:
             "Cuts": "outline"}.get(suffix, "user")
 
 
+# Documentation layers (fab notes, drawings, comments, User.N, Margin): drawn anywhere on the page, so
+# the viewer and report frame them by their own extents instead of the board outline
+DOC_KINDS = ("fab", "user")
+
+
 def layer_side(name: str) -> str:
     if name.startswith("F."):
         return "top"
@@ -184,6 +190,22 @@ def layer_side(name: str) -> str:
     if name.startswith("In") and name.endswith(".Cu"):
         return "inner"
     return "none"
+
+
+def copper_index(name: str) -> int | None:
+    """Physical position of a copper layer, top -> bottom: F.Cu 0, In<n>.Cu n, B.Cu 1000; None otherwise."""
+    if name == "F.Cu":
+        return 0
+    if name == "B.Cu":
+        return 1000
+    m = re.fullmatch(r"In(\d+)\.Cu", name)
+    return int(m.group(1)) if m else None
+
+
+
+def stack_order(names: list[str]) -> list[str]:
+    """Copper first in physical order (F.Cu, In1.Cu, In2.Cu, ..., In10.Cu, B.Cu), then the rest as given."""
+    return sorted(names, key=lambda n: (0, copper_index(n)) if copper_index(n) is not None else (1, 0))
 
 
 def expand_layers(names, copper: list[str], all_layers: list[str]) -> set[str]:

@@ -1,9 +1,10 @@
 // Schematic diff: per-sheet list, side-by-side / ink diff / onion skin / swipe, change list that zooms.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam } from './util.js';
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam, fillViewport } from './util.js';
 import { createStage, PX_PER_MM } from './panzoom.js';
 import { createChangeList, describeChange } from './changes.js';
 import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
-import { createModeBar, legend } from './widgets.js';
+import { createModeBar, legend, boxesToggle } from './widgets.js';
+import { boxesShown, toggleBoxes } from './boxes.js';
 import { comparePanes } from './compare.js';
 
 // Base raster resolution (px/mm): shared by the first display bitmaps and the ink diff, so a sheet is
@@ -99,11 +100,13 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
   const extra = el('div', { class: 'toolbar-extra' });
   const title = el('div', { class: 'view-title' },
     el('strong', {}, sheet.title || sheet.id), el('span', { class: 'muted' }, sheet.file || ''), badge('status', sheet.status));
-  const toolbar = el('div', { class: 'toolbar' }, modeBar.el, extra, el('span', { class: 'spacer' }), readout, zoomLbl,
+  const boxes = boxesToggle((on) => stage?.setBoxes(on));
+  const toolbar = el('div', { class: 'toolbar' }, modeBar.el, extra, el('span', { class: 'spacer' }), readout, zoomLbl, boxes.el,
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const stageWrap = el('div', { class: 'stage-wrap paper' }, el('div', { class: 'loading' }, 'Loading sheet…'));
   const legendBox = el('div', { class: 'legend' });
   mainBox.append(title, toolbar, stageWrap, legendBox);
+  const stopFill = fillViewport(stageWrap, { until: mainBox, watch: [title, toolbar, legendBox] });
 
   // --- change list: contract changes; if there are none, the pixel diff's regions
   const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null });
@@ -219,7 +222,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
     .then(([b, h]) => {
       if (destroyed) return;
       vbs = { base: b, head: h };
-      stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl });
+      stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown() });
       stage.observe(stageWrap);
       stage.onTransform(resharpen);
       stage.setMarks(contractChanges.filter((c) => c.box).map((c) => ({ box: c.box })));
@@ -237,7 +240,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
 
   return {
     get mode() { return mode; },
-    destroy() { destroyed = true; resharpen.cancel(); for (const c of cleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; resharpen.cancel(); stopFill(); boxes.stop(); for (const c of cleanups) c(); stage?.destroy(); },
     onParams(p) {
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
       const ci = Number.parseInt(p.c, 10);
@@ -249,6 +252,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
       if (e.key === 'n') { changes.next(); return true; }
       if (e.key === 'p') { changes.prev(); return true; }
       if (e.key === 'f') { stage?.fit(); return true; }
+      if (e.key === 'b') { toggleBoxes(); return true; }
       if (e.key === 'm') {
         const i = modes.findIndex(([m]) => m === mode);
         preferredMode = modes[(i + 1) % modes.length][0];

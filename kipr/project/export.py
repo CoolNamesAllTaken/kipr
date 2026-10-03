@@ -260,3 +260,42 @@ def same_content(a: str | None, b: str | None) -> bool | None:
         return None
     with open(a, "rb") as fa, open(b, "rb") as fb:
         return _VOLATILE.sub(b"", fa.read()) == _VOLATILE.sub(b"", fb.read())
+
+
+_FS = re.compile(r"%FS[LT]?[AI]?X(\d)(\d)Y(\d)(\d)\*%")
+_XY = re.compile(r"(?:X([+-]?\d+))?(?:Y([+-]?\d+))?(?:I[+-]?\d+)?(?:J[+-]?\d+)?D0?([123])\*")
+
+
+def gerber_extent(text: str, origin=(0.0, 0.0)) -> list[float] | None:
+    """KiCad-frame box [x, y, w, h] (mm) of every coordinate a gerber names, or None if it draws nothing.
+
+    Coordinates only (no aperture size): callers add a margin. The gerber frame is KiCad's with y
+    negated around `origin` (board.gerber_origin_mm). Handles %FS…% decimals and %MOIN*% inches.
+    """
+    fs = _FS.search(text)
+    scale = 10.0 ** -int(fs.group(2)) if fs else 1e-6
+    if "%MOIN*%" in text:
+        scale *= 25.4
+    x = y = 0.0
+    x0 = y0 = float("inf")
+    x1 = y1 = float("-inf")
+    for m in _XY.finditer(text):
+        if m.group(1) is not None:
+            x = int(m.group(1)) * scale
+        if m.group(2) is not None:
+            y = int(m.group(2)) * scale
+        x0, x1, y0, y1 = min(x0, x), max(x1, x), min(y0, y), max(y1, y)
+    if x0 == float("inf"):
+        return None
+    ox, oy = origin
+    return [round(x0 + ox, 4), round(oy - y1, 4), round(x1 - x0, 4), round(y1 - y0, 4)]
+
+
+def union_box(boxes) -> list[float] | None:
+    """Union of [x, y, w, h] boxes (None entries ignored)."""
+    bs = [b for b in boxes if b]
+    if not bs:
+        return None
+    x0, y0 = min(b[0] for b in bs), min(b[1] for b in bs)
+    x1, y1 = max(b[0] + b[2] for b in bs), max(b[1] + b[3] for b in bs)
+    return [round(x0, 4), round(y0, 4), round(x1 - x0, 4), round(y1 - y0, 4)]

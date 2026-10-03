@@ -125,7 +125,8 @@ h1 { font-size: 20px; }
 .swatch[data-layer="F.Paste"] { background: #b4a0a0; } .swatch[data-layer="B.Paste"] { background: #00c2c2; }
 .swatch[data-layer="Edge.Cuts"] { background: #d0d200; } .swatch[data-layer="Drill"] { background: #dbdbdb; }
 
-.stage-wrap { height: min(62vh, 640px); min-height: 280px; display: grid; grid-template-columns: 1fr; gap: 6px; }
+/* --fill-h: the window height left below the stage's top (fillViewport) */
+.stage-wrap { height: var(--fill-h, 62vh); min-height: 360px; display: grid; grid-template-columns: 1fr; gap: 6px; }
 .stage-wrap.split { grid-template-columns: 1fr 1fr; }
 .pane { position: relative; overflow: hidden; border-radius: 6px; cursor: grab; touch-action: none; user-select: none; }
 .pane.grabbing { cursor: grabbing; }
@@ -145,7 +146,7 @@ h1 { font-size: 20px; }
 .key::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
 .key.removed::before { background: rgb(230,40,40); } .key.added::before { background: rgb(40,200,70); }
 
-.stage3d-wrap { position: relative; height: min(62vh, 640px); min-height: 280px; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+.stage3d-wrap { position: relative; height: var(--fill-h, 62vh); min-height: 360px; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
 .stage3d { position: absolute; inset: 0; }
 .stage3d canvas { display: block; }
 .labels3d { position: absolute; inset: 6px 8px auto 8px; display: flex; justify-content: space-around; pointer-events: none; }

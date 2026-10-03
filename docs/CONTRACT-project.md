@@ -165,8 +165,9 @@ is listed), or when the rendered SVGs differ.
     "status": "modified",
     "semantic_changes": 5,              // number of `changes` that touch this layer
     "base": {"gerber": "p/<slug>/pcb/base/F_Cu.gbr", "svg": "p/<slug>/pcb/base/F_Cu.svg"},
-    "head": {"gerber": "…", "svg": "…"}  // drill layers: {"gerber": "…/PTH.drl", "svg": null}
-  }],
+    "head": {"gerber": "…", "svg": "…"}, // drill layers: {"gerber": "…/PTH.drl", "svg": null}
+    "extent_mm": [x, y, w, h]           // fab / user layers only: box of what the layer draws (both sides'
+  }],                                   // gerbers, KiCad mm), null if empty; notes often lie off the board
   "gbrjob": {"base": "p/<slug>/pcb/base/board.gbrjob", "head": "…"},
   "pos": {"base": "p/<slug>/pcb/base/pos.csv", "head": "…"},
   "changes": [PcbChange],
@@ -175,7 +176,8 @@ is listed), or when the rendered SVGs differ.
 }
 ```
 
-Layers are every layer enabled in the board (head order, then base-only layers), followed by
+Layers are every layer enabled in the board (copper first in stack order F.Cu, In1.Cu, …, B.Cu; then
+the rest in head order, then base-only layers), followed by
 `PTH` and `NPTH` when the board has such holes. A layer's `status` compares the exported gerber
 (or drill) files ignoring creation dates and the revision in `%TF.ProjectId`; without exports it
 falls back to "some semantic change touches this layer".

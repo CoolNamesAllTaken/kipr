@@ -147,9 +147,121 @@ for (const theme of THEMES) {
       if (!/d \d+\.\d+ mm/.test(txt || '')) problems.push(`${tag}: measure tool shows "${txt}"`);
       await page.screenshot({ path: path.join(a.shots, `pcb-measure.${theme}.${sizeName}.png`) });
     }
+    await checkBoxes(page, tag, `${theme}.${sizeName}`);
+    if (a.mode !== 'file') await checkDocLayer(page, tag, `${theme}.${sizeName}`);
     await ctx.close();
   }
 }
+/**
+ * A fab note on Dwgs.User 50 mm outside the board (make_mock NOTE_*): off by default and outside the
+ * board frame; once the layer is ticked the frame covers it and its strokes are drawn (pixels in the
+ * head canvas); the per-layer diff of Dwgs.User frames it too and shows the added line.
+ */
+async function checkDocLayer(page, tag, suffix) {
+  const NOTE = { x: 210, y: 80, w: 30, h: 14 };
+  const world = () => page.locator('.stage-wrap').getAttribute('data-world').then((v) => (v || '0,0,0,0').split(',').map(Number));
+  const covers = ([x, y, w, h]) => x <= NOTE.x && y <= NOTE.y && x + w >= NOTE.x + NOTE.w && y + h >= NOTE.y + NOTE.h;
+  // max alpha of `sel`'s canvas in a 1.5 mm square around KiCad point (x, y); the canvas spans the frame
+  const inkAt = (sel, x, y) => world().then((wb) => page.evaluate(([sel, wb, x, y]) => {
+    const c = document.querySelector(sel);
+    if (!c) return -1;
+    const [wx, wy, ww, wh] = wb;
+    const sx = c.width / ww; const sy = c.height / wh;
+    const px = Math.round((x - wx) * sx); const py = Math.round((y - wy) * sy);
+    const r = Math.max(2, Math.round(0.75 * sx));
+    const d = c.getContext('2d').getImageData(Math.max(0, px - r), Math.max(0, py - r), 2 * r, 2 * r).data;
+    let m = 0;
+    for (let i = 3; i < d.length; i += 4) m = Math.max(m, d[i]);
+    return m;
+  }, [sel, wb, x, y]));
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout?view=layers&mode=side`);
+  await settle(page);
+  if (covers(await world())) problems.push(`${tag} doc layer: the frame covers the note with Dwgs.User off (${await world()})`);
+  await page.locator('#ly-Dwgs_User').check();
+  await settle(page);
+  await page.waitForTimeout(500);
+  if (!covers(await world())) problems.push(`${tag} doc layer: frame ${await world()} does not cover the note after ticking Dwgs.User`);
+  const ink = await inkAt('.pane:nth-child(2) .layer-canvas', NOTE.x + 15, NOTE.y);
+  if (!(ink > 64)) problems.push(`${tag} doc layer: no note pixels in the head pane (alpha ${ink})`);
+  await page.screenshot({ path: path.join(a.shots, `doc-layer-on.${suffix}.png`) });
+  await page.locator('#ly-Dwgs_User').uncheck(); // back to the default for the next run
+  await settle(page);
+  if (covers(await world())) problems.push(`${tag} doc layer: frame still covers the note after unticking`);
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout/Dwgs.User?view=layers&mode=diff`);
+  await settle(page);
+  await page.waitForTimeout(500);
+  if (!covers(await world())) problems.push(`${tag} doc layer diff: frame ${await world()} does not cover the note`);
+  const added = await inkAt('.diff-canvas', NOTE.x + 15, NOTE.y + 12);
+  if (!(added > 64)) problems.push(`${tag} doc layer diff: the added note line is not drawn (alpha ${added})`);
+  if (!/Dwgs\.User: [1-9]\d* changed area/.test(await page.locator('.legend').textContent())) problems.push(`${tag} doc layer diff: no changed area found`);
+  await page.screenshot({ path: path.join(a.shots, `doc-layer-diff.${suffix}.png`) });
+}
+
+/**
+ * The Boxes toggle (key b): change boxes on / off in every compare mode of the schematic and layout,
+ * kept in the URL (boxes=0) and across reloads (localStorage), a selected change still flashes its
+ * outline for about a second, and the 3D Markers checkbox follows.
+ */
+async function checkBoxes(page, tag, suffix) {
+  const marks = () => page.locator('svg.overlay .mark').count();
+  const shot = (name) => page.screenshot({ path: path.join(a.shots, `${name}.${suffix}.png`) });
+  await page.goto(base + `${P}/schematic/root?mode=side`);
+  await settle(page);
+  if (!(await marks())) problems.push(`${tag} boxes: no change boxes by default`);
+  if (await page.locator('.boxes-toggle[aria-pressed="true"]').count() !== 1) problems.push(`${tag} boxes: toggle not pressed by default`);
+  await shot('boxes-on-sch');
+  await page.keyboard.press('b');
+  await page.waitForTimeout(100);
+  if (await marks()) problems.push(`${tag} boxes: 'b' left ${await marks()} boxes`);
+  if (!page.url().includes('boxes=0')) problems.push(`${tag} boxes: hidden but not in the URL (${page.url()})`);
+  await shot('boxes-off-sch');
+  // a change in the list still zooms there and flashes its outline, which goes away
+  const before = await page.locator('.readout.zoom').textContent();
+  await page.locator('.change').first().click();
+  await page.waitForTimeout(150);
+  if (await page.locator('svg.overlay .hl.flash').count() < 1) problems.push(`${tag} boxes: no flash on a selected change`);
+  if ((await page.locator('.readout.zoom').textContent()) === before) problems.push(`${tag} boxes: selecting a change did not zoom`);
+  await shot('boxes-off-flash');
+  await page.waitForTimeout(1300);
+  if (await page.locator('svg.overlay .hl').count()) problems.push(`${tag} boxes: the flash outline stayed`);
+  // every compare mode, schematic and layout, plus a head-only project: still hidden (localStorage, no URL param)
+  for (const hash of [`${P}/schematic/root?mode=diff`, `${P}/schematic/root?mode=onion`, `${P}/schematic/root?mode=swipe`,
+    `${P}/layout?view=top&mode=side`, `${P}/layout/F.Cu?view=top&mode=diff`, `${P}/layout?view=layers&mode=onion`, `${P}/layout?view=top&mode=swipe`,
+    '#/p/sensor_breakout/layout?view=top&mode=single', '#/p/sensor_breakout/schematic']) {
+    await page.goto('about:blank');
+    await page.goto(base + hash);
+    await settle(page);
+    if (await marks()) problems.push(`${tag} boxes: ${await marks()} boxes while hidden at ${hash}`);
+    if (!page.url().includes('boxes=0')) problems.push(`${tag} boxes: no boxes=0 in the URL at ${hash}`);
+  }
+  await shot('boxes-off-pcb');
+  if (hasPcba3d) {
+    await page.goto(base + `${P}/pcba3d`);
+    await page.waitForFunction(() => document.querySelector('.pcba3d-host')?.dataset.ready !== undefined, null, { timeout: 180000 }).catch(() => {});
+    if (await page.locator('input[data-toggle="markers"]').isChecked()) problems.push(`${tag} boxes: 3D Markers still on while boxes are hidden`);
+    await page.locator('input[data-toggle="markers"]').click(); // turning Markers on shows the boxes again
+  } else {
+    await page.goto(base + `${P}/layout?view=top&mode=side`);
+    await settle(page);
+    await page.keyboard.press('b');
+  }
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/layout?view=top&mode=side`);
+  await settle(page);
+  if (!(await marks())) problems.push(`${tag} boxes: not back on after turning them on again`);
+  if (page.url().includes('boxes=')) problems.push(`${tag} boxes: shown but the URL has ${page.url()}`);
+  await shot('boxes-on-pcb');
+  // a deep link with boxes=0 hides them in a fresh browser (no stored choice)
+  const ctx2 = await browser.newContext({ viewport: page.viewportSize() });
+  const p2 = await ctx2.newPage();
+  await p2.goto(base + `${P}/layout?view=top&mode=side&boxes=0`);
+  await settle(p2);
+  if (await p2.locator('svg.overlay .mark').count()) problems.push(`${tag} boxes: boxes=0 deep link shows boxes`);
+  await ctx2.close();
+}
+
 await browser.close();
 server?.close();
 console.log(`screens: ${shots.length} screenshots in ${a.shots}`);

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { parseHash, formatHash, TABS } from '../../web/project/js/route.js';
 import { inkMask, alphaMask, dilate, diffMasks, paintDiff, regions } from '../../web/project/js/inkdiff.js';
 import {
-  sortLayers, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
+  sortLayers, copperIndex, isDocLayer, docExtent, frameBox, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
 import { fitTransform, zoomAbout } from '../../web/project/js/panzoom.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
@@ -116,6 +116,49 @@ const LAYERS = [L('F.SilkS', 'silk', 'top'), L('Edge.Cuts', 'outline', 'none'), 
 
 test('board: layer stack order back -> inner -> front -> outline -> drills', () => {
   assert.deepEqual(sortLayers(LAYERS).map((l) => l.id), ['B.SilkS', 'B.Cu', 'In1.Cu', 'F.Cu', 'F.Mask', 'F.SilkS', 'Edge.Cuts', 'PTH']);
+});
+
+// a board's layers as the backend lists them (header order), for an n-layer stack
+function stack(n) {
+  const inner = Array.from({ length: n - 2 }, (_, i) => L(`In${i + 1}.Cu`, 'copper', 'inner'));
+  return [L('F.Cu', 'copper', 'top'), ...inner, L('B.Cu', 'copper', 'bottom'), L('F.Mask', 'mask', 'top'), L('B.Mask', 'mask', 'bottom'),
+    L('F.SilkS', 'silk', 'top'), L('B.SilkS', 'silk', 'bottom'), L('Edge.Cuts', 'outline', 'none')];
+}
+const copperOf = (ls) => ls.filter((l) => l.kind === 'copper').map((l) => l.id);
+const shuffled = (ls) => [...ls].reverse().sort((a, b) => (a.id.length % 3) - (b.id.length % 3));
+
+test('board: inner copper in physical order (4, 6, 10 and 32 layers)', () => {
+  for (const n of [4, 6, 10, 32]) {
+    const top = ['F.Cu', ...Array.from({ length: n - 2 }, (_, i) => `In${i + 1}.Cu`), 'B.Cu'];
+    const sorted = sortLayers(shuffled(stack(n)));
+    // paint order: B.Cu first, then In<n-2> ... In1, F.Cu last
+    assert.deepEqual(copperOf(sorted), [...top].reverse(), `paint order, ${n} layers`);
+    // the layer list shows the stack top -> bottom
+    const list = [...sorted].reverse().map((l) => l.id);
+    assert.deepEqual(list.filter((id) => id.endsWith('.Cu')), top, `list order, ${n} layers`);
+    assert.deepEqual(list.slice(0, 3), ['Edge.Cuts', 'F.SilkS', 'F.Mask'], `list starts with the front, ${n} layers`);
+    assert.deepEqual(list.slice(-2), ['B.Mask', 'B.SilkS'], `list ends with the back, ${n} layers`);
+  }
+  // numeric, not lexical: In10 below In9, In2 above In10
+  const ten = [...sortLayers(shuffled(stack(12)))].reverse().map((l) => l.id);
+  assert.ok(ten.indexOf('In9.Cu') < ten.indexOf('In10.Cu') && ten.indexOf('In2.Cu') < ten.indexOf('In10.Cu'));
+  assert.deepEqual(['F.Cu', 'In1.Cu', 'In10.Cu', 'B.Cu', 'F.SilkS', 'In1.User'].map(copperIndex), [0, 1, 10, 1000, null, null]);
+  const users = ['User.10', 'User.2', 'User.1', 'Dwgs.User', 'Cmts.User'].map((id) => L(id, 'user', 'none'));
+  assert.deepEqual([...sortLayers(users)].reverse().map((l) => l.id), ['Cmts.User', 'Dwgs.User', 'User.1', 'User.2', 'User.10']);
+});
+
+test('board: documentation layers are framed by their own extents', () => {
+  const dwgs = { id: 'Dwgs.User', kind: 'user', side: 'none', extent_mm: [210, 80, 30, 14] };
+  const fab = { id: 'F.Fab', kind: 'fab', side: 'top', extent_mm: [90, 60, 5, 5] };
+  const silk = { id: 'F.SilkS', kind: 'silk', side: 'top', extent_mm: [0, 0, 500, 500] };
+  assert.deepEqual([dwgs, fab, silk].map(isDocLayer), [true, true, false]);
+  assert.equal(docExtent(silk), null); // board layers never grow the frame
+  assert.equal(docExtent({ id: 'Cmts.User', kind: 'user' }), null);
+  const board = { x: 98, y: 68, w: 64, h: 44 };
+  assert.deepEqual(frameBox(board, []), board);
+  assert.deepEqual(frameBox(board, [null]), board);
+  assert.deepEqual(frameBox(board, [docExtent(dwgs)]), { x: 98, y: 68, w: 144, h: 44 });
+  assert.deepEqual(frameBox(board, [docExtent(dwgs), docExtent(fab)]), { x: 88, y: 58, w: 154, h: 54 });
 });
 
 test('board: realistic face picks that side', () => {
@@ -263,4 +306,38 @@ test('grid findings: per-sheet groups and links to the spot on the sheet', () =>
   assert.equal(parseAtParam('1,2,0,3'), null);
   assert.equal(parseAtParam('1,2,3'), null);
   assert.equal(parseAtParam('1e3,2'), null);
+});
+
+// --- boxes toggle --------------------------------------------------------------------------------------
+
+test('boxes: default shown, toggle remembered, deep link wins without being remembered', async () => {
+  const { boxesShown, setBoxesShown, toggleBoxes, boxesFromParams, boxesParam, onBoxes, resetBoxes } = await import('../../web/project/js/boxes.js');
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+  try {
+    resetBoxes();
+    assert.equal(boxesShown(), true);
+    assert.equal(boxesParam(), null);
+    const seen = [];
+    onBoxes((on) => seen.push(on));
+    toggleBoxes();
+    assert.equal(boxesShown(), false);
+    assert.equal(boxesParam(), '0');
+    assert.equal(store.get('kipr.boxes'), '0');
+    resetBoxes(); // a new page load
+    assert.equal(boxesShown(), false);
+    assert.equal(boxesFromParams({ boxes: '1' }), true); // a link with boxes=1
+    assert.equal(store.get('kipr.boxes'), '0', 'a link does not change the remembered choice');
+    assert.equal(boxesFromParams({}), true, 'no param: keep the current choice');
+    assert.deepEqual(seen, [false]);
+    // storage that throws (private mode, blocked site data): still works, just not remembered
+    globalThis.localStorage = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+    resetBoxes();
+    assert.equal(boxesShown(), true);
+    setBoxesShown(false);
+    assert.equal(boxesShown(), false);
+  } finally {
+    delete globalThis.localStorage;
+    resetBoxes();
+  }
 });

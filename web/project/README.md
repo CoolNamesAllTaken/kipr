@@ -35,7 +35,16 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   layer's red/green diff (the fork's `analyzeLayerDiff` + `renderLayerDiff`) over the dimmed board. Same
   compare modes as the schematic, change list with zoom, a measure tool (Δx, Δy, distance in mm), cursor
   readout in board mm. Renders are re-done at a higher resolution after zooming in. DRC rows link here with
-  `at=x,y`. Without WebGL2, or from file://, it shows the per-layer SVG exports instead (with a pixel diff).
+  `at=x,y`. The frame is the board; documentation layers (fab, Dwgs/Cmts/Eco/User.N, Margin) that are
+  ticked in Layers, or diffed, widen it to their `extent_mm` (notes often sit beside the board), and
+  Fit fits that frame. The layer list reads top to bottom (F.*, In1.Cu, In2.Cu, …, B.*); paint order is
+  its reverse. Without WebGL2, or from file://, it shows the per-layer SVG exports instead (with a pixel diff).
+- **Boxes** (`b`, `boxes=0` in the URL, remembered in localStorage): show / hide the boxes around
+  changes in the schematic and layout views (every compare mode) and the 3D Markers. Hidden, a selected
+  change still zooms there and flashes its outline for a second.
+- The schematic / layout stages and the 3D view fill the window below the toolbars (`fillViewport` in
+  util.js sets `--fill-h`, min 360 px); the side and change columns scroll on their own. Narrow screens
+  (≤ 760 px) get a fixed-height stage and page scroll.
 - **3D PCBA**: mounts `pcba3d/index.js` (`mountPcba3d(el, project, baseUrl) -> {destroy()}`), or from
   file:// the prebuilt `pcba3d/pcba3d.bundle.js`; a placeholder when the module is missing. Once the
   module has loaded its data, `.pcba3d-host[data-ready]` holds its error count (the browser tests wait on it).

@@ -58,7 +58,19 @@ export function layerList(pcb) {
   return arr(obj(pcb)?.layers).filter((l) => obj(l) && typeof l.id === 'string' && l.id.length < 80);
 }
 
-/** Stack order bottom -> top: back side, inner, front, then outline and drills on top. */
+/** Physical copper index top -> bottom: F.Cu 0, In<n>.Cu n (numeric: In10 after In9), B.Cu last; null if not copper. */
+export function copperIndex(id) {
+  if (id === 'F.Cu') return 0;
+  if (id === 'B.Cu') return 1000;
+  const n = /^In(\d+)\.Cu$/.exec(id);
+  return n ? +n[1] : null;
+}
+
+/**
+ * Paint order bottom -> top: back side, inner copper from the bottom up (In<n> ... In2, In1: KiCad numbers
+ * inner layers in stack order from the top), front, then outline and drills on top. Lists show it reversed
+ * (top of the stack first).
+ */
 export function layerRank(l) {
   const kindRank = { copper: 0, mask: 1, paste: 2, silk: 3, fab: 4, courtyard: 5, user: 6 };
   if (l.kind === 'outline') return 400;
@@ -66,15 +78,33 @@ export function layerRank(l) {
   const k = kindRank[l.kind] ?? 6;
   if (l.side === 'bottom') return 100 + (6 - k);
   if (l.side === 'inner') {
-    const n = /^In(\d+)\./.exec(l.id);
-    return 200 + (n ? +n[1] : 50) / 100;
+    const n = copperIndex(l.id);
+    return 200 + (n !== null && n < 999 ? (999 - n) / 10 : 0);
   }
   if (l.side === 'top') return 300 + k;
   return 350 + k;
 }
 
+const natural = new Intl.Collator('en', { numeric: true });
+
+/** Paint order (layerRank); equal ranks in reverse natural order, so the list (reversed) reads User.1, User.2, … User.10. */
 export function sortLayers(layers) {
-  return [...layers].sort((a, b) => layerRank(a) - layerRank(b) || a.id.localeCompare(b.id));
+  return [...layers].sort((a, b) => layerRank(a) - layerRank(b) || natural.compare(b.id, a.id));
+}
+
+/** Documentation layers (fab, Dwgs/Cmts/Eco/User.N, Margin): drawn anywhere on the page, framed by their own extents. */
+export function isDocLayer(l) {
+  return l?.kind === 'fab' || l?.kind === 'user';
+}
+
+/** A doc layer's extent_mm (KiCad mm box of what it draws, both sides), or null. */
+export function docExtent(l) {
+  return isDocLayer(l) ? bbox(l.extent_mm) : null;
+}
+
+/** The stage frame: the board box (already with its margin) grown to cover `extents` (+2 mm each). */
+export function frameBox(boardBox, extents = []) {
+  return union([boardBox, ...extents.filter(Boolean).map((e) => grow(e, 2))]);
 }
 
 /** Layers shown by default in the per-layer view: copper, silk, outline, drills. */

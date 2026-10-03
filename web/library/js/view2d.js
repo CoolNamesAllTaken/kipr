@@ -5,7 +5,7 @@
 // same "world" box of vbW x vbH mm and a single transform (tx, ty, scale) drives all panes.
 // Images are loaded with <img> (never inlined), so SVG content from a PR cannot run script.
 
-import { el, clear, assetUrl, fetchText } from './util.js';
+import { el, clear, assetUrl, fetchText, fillViewport } from './util.js';
 
 const PX_PER_MM = 20; // world pixels per mm at scale 1
 
@@ -72,6 +72,7 @@ export function createView2D(item, container) {
   const stageWrap = el('div', { class: 'stage-wrap' });
   const legend = el('div', { class: 'legend' });
   container.append(toolbar, layerBar, stageWrap, legend);
+  const stopFill = fillViewport(stageWrap, { until: container, gap: 0, watch: [toolbar, layerBar, legend] });
 
   for (const [m, label] of modes) {
     modeBar.append(el('button', {
@@ -223,6 +224,7 @@ export function createView2D(item, container) {
   }
 
   let fitted = false;
+  let autoFit = false; // still the fitted view: re-fit when the stage resizes
   function fit() {
     const p = panes[0];
     if (!p) return;
@@ -233,6 +235,7 @@ export function createView2D(item, container) {
     view.tx = (pw - w * view.s) / 2;
     view.ty = (ph - h * view.s) / 2;
     fitted = true;
+    autoFit = true;
     applyTransform();
   }
 
@@ -245,6 +248,7 @@ export function createView2D(item, container) {
   }
 
   function zoomAt(px, py, factor) {
+    autoFit = false;
     const s = Math.min(Math.max(view.s * factor, 0.02), 400);
     const f = s / view.s;
     view.tx = px - (px - view.tx) * f;
@@ -281,6 +285,7 @@ export function createView2D(item, container) {
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       if (pointers.size === 1) {
+        if (e.clientX !== prev.x || e.clientY !== prev.y) autoFit = false;
         view.tx += e.clientX - prev.x;
         view.ty += e.clientY - prev.y;
         applyTransform();
@@ -316,7 +321,7 @@ export function createView2D(item, container) {
     if (e.key === 'm') setMode(modes[(idx + 1) % modes.length][0]);
   };
   document.addEventListener('keydown', onKey);
-  const ro = new ResizeObserver(() => { if (fitted) applyTransform(); });
+  const ro = new ResizeObserver(() => { if (autoFit) fit(); else if (fitted) applyTransform(); });
   ro.observe(stageWrap);
 
   // --- viewBox: every SVG of an item shares it, so the first one we can read is enough
@@ -348,6 +353,7 @@ export function createView2D(item, container) {
       stopBlink();
       document.removeEventListener('keydown', onKey);
       ro.disconnect();
+      stopFill();
     },
   };
 }

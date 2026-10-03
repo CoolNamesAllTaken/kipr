@@ -3,7 +3,7 @@
 //   geom[side]               -> footprint geometry json (bbox, pads, courtyard, edge_cuts)
 //   renders[side].layers     -> per-layer SVGs painted onto the board faces
 //   model3d_by_side[side][]  -> STEP copies ("file") + KiCad offset/rotate/scale/hide
-import { el, clear, assetUrl, fetchText, markdown, OFFLINE } from './util.js';
+import { el, clear, assetUrl, fetchText, markdown, OFFLINE, fillViewport } from './util.js';
 
 const SERVE_HINT = 'Run `python3 serve.py` in this folder for the 3D view (see README.txt). Either way it needs access to cdn.jsdelivr.net.';
 
@@ -51,8 +51,10 @@ export function createPanel3D(item, container) {
   const stage = el('div', { class: 'stage3d' }, el('div', { class: 'loading' }, 'Loading 3D viewer…'));
   const labels = el('div', { class: 'labels3d' });
   const status = el('div', { class: 'status3d' });
-  container.append(toolbar, groupsBar, el('div', { class: 'stage3d-wrap' }, stage, labels), status,
+  const wrap = el('div', { class: 'stage3d-wrap' }, stage, labels);
+  container.append(toolbar, groupsBar, wrap, status,
     el('div', { class: 'hint' }, 'Drag to orbit · right-drag / shift-drag to pan · wheel to zoom'));
+  const stopFill = fillViewport(wrap, { until: container, gap: 0, watch: [toolbar, groupsBar, status] });
   let viewer = null;
   let destroyed = false;
 
@@ -144,5 +146,5 @@ export function createPanel3D(item, container) {
       stage.dataset.ready = 'error';
     });
 
-  return { destroy() { destroyed = true; viewer?.destroy(); if (window.__cr3d === viewer) window.__cr3d = null; } };
+  return { destroy() { destroyed = true; stopFill(); viewer?.destroy(); if (window.__cr3d === viewer) window.__cr3d = null; } };
 }
