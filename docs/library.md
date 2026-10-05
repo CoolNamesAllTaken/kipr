@@ -261,7 +261,13 @@ Security notes:
 `library-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`, `lib-3d` (finding
 messages), `klc` (`true`), `klc-error-severity` (`warning`; same value as library-review.yml),
 `pages-url` (default `https://<owner>.github.io/<repo>/`),
-`fail-conclusion` (`neutral`; `failure` lets you require the check, or `success`).
+`fail-conclusion` (`neutral`; `failure` lets you require the check, or `success`), `ping` (`true`).
+
+With `ping: true`, an update of the sticky comment for a new head commit also posts one line at
+the bottom of the PR, e.g. "🔁 Component review updated for `abc1234`: 6 items: 0 fail, 4 warn,
+2 pass · results · viewer", and minimizes the previous one as outdated (deletes it if minimizing
+fails). No ping when the comment was just created or for a re-run of the commit it already
+reports. Only the bot's own pings (hidden `<!-- kipr-ping:library -->` marker) are touched.
 
 `library-review-cleanup.yml`: `kipr-ref`, `kipr-repository`.
 
@@ -350,7 +356,7 @@ The GitHub glue is `kipr library ci <tool>` (each has `--help`):
 | `resolve-pr --meta pr.json --repo o/r --run-head-sha SHA` | verify the PR of a workflow_run |
 | `deploy-pages --repo o/r --pr N --site DIR [--push] [--remote URL]` / `--delete` | gh-pages `pr/<N>/` |
 | `make-comment --site DIR --repo o/r --pr N --head-sha SHA` | print the sticky comment |
-| `post-review --site DIR --repo o/r --pr N --head-sha SHA [--dry-run] [--files-json F]` | comment + inline review + check |
+| `post-review --site DIR --repo o/r --pr N --head-sha SHA [--no-ping] [--dry-run] [--files-json F]` | comment + inline review + check + ping |
 | `fetch-klc-utils DIR` | kicad-library-utils at the pinned commit |
 
 Preview what CI would post without writing anything (`--dry-run` only makes GET requests; add

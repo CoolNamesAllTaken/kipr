@@ -51,6 +51,10 @@ on:
         description: "check-run conclusion for verdict fail: neutral (never blocks), failure or success"
         type: string
         default: neutral
+      ping:
+        description: after an update for a new commit, post a one-line "review updated" comment at the bottom of the PR (earlier ones are minimized)
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -173,7 +177,10 @@ jobs:
           NOTE: ${{ steps.checks.outputs.note }}
           CR_PAGES_URL: ${{ inputs.pages-url }}
           CR_FAIL_CONCLUSION: ${{ inputs.fail-conclusion }}
+          KIPR_PING: ${{ inputs.ping }}
         run: |
+          ping_args=()
+          if [ "$KIPR_PING" != "true" ]; then ping_args=(--no-ping); fi
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
           # Artifacts of the triggering run: the viewer zip and the non-zipped HTML report.
           artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" || echo '{}')
@@ -188,7 +195,7 @@ jobs:
             --head-sha "$HEAD_SHA" ${PAGES_SHA:+--pages-sha "$PAGES_SHA"} \
             ${CR_PAGES_URL:+--pages-url "$CR_PAGES_URL"} \
             --artifact-url "$artifact_url" ${report_url:+--report-url "$report_url"} \
-            --run-url "$run_url" ${NOTE:+--note "$NOTE"} \
+            --run-url "$run_url" ${NOTE:+--note "$NOTE"} "${ping_args[@]}" \
             --comment-out "$RUNNER_TEMP/comment.md"
           cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
 

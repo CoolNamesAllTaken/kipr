@@ -233,15 +233,15 @@ BOT = {"login": "github-actions[bot]"}
 
 def test_post_comment_create_update_skip():
     gh = FakeGitHub([{"id": 1, "user": {"login": "someone"}, "body": MARKER}])  # not ours
-    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=True) == "created"
+    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=True) == ("created", None)
     assert gh.calls == [("POST", "/repos/o/r/issues/3/comments", {"body": "B"})]
     gh = FakeGitHub([{"id": 7, "user": BOT, "body": "x " + MARKER}])
-    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=False) == "updated"
+    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=False)[0] == "updated"
     assert gh.calls == [("PATCH", "/repos/o/r/issues/comments/7", {"body": "B"})]
     gh = FakeGitHub([])
-    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=False) == "skipped" and gh.calls == []
+    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=False) == ("skipped", None) and gh.calls == []
     gh = FakeGitHub([])
-    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=True, dry_run=True) == "created" and gh.calls == []
+    assert post_comment.publish(gh, "o/r", 3, "B", has_projects=True, dry_run=True) == ("created", None) and gh.calls == []
 
 
 def test_post_comment_dry_run_cli_offline(tmp_path, capsys, monkeypatch):

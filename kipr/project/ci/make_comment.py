@@ -12,8 +12,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from .common import (CHECK_KINDS, MARKER, change_lines, code, check_counts, d, font_warning, grid_findings, grid_line, grid_mil,
-                     load_review, md_inline, new_violations, safe_http_url, summary_table, text, truncate, violation_line)
+from kipr.library.ci.ping import link, sha_marker
+
+from .common import (CHECK_KINDS, MARKER, SHA_RE, change_lines, code, check_counts, d, font_warning, grid_findings, grid_line,
+                     grid_mil, load_review, lst, md_inline, new_violations, num, safe_http_url, summary_table, text, truncate,
+                     violation_line)
 
 MAX_COMMENT = 60000  # GitHub's hard limit is 65536 characters
 TITLE = "## KiCad project review"
@@ -92,12 +95,40 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
                 lines += body + ["", "</details>"]
     if sha:
         lines += ["", f"<sub>kipr project review for {md_inline(sha[:12], 12)}.</sub>"]
+        if marker and SHA_RE.fullmatch(sha):
+            lines.append(sha_marker(sha))
     body = "\n".join(lines) + "\n"
     if len(body) > MAX_COMMENT and details:
         return build_comment(doc, run_url, site_url, report_url, data_url, head_sha,
                              (note + " " if note else "") + "Details were too long for a comment; see the report.",
                              details=False, marker=marker)
     return truncate(body, MAX_COMMENT)
+
+
+def ping_line(doc: dict, head_sha: str, results_url=None, run_url=None, failed: bool = False) -> str:
+    """One line for the "review updated" ping, with the sticky comment's numbers (head_sha validated)."""
+    projects = doc["projects"]
+    if not projects:
+        what = "no results" if lst(doc.get("errors")) else "no KiCad project changed"
+    else:
+        parts = []
+        for kind in ("drc", "erc"):
+            cs = [c for p in projects if (c := check_counts(p, kind))]
+            if cs:
+                new, fixed = sum(c[0] for c in cs), sum(c[1] for c in cs)
+                parts.append(f"{new} new / {fixed} fixed {kind.upper()}" if fixed else
+                             f"{new} new {kind.upper()}" if new else f"0 {kind.upper()}")
+        comps = sum(num(d(d(p.get("summary")).get("components")).get(k))
+                    for p in projects for k in ("added", "removed", "moved", "changed"))
+        parts.append(f"{comps} component{'s' if comps != 1 else ''} changed")
+        grids = [d(d(p.get("summary")).get("grid")) for p in projects]
+        if any(grids):
+            parts.append(f"{sum(num(g.get('count')) for g in grids)} off-grid")
+        what = ", ".join(parts)
+    if failed or lst(doc.get("errors")):
+        what += " (⚠️ see the run)"
+    return (f"🔁 KiCad review updated for `{head_sha[:7]}`: {what}"
+            + link("results", safe_http_url(results_url)) + link("run", safe_http_url(run_url)))
 
 
 def main(argv=None) -> int:
