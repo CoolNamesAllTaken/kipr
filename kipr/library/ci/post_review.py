@@ -7,7 +7,9 @@
      or no longer reviewed) get a "no longer reported" note on top, the original text folded
      into <details>, and their review thread resolved; never deleted, humans' comments untouched;
   2. ONE sticky issue comment (hidden `<!-- component-review -->` marker), created or updated;
-  3. a check run "Component review" on the head sha with the overall verdict.
+  3. a check run "Component review" on the head sha with the overall verdict;
+  4. when the sticky comment was updated for a new head sha, a one-line "review updated" ping
+     at the bottom of the PR, earlier pings minimized (kipr.library.ci.ping; --no-ping: off).
 
 --dry-run only issues GET requests (it still reads the PR's file list and existing comments
 if a token / `gh auth` login is available; use --files-json to work fully offline) and prints
@@ -16,7 +18,7 @@ the comment markdown and the review/check payloads.
 Usage:
   kipr library ci post-review --site SITE --repo owner/repo --pr N --head-sha SHA [--pages-sha SHA]
                  [--pages-url URL] [--artifact-url URL] [--run-url URL] [--note TEXT]
-                 [--fail-conclusion neutral|failure|success] [--no-check] [--dry-run]
+                 [--fail-conclusion neutral|failure|success] [--no-check] [--no-ping] [--dry-run]
                  [--files-json FILE] [--comment-out FILE]
   kipr library ci post-review --mark-closed --repo owner/repo --pr N      # after the preview was deleted
 """
@@ -29,9 +31,10 @@ import re
 import sys
 from pathlib import Path
 
+from . import ping
 from .common import (FINDING_MARKER_RE, MARKER, GitHub, check_repo, check_sha, findings_of,
                      item_review, load_site, log, md_block, md_inline, overall_verdict,
-                     parse_pr_number, safe_repo_path)
+                     parse_pr_number, safe_http_url, safe_repo_path, verdict_of)
 from .make_comment import Ctx, build_comment, default_pages_url, finding_key, pr_findings_of
 
 BOT_LOGIN = os.environ.get("CR_BOT_LOGIN", "github-actions[bot]")
@@ -255,7 +258,8 @@ def retire_stale(gh: GitHub, repo: str, pr: int, comments: list[dict], current: 
     return n
 
 
-def upsert_sticky(gh: GitHub, repo: str, pr: int, body: str) -> None:
+def upsert_sticky(gh: GitHub, repo: str, pr: int, body: str) -> dict | None:
+    """-> the sticky comment as it was before (None: just created)."""
     existing = find_sticky(gh, repo, pr)
     if existing:
         gh.request("PATCH", f"/repos/{repo}/issues/comments/{existing['id']}", {"body": body})
@@ -263,6 +267,21 @@ def upsert_sticky(gh: GitHub, repo: str, pr: int, body: str) -> None:
     else:
         c, _ = gh.request("POST", f"/repos/{repo}/issues/{pr}/comments", {"body": body})
         log(f"created sticky comment {c.get('html_url')}")
+    return existing
+
+
+def ping_line(manifest, review, head_sha: str, results_url=None, viewer_url=None) -> str:
+    """One line for the "review updated" ping, with the sticky comment's numbers (head_sha validated)."""
+    n = len(manifest["items"])
+    counts = {"fail": 0, "warn": 0, "pass": 0, None: 0}
+    for i in manifest["items"]:
+        counts[verdict_of(item_review(review, i.get("id")))] += 1
+    what = f"{n} item{'s' if n != 1 else ''}"
+    if n:
+        what += ": " + ", ".join([f"{counts[v]} {v}" for v in ("fail", "warn", "pass")]
+                                 + ([f"{counts[None]} not reviewed"] if counts[None] else []))
+    return (f"🔁 Component review updated for `{head_sha[:7]}`: {what}"
+            + ping.link("results", safe_http_url(results_url)) + ping.link("viewer", safe_http_url(viewer_url)))
 
 
 def mark_closed(gh: GitHub, repo: str, pr: int) -> None:
@@ -290,6 +309,7 @@ def main(argv=None) -> int:
                     choices=["neutral", "failure", "success"])
     ap.add_argument("--no-check", action="store_true", help="don't create a check run")
     ap.add_argument("--no-inline", action="store_true", help="don't submit an inline review")
+    ap.add_argument("--no-ping", action="store_true", help="no 'review updated' ping for a new head sha")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--files-json", type=Path, help="offline: PR files list (GET /pulls/N/files) as JSON")
     ap.add_argument("--comment-out", type=Path, help="also write the comment markdown here")
@@ -343,6 +363,11 @@ def main(argv=None) -> int:
         print("===== check run (POST /repos/%s/check-runs) =====" % repo)
         print(json.dumps(check, indent=2, ensure_ascii=False) if check else "(disabled)")
         print(f"===== {len(already)} finding(s) already posted inline =====")
+        if online and not a.no_ping:
+            previous = find_sticky(gh, repo, pr)
+            print("===== ping =====")
+            print(ping_line(manifest, review, head_sha, previous.get("html_url"), ctx.viewer)
+                  if ping.wanted(True, previous, head_sha) else "(none)")
         if posted and review and not a.no_inline:
             n = len(stale_comments(posted, current_finding_keys(manifest, review)))
             print(f"===== {n} inline comment(s) would be marked no longer reported =====")
@@ -361,7 +386,9 @@ def main(argv=None) -> int:
     # without a review every earlier finding would look stale; keep them as they are then
     if posted and review and not a.no_inline:
         retire_stale(gh, repo, pr, posted, current_finding_keys(manifest, review), head_sha)
-    upsert_sticky(gh, repo, pr, body)
+    previous = upsert_sticky(gh, repo, pr, body)
+    if ping.wanted(not a.no_ping, previous, head_sha):
+        ping.post(gh, repo, pr, "library", ping_line(manifest, review, head_sha, previous.get("html_url"), ctx.viewer))
     if check:
         try:
             gh.request("POST", f"/repos/{repo}/check-runs", check)

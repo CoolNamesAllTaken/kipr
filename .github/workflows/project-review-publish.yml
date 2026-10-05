@@ -30,6 +30,10 @@ on:
         description: where kipr is installed from (owner/repo on github.com)
         type: string
         default: CoolNamesAllTaken/kipr
+      ping:
+        description: after an update for a new commit, post a one-line "review updated" comment at the bottom of the PR (earlier ones are minimized)
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -102,7 +106,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.pr }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          KIPR_PING: ${{ inputs.ping }}
         run: |
+          ping_args=()
+          if [ "$KIPR_PING" != "true" ]; then ping_args=(--no-ping); fi
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
           # artifact ids of the triggering run -> direct download links
           artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" || echo '{}')
@@ -116,7 +123,7 @@ jobs:
           kipr project ci post-comment --data "$UNTRUSTED/data/project-review.json" \
             --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" --run-url "$run_url" \
             --report-url "$(url_of project-review.html)" --site-url "$(url_of project-review-site)" \
-            --data-url "$(url_of project-review-data)" ${note:+--note "$note"} \
+            --data-url "$(url_of project-review-data)" ${note:+--note "$note"} "${ping_args[@]}" \
             --comment-out "$RUNNER_TEMP/comment.md"
           cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kipr.library.ci.common import (GitHub, check_repo, check_sha, load_json, log, md_inline,  # noqa: F401
+from kipr.library.ci.common import (SHA_RE, GitHub, check_repo, check_sha, load_json, log, md_inline,  # noqa: F401
                                     parse_pr_number, safe_http_url, safe_repo_path, truncate, write_outputs)
 
 MARKER = "<!-- kipr-project-review -->"

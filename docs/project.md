@@ -225,7 +225,15 @@ Security notes (same as the library review):
 | `libraries-ref` | default branch | ref of `libraries-repository` |
 | `libraries-path-var` | – | environment variable set to that checkout, for board paths like `${KICAD_LIBS_DIR}/lib_3d/…` (3D models) |
 
-`project-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`.
+`project-review-publish.yml` (privileged): `kipr-ref`, `kipr-repository`, `ping` (`true`).
+
+The sticky comment is edited in place and stays near the top of the PR. With `ping: true`, an
+update for a new head commit also posts one line at the bottom, e.g.
+"🔁 KiCad review updated for `abc1234`: 2 new / 1 fixed DRC, 0 ERC, 5 components changed,
+1 off-grid · results · run", and minimizes the previous one as outdated (deletes it if
+minimizing fails). No ping when the comment was just created or when the run is for the commit
+the comment already reports (a re-run). Only the bot's own pings (hidden
+`<!-- kipr-ping:project -->` marker) are touched. `ping: false` turns it off.
 
 Size budget: the exports get half of `max-artifact-mb` (the viewer adds an offline copy of the
 SVGs). When they don't fit, `kipr project ci limit-size` drops, in order: STEP models, SVGs of
@@ -326,7 +334,7 @@ The GitHub glue is `kipr project ci <tool>` (each has `--help`):
 | `pr-meta --pr N --head-sha … --base-sha … --merge-base … --out DIR` | review | write pr.json |
 | `resolve-pr --meta pr.json --repo o/r --run-head-sha SHA` | publish | verify the PR (same tool as the library review) |
 | `make-comment --data project-review.json [--run-url …] [--report-url …]` | – | print the comment |
-| `post-comment --data … --repo o/r --pr N --head-sha SHA [--dry-run]` | publish | create/update the sticky comment |
+| `post-comment --data … --repo o/r --pr N --head-sha SHA [--no-ping] [--dry-run]` | publish | create/update the sticky comment, ping on a new commit |
 
 Preview the comment for a local review: `kipr project ci make-comment --data review/project-review.json`.
 

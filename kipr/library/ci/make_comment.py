@@ -21,6 +21,7 @@ from .common import (KLC_NOT_CHECKED, MARKER, SEVERITY_RANK, check_repo, klc_not
                      reencode_explanation, reencoded_file_notes, reencoded_summary,
                      md_block, md_code, md_inline, overall_verdict, parse_pr_number, safe_http_url,
                      safe_repo_path, safe_site_file, safe_slug, verdict_of)
+from .ping import sha_marker
 
 MAX_COMMENT = 60000          # GitHub's hard limit is 65536 characters
 IMG_WIDTH = 240
@@ -296,7 +297,7 @@ def build_comment(ctx: Ctx, manifest: dict, review, *, artifact_url: str | None 
         body += block
     if omitted:
         body += f"\n_{omitted} more component(s) omitted to fit GitHub's comment size limit: see the viewer._\n"
-    return body + footer + "\n"
+    return body + footer + "\n" + sha_marker(ctx.head_sha) + "\n"
 
 
 def main(argv=None) -> int:
