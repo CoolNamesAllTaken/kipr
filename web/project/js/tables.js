@@ -280,7 +280,7 @@ function impedanceCard(z) {
   const c = obj(z.count) || {};
   const sec = el('section', { class: 'card impedance-check' });
   const method = `${z.method || 'closed-form estimate'}${z.boarddd ? `, boarddd ${z.boarddd}` : ''}. About ±2 % of a field solver inside the models' validity ranges; fab tolerance is ±10 %. A review aid, not a sign-off.`;
-  sec.append(el('h3', {}, 'Impedance', ' ', el('span', { class: 'muted', title: method }, 'closed-form estimate ⓘ'), ' ',
+  sec.append(el('h3', {}, 'Impedance', ' ', el('span', { class: 'muted imp-method', title: method }, 'closed-form estimate'), ' ',
     num(c.new_violations) && c.new_violations ? badge('sev', 'error', 'newly out of tolerance') : num(c.violations) && c.violations ? badge('sev', 'warning') : null, ' ',
     rows.length ? badge('delta', `${num(c.violations) ? c.violations : 0} / ${num(c.rows) ? c.rows : 0} out of tol.`) : null));
   if (!rows.length) { sec.append(el('p', { class: 'muted' }, 'No net class has an impedance target.')); return sec; }

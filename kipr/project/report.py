@@ -553,7 +553,8 @@ def impedance_section(z) -> str:
         trs.append([f'<span class="b s-{sev}">{esc(r.get("severity"))}</span>',
                     f'<code>{esc(r.get("class"))}</code> <span class="muted">{esc(t.get("kind"))}</span>',
                     esc(r.get("layer")), f'{esc(side.get("structure"))} <span class="muted">{esc(side.get("model"))}</span>',
-                    f"{geo(b)} → {geo(h)}", f'{f(b.get("Z"))} → {f(h.get("Z"))}', zt,
+                    (f"{geo(b)} → {geo(h)}" if b and h and geo(b) != geo(h) else geo(h or b)),
+                    (f'{f(b.get("Z"))} → {f(h.get("Z"))}' if b and h and f(b.get("Z")) != f(h.get("Z")) else f((h or b).get("Z"))), zt,
                     (f'{num(h.get("deviation_pct")):+.1f} %' if num(h.get("deviation_pct")) is not None else "–"),
                     flags.strip() + (f'<br><span class="muted small">{esc("; ".join(notes))}</span>' if notes else "")])
     sc = [d(x) for x in lst(z.get("stackup_changes"))]

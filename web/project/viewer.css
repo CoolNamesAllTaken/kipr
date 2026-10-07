@@ -269,4 +269,5 @@ table.kv th[scope="row"] { width: 1%; white-space: nowrap; font-weight: 500; }
 .imp-ok { color: var(--add); }
 .imp-flags .imp { margin-right: 2px; cursor: help; }
 .imp-warn-dot { color: var(--warn); cursor: help; }
-.impedance tr[title] { cursor: help; }
+.impedance tr[title], .imp-method { cursor: help; }
+.imp-method { text-decoration: underline dotted; }
