@@ -173,7 +173,6 @@ function route() {
   // the view on show goes to its onParams(params, item), which keeps the compare mode, zoom etc.
   const key = p ? `${p.slug}|${r.tab}` : null;
   const same = p && key === state.viewKey && state.view;
-  if (same && r.item === null) r.item = state.route.item; // a link to the tab itself: stay on this item
   state.route = r;
   if (p) rememberRoute(state.tabRoutes, r);
   boxesFromParams(r.params);
@@ -295,7 +294,7 @@ function copyLink(btn) {
 const SHORTCUTS = [
   ['1 – 6', 'switch tab (Schematic, Layout, 3D, BOM, Netlist, ERC/DRC)'],
   ['j / k', 'next / previous project'],
-  ['[ / ]', 'previous / next layer (layout) or sheet (schematic); the compare mode, slider and zoom stay'],
+  ['[ / ]', 'previous / next layer (layout: that one layer, base vs head, in any compare mode) or sheet (schematic); the mode, slider and zoom stay'],
   ['n / p', 'next / previous change (zooms to it)'],
   ['m', 'cycle compare mode (side by side, diff, onion, swipe)'],
   ['v', 'cycle board view (top, bottom, layers)'],

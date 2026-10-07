@@ -423,9 +423,14 @@ test('viewstate: notes when the kept mode does not fit the layer / sheet', () =>
   assert.match(layerNote(L('added'), 'diff'), /only in head/);
   assert.match(layerNote(L('removed'), 'diff'), /only in base/);
   assert.equal(layerNote(L('added'), 'diff', { bothSides: false }), null); // an added project: every layer is
-  assert.equal(layerNote(L('modified'), 'swipe'), null); // no layer picked yet: nothing to explain
-  assert.match(layerNote(L('modified'), 'swipe', { picked: true, view: 'top' }), /Swipe shows the top face/);
-  assert.match(layerNote(L('modified'), 'side', { picked: true, view: 'layers' }), /ticked layers/);
+  assert.match(layerNote(L('unchanged'), 'diff', { solo: false }), /identical/); // Diff always shows one layer
+  // a selected layer in the other modes: base vs head of that layer
+  assert.equal(layerNote(L('modified'), 'swipe'), null);
+  assert.match(layerNote(L('unchanged'), 'side'), /^In1\.Cu is identical in base and head\.$/);
+  assert.match(layerNote(L('added'), 'swipe'), /only in head: the base side is empty/);
+  assert.match(layerNote(L('removed'), 'onion'), /only in base: the head side is empty/);
+  // no layer selected: the board view, nothing to say
+  assert.equal(layerNote(L('unchanged'), 'side', { solo: false }), null);
   assert.equal(layerNote(null, 'diff'), null);
   const S = (status) => ({ id: 'root', status });
   assert.equal(sheetNote(S('modified'), 'diff'), null);

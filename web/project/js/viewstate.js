@@ -81,24 +81,18 @@ export function routeFor(mem, slug, tab) {
   return { slug, tab, item: m?.item ?? null, params: { ...(m?.params || {}) } };
 }
 
-const MODE_TEXT = { side: 'Side by side', onion: 'Onion skin', swipe: 'Swipe', single: 'Single side', diff: 'Diff' };
-
 /**
  * Note for the selected PCB layer under the kept compare mode, or null when the combination is fine.
- * picked: the user chose a layer (click or [ ]) while in a mode that does not show single layers.
+ * solo: a layer is selected (every mode shows it alone); otherwise only Diff shows a single layer.
  */
-export function layerNote(layer, mode, { view = 'top', bothSides = true, picked = false } = {}) {
-  if (!layer || typeof layer.id !== 'string') return null;
+export function layerNote(layer, mode, { bothSides = true, solo = true } = {}) {
+  if (!layer || typeof layer.id !== 'string' || (mode !== 'diff' && !solo)) return null;
   const id = layer.id;
-  if (mode === 'diff') {
-    if (layer.status === 'unchanged') return `${id} is identical in base and head: the diff shows no changes.`;
-    if (bothSides && layer.status === 'added') return `${id} is only in head: all of it shows as added.`;
-    if (bothSides && layer.status === 'removed') return `${id} is only in base: all of it shows as removed.`;
-    return null;
-  }
-  if (!picked) return null;
-  const shows = view === 'layers' ? 'the ticked layers' : `the ${view} face`;
-  return `${id} selected: ${MODE_TEXT[mode] || mode} shows ${shows}; Diff diffs the selected layer.`;
+  const diff = mode === 'diff';
+  if (layer.status === 'unchanged') return `${id} is identical in base and head${diff ? ': the diff shows no changes' : ''}.`;
+  if (bothSides && layer.status === 'added') return `${id} is only in head: ${diff ? 'all of it shows as added' : 'the base side is empty'}.`;
+  if (bothSides && layer.status === 'removed') return `${id} is only in base: ${diff ? 'all of it shows as removed' : 'the head side is empty'}.`;
+  return null;
 }
 
 /** Note for a schematic sheet under the kept compare mode, or null. */

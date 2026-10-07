@@ -39,15 +39,21 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   ticked in Layers, or diffed, widen it to their `extent_mm` (notes often sit beside the board), and
   Fit fits that frame. The layer list reads top to bottom (F.*, In1.Cu, In2.Cu, …, B.*); paint order is
   its reverse. Without WebGL2, or from file://, it shows the per-layer SVG exports instead (with a pixel diff).
-- **View state survives navigation** (`viewstate.js`): picking another layer or sheet (click, `[` / `]`)
-  changes only that. The compare mode, the onion / swipe slider, the board view, the ticked layers, Boxes,
-  the measure tool and the zoom region (the same KiCad-mm region, re-rendered for the new layer; a doc
-  layer that widens the frame keeps it too) stay. Sheets keep the zoom when the paper size matches, else
-  they are fitted. When the kept mode does not suit the new layer or sheet (Diff on an unchanged layer, a
-  sheet only in head), a short note floats over the stage instead of switching modes. The URL holds it
-  all (`z=cx,cy,w`: centre and visible width in mm, absent when fitted; `sw` / `op`: the slider on show;
-  the sliders and the compare mode are shared by the schematic and layout tabs), each new layer / sheet is a history entry (back / forward step through them), a reload or a copied
-  link shows the same view, and tab, project and sidebar links return to each tab as it was left.
+- **Selected layer** (click a layer name, or `[` / `]`; `…/layout/<layer>` in the URL): every compare mode
+  shows that one layer, base vs head (side by side, onion, swipe, head / base only; Diff its diff), in its
+  KiCad colour on a dark ground, the same per-layer gerber render as Diff, without the realistic face.
+  Top / Bottom / Layers clear the selection and show that board view again (no layer in the URL);
+  picking a layer selects one again. The flip of the board view stays (from Bottom, layers are mirrored).
+- **View state survives navigation** (`viewstate.js`): picking another layer or sheet changes only that.
+  The compare mode, the onion / swipe slider, the ticked layers, Boxes, the measure tool and the zoom
+  region (the same KiCad-mm region, re-rendered for the new layer; a doc layer that widens the frame
+  keeps it too) stay. Sheets keep the zoom when the paper size matches, else they are fitted. When the
+  kept mode does not suit the new layer or sheet (an unchanged layer, a layer or sheet only in head), a
+  short note floats over the stage instead of switching modes. The URL holds it all (`z=cx,cy,w`: centre
+  and visible width in mm, absent when fitted; `sw` / `op`: the slider on show; the sliders and the
+  compare mode are shared by the schematic and layout tabs), each new layer / sheet is a history entry
+  (back / forward step through them), a reload or a copied link shows the same view, and tab, project
+  and sidebar links return to each tab as it was left.
 - **Boxes** (`b`, `boxes=0` in the URL, remembered in localStorage): show / hide the boxes around
   changes in the schematic and layout views (every compare mode) and the 3D Markers. Hidden, a selected
   change still zooms there and flashes its outline for a second.
@@ -66,7 +72,7 @@ Every render of a sheet or board frames an explicit box in KiCad mm (never "fit"
 change boxes and the measure tool all share one coordinate system: sheet SVG viewBox = sheet mm, PCB SVG
 viewBox = board mm, gerber (x, y) = (kicad_x − gx, gy − kicad_y) with `board.gerber_origin_mm` = (gx, gy).
 
-Keyboard: `1`–`6` tabs, `j`/`k` project, `[`/`]` previous / next layer or sheet (mode and zoom stay), `n`/`p` change, `m` compare mode,
+Keyboard: `1`–`6` tabs, `j`/`k` project, `[`/`]` previous / next layer (in any compare mode) or sheet; mode and zoom stay, `n`/`p` change, `m` compare mode,
 `v` board view, `f` fit, `r` measure, `t` theme, `/` filter, `Esc` clear, `?` help. Dark/light follows the
 system until toggled (remembered per browser; `data-theme` on `<html>`, which `pcba3d/` reads too).
 

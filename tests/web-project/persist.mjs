@@ -4,8 +4,10 @@
 //
 // Layout: in swipe (slider at 30%), side by side and diff, zoomed in with the boxes hidden, clicking
 // three layers in turn and stepping with [ / ] change only the selected layer: the compare mode, the
-// slider, the zoom region (px/mm and transform), the Boxes toggle and the ticked layers stay, and the
-// URL names the new layer with the same mode / sw / z. In diff a doc layer (Dwgs.User) reframes the
+// slider, the zoom region (px/mm and transform), the Boxes toggle and the ticked layers stay, the URL
+// names the new layer with the same mode / sw / z, and the panes show that layer (their pixels change
+// per layer; base and head both drawn). Top / Bottom / Layers clear the selection (the board view, no
+// layer in the URL) and a layer click selects one again. In diff a doc layer (Dwgs.User) reframes the
 // world but keeps the region on show. Back / forward return to the previous layer with that state, a
 // reload restores it, and a tab switch comes back to it. Schematic: the same for sheets (all A4 in the
 // mock, so the zoom stays too), including a sheet that is only in head (mode kept, note shown).
@@ -51,6 +53,30 @@ const snapshot = () => page.evaluate(() => {
     note: [...document.querySelectorAll('.layer-note, .sheet-note')].filter((n) => !n.hidden).map((n) => n.textContent).join(' '),
   };
 });
+
+/** What the panes draw: a checksum of every layer canvas (whole bitmap, not just the visible part). */
+const pixels = () => page.evaluate(() => {
+  let h = 0;
+  let n = 0;
+  for (const c of document.querySelectorAll('.pane canvas.layer-canvas')) {
+    if (!c.width || !c.height) continue;
+    n++;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    const step = Math.max(4, Math.floor(d.length / 200000) * 4);
+    for (let i = 0; i < d.length; i += step) h = (h * 31 + d[i] + 3 * d[i + 1] + 7 * d[i + 2] + 11 * d[i + 3]) % 2147483647;
+    h = (h * 31 + c.width * 7 + c.height) % 2147483647;
+  }
+  return { h, n, sides: [...document.querySelectorAll('.pane .layer-holder')].map((x) => x.dataset.side).sort().join(',') };
+});
+
+/** Clicking / stepping to another layer redrew the panes with it (a different picture, both sides). */
+async function redrawn(tag, before, id) {
+  const now = await pixels();
+  check(now.h !== before.h, `${tag}: the panes look the same as before (not redrawn for ${id})`);
+  const both = await page.evaluate(() => [...document.querySelectorAll('.pane .layer-holder')].length);
+  check(both === 2, `${tag}: ${both} layer holders on show, expected base + head`);
+  return now;
+}
 const parseZ = (z) => (z ? z.split(',').map(Number) : null);
 const closeZ = (p, q) => !!p && !!q && Math.abs(p[0] - q[0]) <= p[2] * 0.01 && Math.abs(p[1] - q[1]) <= p[2] * 0.01 && Math.abs(p[2] - q[2]) <= p[2] * 0.01;
 
@@ -104,13 +130,17 @@ async function layout() {
   await stable();
   let s0 = await snapshot();
   check(s0.mode === 'swipe' && s0.slider === 0.3 && s0.sw === '0.3' && s0.z && s0.boxes === 'false', `layout setup: ${JSON.stringify(s0)}`);
+  check(s0.view === null, `layout setup: a layer is selected but the board view ${s0.view} is still marked`);
+  let px = await pixels();
   for (const id of ['B.Cu', 'F.SilkS', 'Edge.Cuts']) {
     await clickLayer(id);
     await stable();
     const s1 = await snapshot();
     same(`layout swipe click ${id}`, s0, s1, id);
+    px = await redrawn(`layout swipe click ${id}`, px, id);
     check(s1.selected === id, `layout swipe click ${id}: selected row is ${s1.selected}`);
-    check(/selected/.test(s1.note), `layout swipe click ${id}: no note that swipe shows the face (${s1.note})`);
+    if (id === 'Edge.Cuts') check(/identical/.test(s1.note), `layout swipe on unchanged Edge.Cuts: no note (${s1.note})`);
+    else check(!s1.note, `layout swipe click ${id}: unexpected note "${s1.note}"`);
   }
   await shot('layout-swipe-after-clicks');
   // [ / ] in list order (top of the stack first): from Edge.Cuts
@@ -121,17 +151,35 @@ async function layout() {
     await stable();
     at = (at + (key === ']' ? 1 : -1) + order.length) % order.length;
     same(`layout swipe key ${key}`, s0, await snapshot(), order[at]);
+    if (a.mode !== 'file') px = await redrawn(`layout swipe key ${key}`, px, order[at]); // drills have no SVG
   }
+
+  // Top clears the selection: the realistic face, no layer in the URL, mode / slider / zoom kept; a
+  // layer click selects one again
+  await page.locator('.seg[aria-label="Board view"] .seg-btn[data-mode="top"]').click();
+  await stable();
+  let sb = await snapshot();
+  check(sb.view === 'top' && sb.item === '' && sb.selected === null, `layout Top: view ${sb.view}, URL item "${sb.item}", selected ${sb.selected}`);
+  check(sb.mode === s0.mode && sb.slider === s0.slider && sb.zoom === s0.zoom && sb.sw === s0.sw, `layout Top: mode / slider / zoom changed (${JSON.stringify(sb)})`);
+  check((await pixels()).h !== px.h, 'layout Top: still the single layer on show');
+  await clickLayer('B.Cu');
+  await stable();
+  sb = await snapshot();
+  check(sb.view === null && sb.item === 'B.Cu' && sb.mode === 'swipe' && sb.zoom === s0.zoom, `layout re-select: ${JSON.stringify(sb)}`);
+  px = await pixels();
 
   // side by side, zoomed elsewhere
   await pickMode('side');
   await zoomIn(2);
   s0 = await snapshot();
   check(s0.mode === 'side' && s0.hashMode === 'side', `layout side setup: ${s0.mode}`);
+  px = await pixels();
   for (const id of ['F.Cu', 'B.Mask', 'F.Paste']) {
     await clickLayer(id);
     await stable();
     same(`layout side click ${id}`, s0, await snapshot(), id);
+    px = await redrawn(`layout side click ${id}`, px, id);
+    check(await page.locator('.pane').count() === 2, `layout side click ${id}: not two panes`);
   }
   for (const key of [']', '[', '[']) {
     const before = (await snapshot()).item;
@@ -140,6 +188,7 @@ async function layout() {
     const s1 = await snapshot();
     check(s1.item !== before, `layout side key ${key}: layer did not change`);
     same(`layout side key ${key}`, s0, s1, s1.item);
+    px = await redrawn(`layout side key ${key}`, px, s1.item);
   }
 
   // diff: re-rendered for each layer at the same region; an unchanged layer keeps diff with a note
