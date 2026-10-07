@@ -9,7 +9,7 @@ bash run_all.sh [--quick] [--real OUT]       # everything below; SHOTS=dir keeps
 | file | what |
 |---|---|
 | `make_mock.py` | synthetic contract-conformant OUT: 3 projects (modified / added / removed), A4 sheets, RS-274X gerbers, Excellon drills, per-layer SVGs, BOM, netlist, ERC/DRC. `--site` also copies the viewer in. Nothing from a real design. |
-| `unit.test.mjs` | `node --test`: routing, view-state merge (viewstate.js), ink diff + regions, board frame maths, layer order, pan/zoom maths, URL filters, table filters, view helpers |
+| `unit.test.mjs` | `node --test`: routing, view-state merge (viewstate.js) and the URL format of view2d's zoom / slider strings, board frame maths, layer order, KiCad ⇄ view2d frame, `STAGE_CSS` in viewer.css, URL filters, table filters, view helpers |
 | `test_site.py` | `python3 -m unittest`: site copy, file:// bundle, data.js escaping, pack confinement, report content/size cap/ink diff |
 | `screens.mjs` | playwright smoke test: every view in light + dark, desktop + narrow; fails on page errors, console errors, failed requests; `--mode file` opens from disk; for any other OUT (`--site`) it derives the views from its JSON |
 | `persist.mjs` | playwright: clicking layers / sheets and `[` `]` keep the compare mode, slider, zoom region and Boxes (swipe, side by side, diff; a doc layer reframes but keeps the region); the panes redraw with the selected layer (pixels change per layer in side by side and swipe), Top / Bottom / Layers clear the selection; the URL follows; back / forward, reload and tab switches restore the view |

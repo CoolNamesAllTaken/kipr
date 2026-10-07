@@ -85,11 +85,16 @@ letting the browser re-rasterise a vector `<img>` on every pan and zoom.
 `index.html` loads `js/boot.js`, a classic script. Over http(s) it loads `js/app.js` as a module. From disk it
 loads `data.js` (`window.KIPR_DATA = {review}`) and `js/bundle.js` (the same modules as one classic script),
 and the SVGs, gerbers and drill files come from `offline/<slug>.js` packs (file:// images would taint the
-canvas, and fetch() is blocked). The gerber renderer can't be imported as a module from disk, so the layout
-tab takes it from the committed classic-script 3D bundle `pcba3d/pcba3d.bundle.js`
-(`window.KIPR_GERBER = {gerber, wasmGlue}`: boarddd/gerber and the wasm-bindgen glue) with its WASM from `offline/pcba3d-vendor.js`: the
-layout tab renders gerbers from disk too. Without WebGL2 (or without the bundle) it shows the per-layer SVG
-exports. The 3D tab loads the same bundle and its GLB packs `offline/pcba3d-<slug>.js`; it reads the fab
+canvas, and fetch() is blocked). boarddd can't be imported as modules from disk, so the layout and
+schematic tabs take it from the committed classic-script 3D bundle `pcba3d/pcba3d.bundle.js`
+(`window.KIPR_GERBER = {gerber, view2d, wasmGlue}`: boarddd/gerber, boarddd/view2d and the wasm-bindgen
+glue) with its WASM from `offline/pcba3d-vendor.js`: gerbers render from disk too. Without WebGL2 it shows
+the per-layer SVG exports; without the bundle the two tabs ask for `serve.py`.
+
+The 2D stage of both tabs (pan / zoom, synced panes, compare modes, ink diff, measure, overlays) is
+boarddd/view2d; `js/stage2d.js` adapts it to the KiCad frame, the readouts and the change boxes. The CSP
+refuses the `<style>` view2d would inject, so `viewer.css` carries its `STAGE_CSS` (a unit test keeps the
+copy in sync). The 3D tab loads the same bundle and its GLB packs `offline/pcba3d-<slug>.js`; it reads the fab
 files from the project pack (see `pcba3d/README.md`).
 
 ## Security
@@ -113,7 +118,7 @@ Everything comes from a pull request, so the same rules as the library viewer ap
 ## Third-party code
 
 `vendor/boarddd` and `vendor/three` are symlinks into `web/vendor/` (see `web/vendor/README.md`): boarddd
-(MIT) brings the gerber renderer, `boarddd/gerber`, built on
+(MIT) brings the 2D stage `boarddd/view2d` and the gerber renderer, `boarddd/gerber`, built on
 [wasm-gerber-viewer](https://github.com/dsafdsaf132/wasm-gerber-viewer) (MIT) with its wasm under
 `vendor/boarddd/third_party/wasm-gerber-renderer/core/`. Nothing is loaded from a CDN.
 

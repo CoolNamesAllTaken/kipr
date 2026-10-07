@@ -159,45 +159,52 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 @media (max-width: 760px) { .readout:not(.measure) { display: none; } }
 
 /* --fill-h: the window height left below the stage's top (fillViewport); phones scroll the page instead */
-.stage-wrap { height: var(--fill-h, 66vh); min-height: 360px; display: grid; grid-template-columns: 1fr; gap: 6px; }
-.stage-wrap.split { grid-template-columns: 1fr 1fr; }
+.stage-wrap { position: relative; height: var(--fill-h, 66vh); min-height: 360px; }
 /* note on the kept compare mode vs the selected layer / sheet: floats over the stage, so showing or hiding
    it never resizes the stage (stepping through layers keeps the board exactly where it was) */
 .view-note { position: relative; height: 0; z-index: 5; }
 .view-note > .notice { position: absolute; top: 38px; /* below the pane labels */ left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); width: max-content;
   margin: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); pointer-events: none; }
-@media (max-width: 760px) { .stage-wrap { height: 62vh; height: 62svh; } .stage-wrap.split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
-.pane { position: relative; overflow: hidden; border-radius: 6px; cursor: grab; touch-action: none; user-select: none; border: 1px solid var(--border); }
-.pane.grabbing { cursor: grabbing; }
-.pane.measuring { cursor: crosshair; }
-.stage-wrap.paper .pane { background: var(--paper); }
-.stage-wrap.board .pane { background: var(--board-real); }
-.stage-wrap.board.dark .pane { background: var(--board); }
-.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.world img, .world canvas { pointer-events: none; display: block; }
-.sheet-img { position: absolute; }
-.layer-holder, .diff-holder { position: absolute; }
-.layer-holder > img, .layer-holder > canvas, .diff-holder > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-.layer-slot { position: absolute; }
-.layer-slot > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.layer-holder > .sheet-img { position: absolute; inset: 0; width: 100%; height: 100%; }
-.layer-holder.faint { opacity: .3; filter: grayscale(1); }   /* the board under a diff: context only, never coloured */
-.diff-canvas { image-rendering: auto; }
-svg.overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; transform-origin: 50% 50%; }
-svg.overlay { --px: 0.25; }
-svg.overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .6); stroke-width: calc(var(--px) * 1.5px); stroke-dasharray: calc(var(--px) * 5px) calc(var(--px) * 3px); }
-svg.overlay .mark.outline { fill: none; }
-svg.overlay .hl { fill: none; stroke: var(--hl); stroke-width: calc(var(--px) * 3px); animation: pulse 1.2s ease-in-out 3; }
-@keyframes pulse { 50% { stroke-width: calc(var(--px) * 7px); stroke-opacity: .5; } }
-svg.overlay .hl.flash { animation: flash 1s ease-out 1 forwards; } /* boxes hidden: outline the selected change briefly */
+@media (max-width: 760px) { .stage-wrap { height: 62vh; height: 62svh; } .stage-wrap.split .bd2-stage { flex-direction: column; } }
+.stage-busy { position: absolute; left: 10px; bottom: 8px; z-index: 3; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: rgba(0, 0, 0, .55); color: #fff; pointer-events: none; }
+
+/* boarddd/view2d's STAGE_CSS, verbatim (the CSP refuses the <style> it would inject; unit.test.mjs keeps it in sync) */
+.bd2-stage{position:relative;display:flex;gap:2px;width:100%;height:100%;overflow:hidden}
+.bd2-pane{position:relative;flex:1 1 0;min-width:0;overflow:hidden;touch-action:none;user-select:none;cursor:grab}
+.bd2-pane.bd2-grabbing{cursor:grabbing}
+.bd2-pane.bd2-measuring{cursor:crosshair}
+.bd2-slot{position:absolute;inset:0;pointer-events:none}
+.bd2-slot canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+.bd2-overlay{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.bd2-world *{vector-effect:non-scaling-stroke}
+.bd2-label{position:absolute;top:6px;left:6px;padding:1px 6px;border-radius:3px;font:12px system-ui,sans-serif;background:rgba(0,0,0,.55);color:#fff;pointer-events:none}
+.bd2-label.bd2-right{left:auto;right:6px}
+.bd2-missing{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:13px system-ui,sans-serif;color:#888;pointer-events:none}
+.bd2-measure line{stroke:#ffd23f;stroke-width:1.5}
+.bd2-measure circle{fill:none;stroke:#ffd23f;stroke-width:1.5}
+.bd2-measure text{fill:#ffd23f;font:12px system-ui,sans-serif;paint-order:stroke;stroke:#000;stroke-width:3px}
+/* end STAGE_CSS */
+
+/* kipr's look on the view2d stage */
+.bd2-stage { gap: 6px; }
+.bd2-pane { border-radius: 6px; border: 1px solid var(--border); }
+.stage-wrap.paper .bd2-pane { background: var(--paper); }
+.stage-wrap.board .bd2-pane { background: var(--board-real); }
+.stage-wrap.board.dark .bd2-pane { background: var(--board); }
+.bd2-underlay { filter: grayscale(1); }   /* the board under a diff: context only, never coloured */
+.bd2-overlay .mark { fill: rgba(255, 176, 0, .06); stroke: rgba(255, 176, 0, .6); stroke-width: 1.5px; stroke-dasharray: 5 3; }
+.bd2-overlay .mark.outline { fill: none; }
+.bd2-overlay .hl { fill: none; stroke: var(--hl); stroke-width: 3px; animation: pulse 1.2s ease-in-out 3; }
+@keyframes pulse { 50% { stroke-width: 7px; stroke-opacity: .5; } }
+.bd2-overlay .hl.flash { animation: flash 1s ease-out 1 forwards; } /* boxes hidden: outline the selected change briefly */
 @keyframes flash { 0%, 60% { stroke-opacity: 1; } 100% { stroke-opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { svg.overlay .hl, svg.overlay .hl.flash { animation: none; } }
-svg.overlay .measure-line { stroke: #00e5ff; stroke-width: calc(var(--px) * 2px); }
-svg.overlay .measure-pt { fill: #00e5ff; r: calc(var(--px) * 4px); }
-.missing-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #8b949e; font-size: 20px; border: 2px dashed #8b949e; padding: 16px 20px; border-radius: 8px; white-space: nowrap; }
-.pane-label { position: absolute; top: 6px; right: 8px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .6); padding: 1px 8px; border-radius: 10px; pointer-events: none; }
-.pane-label.left { right: auto; left: 8px; }
-.swipe-handle { position: absolute; top: 0; bottom: 0; width: 2px; background: #ffd33d; pointer-events: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, .4); }
+@media (prefers-reduced-motion: reduce) { .bd2-overlay .hl, .bd2-overlay .hl.flash { animation: none; } }
+.bd2-measure line { stroke: #00e5ff; stroke-width: 2; }
+.bd2-measure circle { fill: #00e5ff; stroke: none; r: 4px; }
+.bd2-missing { color: #8b949e; font-size: 20px; } /* "not in base" */
+.bd2-label { left: auto; right: 8px; font-size: 12px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, .6); padding: 1px 8px; border-radius: 10px; font-family: inherit; }
+.bd2-stage .bd2-pane[data-side="swipe"] .bd2-label:not(.bd2-right) { right: auto; left: 8px; }
+.bd2-swipe svg line { stroke: #ffd33d; }
 .legend { display: flex; gap: 6px 14px; font-size: 12px; margin-top: 6px; flex-wrap: wrap; }
 .legend:empty { display: none; }
 .key::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }

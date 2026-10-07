@@ -2,13 +2,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHash, formatHash, TABS } from '../../web/project/js/route.js';
-import { inkMask, alphaMask, dilate, diffMasks, paintDiff, regions } from '../../web/project/js/inkdiff.js';
 import {
   sortLayers, copperIndex, isDocLayer, docExtent, frameBox, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
-import { fitTransform, zoomAbout, regionOf, viewForRegion } from '../../web/project/js/panzoom.js';
+import { kicadFrame, measureText } from '../../web/project/js/stage2d.js';
+// the URL's z= / sw= / op= strings are boarddd/view2d's (vendored): pinned here so old links keep working
 import {
-  mergeParams, formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, sameSize, stepItem, rememberRoute, routeFor, layerNote, sheetNote,
+  formatRegion as formatZoom, parseRegion as parseZoom, sameRegion as sameZoom, formatSlider as sliderParam, parseSlider,
+} from '../../web/vendor/boarddd/src/view2d/viewstate.js';
+import {
+  mergeParams, sameSize, stepItem, rememberRoute, routeFor, layerNote, sheetNote,
 } from '../../web/project/js/viewstate.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
 import { matchesQuery, statusCounts, sheetSpotHash, gridGroups } from '../../web/project/js/tables.js';
@@ -50,65 +53,6 @@ test('route: hostile input never throws and drops odd param names', () => {
   assert.equal(r.params.ok, '%');
   assert.ok(!('<script>' in r.params));
   assert.ok(!('x y' in r.params));
-});
-
-// --- inkdiff -------------------------------------------------------------------------------------
-
-function rgba(w, h, inkAt) {
-  const d = new Uint8ClampedArray(w * h * 4);
-  for (let i = 0; i < w * h; i++) {
-    const [r, g, b, a] = inkAt(i % w, Math.floor(i / w)) ? [0, 0, 0, 255] : [255, 255, 255, 255];
-    d.set([r, g, b, a], i * 4);
-  }
-  return d;
-}
-
-test('inkdiff: white paper is not ink, dark opaque is', () => {
-  const m = inkMask(rgba(4, 1, (x) => x === 2), 4, 1);
-  assert.deepEqual([...m], [0, 0, 1, 0]);
-  const t = new Uint8ClampedArray([0, 0, 0, 10, 0, 0, 0, 255]);
-  assert.deepEqual([...inkMask(t, 2, 1)], [0, 1]);
-  assert.deepEqual([...alphaMask(new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 0]), 2, 1)], [1, 0]);
-});
-
-test('inkdiff: dilate is a square of radius r, clipped at the edges', () => {
-  const m = new Uint8Array(25); m[12] = 1;
-  const d = dilate(m, 5, 5, 1);
-  assert.equal(d.reduce((a, b) => a + b, 0), 9);
-  const e = new Uint8Array(25); e[0] = 1;
-  assert.equal(dilate(e, 5, 5, 2).reduce((a, b) => a + b, 0), 9);
-  assert.deepEqual([...dilate(m, 5, 5, 0)], [...m]);
-});
-
-test('inkdiff: classify removed / added / common with tolerance', () => {
-  const w = 20; const h = 1;
-  const base = inkMask(rgba(w, h, (x) => x === 2 || x === 10), w, h);
-  const head = inkMask(rgba(w, h, (x) => x === 3 || x === 16), w, h);
-  const d = diffMasks(base, head, w, h, 1);
-  // 2 vs 3 is within 1 px: common; 10 only in base: removed; 16 only in head: added
-  assert.deepEqual(d.counts, { removed: 1, added: 1, common: 2 });
-  assert.equal(d.removed[10], 1);
-  assert.equal(d.added[16], 1);
-  const strict = diffMasks(base, head, w, h, 0);
-  assert.deepEqual(strict.counts, { removed: 2, added: 2, common: 0 });
-  const out = paintDiff(new Uint8ClampedArray(w * 4), d);
-  assert.deepEqual([...out.slice(40, 44)], [225, 40, 40, 255]);
-  assert.deepEqual([...out.slice(64, 68)], [30, 175, 70, 255]);
-  assert.equal(out[3], 0);
-});
-
-test('inkdiff: regions merge nearby pixels and drop noise', () => {
-  const w = 40; const h = 20;
-  const m = new Uint8Array(w * h);
-  const set = (x, y) => { m[y * w + x] = 1; };
-  for (let x = 2; x < 6; x++) for (let y = 2; y < 4; y++) set(x, y); // blob A (8 px)
-  for (let x = 8; x < 10; x++) for (let y = 2; y < 4; y++) set(x, y); // 2 px gap from A: merged
-  for (let x = 30; x < 34; x++) for (let y = 10; y < 14; y++) set(x, y); // blob B
-  set(20, 18); // single noise pixel
-  const r = regions(m, w, h, { gap: 4, minPixels: 3 });
-  assert.equal(r.length, 2);
-  assert.deepEqual(r[0], { x: 2, y: 2, w: 8, h: 2, pixels: 12 });
-  assert.deepEqual(r[1], { x: 30, y: 10, w: 4, h: 4, pixels: 16 });
 });
 
 // --- board ---------------------------------------------------------------------------------------
@@ -194,21 +138,6 @@ test('board: rect, origin, style from the contract', () => {
   assert.equal(union([]), null);
   assert.deepEqual(grow({ x: 1, y: 1, w: 2, h: 2 }, 1), { x: 0, y: 0, w: 4, h: 4 });
   assert.equal(layerColor({ id: 'weird', kind: 'nope' }).length, 3);
-});
-
-// --- panzoom math --------------------------------------------------------------------------------
-
-test('panzoom: fit centres the box, zoom keeps the anchor point fixed', () => {
-  const v = fitTransform({ x: 0, y: 0, w: 200, h: 100 }, 400, 400, 0);
-  assert.equal(v.s, 2);
-  assert.equal(v.tx, 0);
-  assert.equal(v.ty, 100);
-  const z = zoomAbout(v, 100, 150, 2);
-  assert.equal(z.s, 4);
-  // world point under (100, 150) stays under it
-  assert.equal((100 - v.tx) / v.s, (100 - z.tx) / z.s);
-  assert.equal((150 - v.ty) / v.s, (150 - z.ty) / z.s);
-  assert.equal(zoomAbout({ s: 1, tx: 0, ty: 0 }, 0, 0, 1e9).s, 2000);
 });
 
 // --- util ----------------------------------------------------------------------------------------
@@ -441,24 +370,31 @@ test('viewstate: notes when the kept mode does not fit the layer / sheet', () =>
   assert.equal(sheetNote(S('added'), 'single', { hasBase: false, bothSides: false }), null);
 });
 
-test('panzoom: region of a view round trips (also mirrored), independent of pane size', () => {
-  const box = { x: 100, y: 50, w: 80, h: 60 };
-  for (const flip of [false, true]) {
-    const v = { tx: -300, ty: -120, s: 3.5 };
-    const r = regionOf(v, 800, 600, box, flip);
-    const v2 = viewForRegion(r, 800, 600, box, flip);
-    for (const k of ['tx', 'ty', 's']) assert.ok(Math.abs(v2[k] - v[k]) < 1e-9, `${flip} ${k}`);
-    // a pane of another size shows the same centre and width
-    const r2 = regionOf(viewForRegion(r, 400, 900, box, flip), 400, 900, box, flip);
-    for (const k of ['cx', 'cy', 'w']) assert.ok(Math.abs(r2[k] - r[k]) < 1e-9, `${flip} ${k} other pane`);
-  }
-  // the fitted view of the whole world is centred on it
-  const fit = fitTransform({ x: 0, y: 0, w: box.w * 4, h: box.h * 4 }, 800, 600, 0);
-  const r = regionOf(fit, 800, 600, box);
-  assert.ok(Math.abs(r.cx - 140) < 1e-9 && Math.abs(r.cy - 80) < 1e-9);
-  // the same KiCad point is the centre in the top and the mirrored bottom view
-  const top = viewForRegion({ cx: 110, cy: 60, w: 20 }, 800, 600, box, false);
-  const bottom = viewForRegion({ cx: 110, cy: 60, w: 20 }, 800, 600, box, true);
-  assert.ok(Math.abs(regionOf(bottom, 800, 600, box, true).cx - 110) < 1e-9);
-  assert.notEqual(top.tx, bottom.tx);
+// --- KiCad frame <-> view2d world (stage2d.js) ------------------------------------------------------
+
+test('stage2d: KiCad mm (y down) <-> view2d world (y up, from the gerber origin), boxes and regions', () => {
+  const f = kicadFrame([100, 50]);
+  assert.deepEqual(f.point(110, 60), [10, -10]);
+  assert.deepEqual(f.kicad(...f.point(123.4, -7.5)), [123.4, -7.5]);
+  const b = { x: 120, y: 40, w: 30, h: 20 };
+  assert.deepEqual(f.bounds(b), { minX: 20, maxX: 50, minY: -10, maxY: 10 });
+  assert.deepEqual(f.box(f.bounds(b)), b);
+  const r = { cx: 124.76, cy: 88.68, w: 7.027 };
+  assert.deepEqual(f.toKicad(f.toWorld(r)), r);
+  assert.equal(f.toWorld(null), null);
+  // the schematic: no origin, y negated
+  assert.deepEqual(kicadFrame().bounds({ x: 0, y: 0, w: 297, h: 210 }), { minX: 0, maxX: 297, minY: -210, maxY: 0 });
+});
+
+test('stage2d: measure readout in KiCad mm', () => {
+  assert.equal(measureText([], true), 'click two points');
+  assert.equal(measureText([], false), '');
+  assert.equal(measureText([{ x: 0, y: 0 }, { x: 3, y: 4 }], true), 'Δx 3.000  Δy 4.000  d 5.000 mm');
+});
+
+
+test('viewer.css carries view2d STAGE_CSS verbatim (the CSP refuses the <style> view2d would inject)', async () => {
+  const { STAGE_CSS } = await import('../../web/vendor/boarddd/src/view2d/stage.js');
+  const css = (await import('node:fs')).readFileSync(new URL('../../web/project/viewer.css', import.meta.url), 'utf8');
+  assert.ok(css.includes(STAGE_CSS.trim()), 'viewer.css: paste the vendored STAGE_CSS between the STAGE_CSS markers');
 });

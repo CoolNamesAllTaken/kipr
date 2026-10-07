@@ -9,3 +9,5 @@ https://github.com/CoolNamesAllTaken/wasm-gerber-viewer at `92976b5a4b2cf5b42b1e
 - `core/wasm/`: `wasm_gerber_processor.js` + `_bg.wasm` built from `crate/` by scripts/build-wasm.sh;
   BUILD.json records the source hash and toolchain (CI checks it).
 - `crate/`: the fork's `wasm/` Rust crate (wasm_gerber_processor) and `rust-toolchain.toml`.
+- `odb/`: `js/src/odb` (the ODB++ job loader) without the Node-only `archive/zip-node.js`, and `js/core/config.js` as
+  `odb/core-config.js`; `src/gerber/odb.js` (`loadOdbJob`) wraps it.

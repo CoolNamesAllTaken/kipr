@@ -1,23 +1,23 @@
 // Layout diff: gerber-rendered board (realistic top/bottom faces and a per-layer view), layer toggles,
 // per-layer pixel diff, side-by-side / onion / swipe, change list that zooms, measure tool.
-// Without WebGL2 (or from file://) it falls back to the per-layer SVG exports.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam, fillViewport } from './util.js';
-import { createStage, PX_PER_MM } from './panzoom.js';
+// Without WebGL2 (or from file:// without the offline renderer) it falls back to the per-layer SVG exports.
+// The stage, the renders and the compare modes are boarddd/view2d (stage2d.js); this is the app around it.
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, debounce, parseAtParam, fillViewport, assetUrl, OFFLINE } from './util.js';
+import { loadView2d, view2dNow, createKiprStage } from './stage2d.js';
 import { createChangeList, describeChange } from './changes.js';
-import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
-import { formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, stepItem, layerNote } from './viewstate.js';
+import { showCompare, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
+import { stepItem, layerNote } from './viewstate.js';
 import {
   layerList, sortLayers, defaultOn, docExtent, frameBox, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
   layerColor, cssColor, grow, union,
 } from './board.js';
-import { renderGerbers, renderFace, renderLayerDiff, gerberUnavailableReason } from './gerber.js';
+import { getRenderer, gerberUnavailableReason } from './gerber.js';
 
 const MODES = [['side', 'Side by side'], ['diff', 'Diff'], ['onion', 'Onion skin'], ['swipe', 'Swipe']];
 const VIEWS = [['top', 'Top'], ['bottom', 'Bottom'], ['layers', 'Layers']];
-// same red / green / grey as the SVG and schematic diffs (inkdiff.js DIFF_COLORS)
+// same red / green / grey as the SVG and schematic ink diffs (boarddd/view2d DIFF_COLORS)
 const GPU_DIFF_COLORS = { removed: [0.88, 0.16, 0.16], added: [0.12, 0.69, 0.27], unchanged: [0.43, 0.43, 0.43] };
 const LAYER_ALPHA = { copper: 0.85, mask: 0.45, paste: 0.6, silk: 0.95, outline: 1, drill: 1, fab: 0.8, courtyard: 0.8, user: 0.7 };
 const layerVisible = new Map(); // persists across projects, like the library viewer's layer state
@@ -71,19 +71,18 @@ export function createLayoutView(project, container, ctx) {
   const urlLayer = layers.find((l) => l.id === ctx.route.item);
   let focus = urlLayer || pickDiffLayer(layers, view);
   let solo = !!urlLayer;
-  setCompareSliders({ swipe: parseSlider(params.sw), opacity: parseSlider(params.op) });
   let destroyed = false;
-  let stage = null;
+  let stage = null; // createKiprStage(): view2d stage in KiCad terms
+  let cmp = null; // view2d compare on show
   let svgBoxes = new Map(); // svg path -> viewBox
-  let renderR = 0;
-  const cache = new Map();
-  const modeCleanups = [];
+  const cache = new Map(); // content key -> Promise<view2d content>: the same object keeps its tiles
 
   // --- shell
   const readout = el('span', { class: 'readout' });
   const zoomLbl = el('span', { class: 'readout zoom' });
   const measureOut = el('span', { class: 'readout measure' });
-  const modeBar = createModeBar(modes, mode, (m) => { setMode(m); pushRoute(); });
+  // the panes change (side by side <-> one), so the region's width does: write the URL again once shown
+  const modeBar = createModeBar(modes, mode, (m) => { setMode(m).then((shown) => { if (shown) pushRoute(); }); pushRoute(); });
   const viewBar = createModeBar(VIEWS, solo ? null : view, (v) => { showBoard(v); pushRoute(); }, 'Board view');
   const measureBtn = el('button', { class: 'btn', title: 'Measure distance (r): click two points', 'aria-pressed': 'false', onclick: () => toggleMeasure() }, 'Measure');
   const extra = el('div', { class: 'toolbar-extra' });
@@ -171,8 +170,10 @@ export function createLayoutView(project, container, ctx) {
   }
   function viewParams() {
     const sl = compareSliders();
-    const z = formatZoom(stage?.region());
-    const out = { z, sw: sliderParam(sl.swipe, mode === 'swipe'), op: sliderParam(sl.opacity, mode === 'onion') };
+    const v = view2dNow();
+    if (!v) return {}; // not loaded yet: the URL keeps what it has
+    const z = v.formatRegion(stage?.region());
+    const out = { z, sw: v.formatSlider(sl.swipe, mode === 'swipe'), op: v.formatSlider(sl.opacity, mode === 'onion') };
     if (z) out.at = null; // zoomed somewhere else since: the region replaces a link's at=
     return out;
   }
@@ -260,7 +261,7 @@ export function createLayoutView(project, container, ctx) {
   }
   const boxKey = (b) => [b.x, b.y, b.w, b.h].map((v) => v.toFixed(3)).join(',');
 
-  // --- content: gerber canvases or SVG stacks
+  // --- content: view2d content for a side (gerber faces / layer stacks, or the SVG exports)
   // single: the selected layer alone (in the Layers view's colours), else the board view
   function layerSetFor(side, single = solo) {
     if (single) return [{ l: focus, path: gerberOf(focus, side), svg: svgOf(focus, side) }];
@@ -271,204 +272,146 @@ export function createLayoutView(project, container, ctx) {
     return [f.outline, f.copper, f.mask, f.silk, ...f.drills].filter(Boolean).map((l) => ({ l, path: gerberOf(l, side), svg: svgOf(l, side) }));
   }
 
-  function gerberJob(side, single = solo) {
-    return layerSetFor(side, single).filter((x) => x.path)
-      .map(({ l, path }) => ({ path, color: layerColor(l), alpha: LAYER_ALPHA[l.kind] ?? 0.8, kind: l.kind }));
+  function memo(key, make) {
+    if (!cache.has(key)) {
+      if (cache.size > 32) cache.delete(cache.keys().next().value);
+      const p = make();
+      p.catch(() => cache.delete(key));
+      cache.set(key, p);
+    }
+    return cache.get(key);
   }
 
-  function wantR() {
-    const box = worldBox();
-    const dpr = window.devicePixelRatio || 1;
-    const cssPerMm = stage ? stage.view.s * PX_PER_MM : 6;
-    let r = Math.max(4, cssPerMm * dpr);
-    r = 2 ** (Math.ceil(Math.log2(r) * 2) / 2); // steps of sqrt(2), so small zooms don't re-render
-    return Math.min(r, rasterScale(box.w, box.h, 64));
-  }
+  // gerber / drill text as a view2d source, null when missing or empty (e.g. an NPTH file without holes)
+  const source = (path, name, drill = false) => (path
+    ? fetchText(path).then((text) => (v2.isEmptySource(text, drill) ? null : { source: text, name })).catch((e) => { showNote(`Could not render: ${path} (${e.message})`); return null; })
+    : Promise.resolve(null));
+  // an SVG export over its viewBox: over http the URL, from disk its text (a file:// image taints canvases)
+  const svgImage = (path) => (OFFLINE ? fetchText(path) : Promise.resolve(assetUrl(path)))
+    .then((src) => v2.image(src, stage.frame.bounds(svgBoxes.get(path) || worldBox())));
 
   // single (default: a layer is selected): that layer alone; null when this side has none of it, so the
   // compare pane says "not in base / head". Diff's faint underlay is always the board view.
   function makeSide(side, single = solo) {
-    if (!sides[side]) return null;
-    if (single && !gerberOf(focus, side) && !svgOf(focus, side)) return null;
-    const box = worldBox();
-    const holder = el('div', { class: 'layer-holder', dataset: { side } });
-    stage.place(holder, box);
+    if (!sides[side]) return Promise.resolve(null);
+    if (single && !gerberOf(focus, side) && !svgOf(focus, side)) return Promise.resolve(null);
     if (useGl) {
-      let key;
-      let make;
       if (single || view === 'layers') {
-        const job = gerberJob(side, single);
-        if (!job.length) { holder.append(el('div', { class: 'missing-msg' }, 'no gerbers for these layers')); return holder; }
-        key = `${side}|layers|${JSON.stringify(job.map((j) => [j.path, j.color]))}|${renderR}`;
-        make = () => renderGerbers(job, box, renderR, { origin });
-      } else {
-        const f = faceLayers(layers, view);
-        const face = { outline: gerberOf(f.outline, side), copper: gerberOf(f.copper, side), mask: gerberOf(f.mask, side), silk: gerberOf(f.silk, side),
-          drills: f.drills.map((l) => gerberOf(l, side)).filter(Boolean) };
-        if (!face.outline && !face.copper) { holder.append(el('div', { class: 'missing-msg' }, 'no gerbers for this face')); return holder; }
-        key = `${side}|${view}|${JSON.stringify(face)}|${renderR}`;
-        make = () => renderFace(face, view, box, renderR, { origin, palette });
+        const set = layerSetFor(side, single).filter((x) => x.path);
+        if (!set.length) return Promise.resolve(null);
+        const key = `${side}|layers|${JSON.stringify(set.map(({ l, path }) => [path, layerColor(l)]))}`;
+        return memo(key, () => Promise.all(set.map(({ l, path }) => source(path, l.id, l.kind === 'drill')))
+          .then((srcs) => v2.layers(set.map(({ l }, i) => srcs[i] && { ...srcs[i], color: layerColor(l), alpha: LAYER_ALPHA[l.kind] ?? 0.8, kind: l.kind === 'drill' ? 'drill' : 'gerber' }).filter(Boolean))));
       }
-      if (!cache.has(key)) {
-        if (cache.size > 16) cache.delete(cache.keys().next().value);
-        cache.set(key, make());
-      }
-      holder.append(el('div', { class: 'loading small' }, 'Rendering…'));
-      cache.get(key).then(({ canvas, failures }) => {
-        if (destroyed) return;
-        const c = canvas.cloneNode(false);
-        c.getContext('2d').drawImage(canvas, 0, 0);
-        c.className = 'layer-canvas';
-        clear(holder).append(c);
-        if (failures.length) showNote(`Could not render: ${failures.map((f) => f.path).join(', ')}`);
-      }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Render failed: ${e.message}`)); });
-      return holder;
+      const f = faceLayers(layers, view);
+      const paths = { outline: gerberOf(f.outline, side), copper: gerberOf(f.copper, side), mask: gerberOf(f.mask, side), silk: gerberOf(f.silk, side),
+        drills: f.drills.map((l) => gerberOf(l, side)).filter(Boolean) };
+      if (!paths.outline && !paths.copper) return Promise.resolve(null);
+      return memo(`${side}|${view}|${JSON.stringify(paths)}`, async () => {
+        const [outline, copper, mask, silk, ...drills] = await Promise.all([source(paths.outline, 'outline'), source(paths.copper, 'copper'),
+          source(paths.mask, 'mask'), source(paths.silk, 'silk'), ...paths.drills.map((p) => source(p, 'drill', true))]);
+        // not mirrored: the stage mirrors the bottom view itself
+        return v2.face({ outline, [view]: { copper, mask, silk }, drills: drills.filter(Boolean) }, { side: view, palette, holes: true, clipSilk: true });
+      });
     }
-    // SVG fallback: one bitmap per layer, rasterised at its own viewBox (KiCad mm) and placed there
-    const layerSet = single || view === 'layers' ? layerSetFor(side, single) : layerSetFor(side).filter(({ l }) => l.kind !== 'mask');
-    for (const { l, svg } of layerSet) {
-      if (!svg) continue;
-      const vb = svgBoxes.get(svg) || box;
-      const slot = el('div', { class: 'layer-slot', dataset: { layer: l.id } });
-      const placed = stage.place(el('div'), vb);
-      for (const k of ['left', 'top']) slot.style[k] = `${parseFloat(placed.style[k]) - parseFloat(holder.style[k])}px`;
-      slot.style.width = placed.style.width; slot.style.height = placed.style.height;
-      holder.append(slot);
-      bitmapOf(svg, vb, Math.min(renderR, rasterScale(vb.w, vb.h, 64))).then((c) => {
-        if (destroyed) return;
-        const copy = c.cloneNode(false);
-        copy.getContext('2d').drawImage(c, 0, 0);
-        copy.className = 'layer-canvas';
-        slot.append(copy);
-      }).catch(() => {});
-    }
-    return holder;
+    // SVG fallback: one image per layer, placed over its own viewBox (KiCad mm)
+    const set = single || view === 'layers' ? layerSetFor(side, single) : layerSetFor(side).filter(({ l }) => l.kind !== 'mask');
+    const svgs = set.filter((x) => x.svg);
+    if (!svgs.length) return Promise.resolve(null);
+    return memo(`${side}|svg|${svgs.map((x) => x.svg).join('|')}|${boxKey(worldBox())}`, () => Promise.all(svgs.map((x) => svgImage(x.svg))));
   }
 
   function showNote(t) { note.hidden = false; note.textContent = t; }
 
-  // --- per-layer diff
-  const diffCache = new Map();
-  function computeDiff(layer) {
+  // --- per-layer diff: the GPU layer diff of the gerbers, or the ink diff of the SVG exports
+  function diffContent(layer) {
     const box = worldBox();
-    const key = `${layer.id}|${useGl ? renderR : 'svg'}|${boxKey(box)}`;
-    if (!diffCache.has(key)) {
-      let p;
-      if (useGl) {
-        const r = renderR;
-        const one = (side) => (gerberOf(layer, side) && sides[side]
-          ? renderGerbers([{ path: gerberOf(layer, side), color: [1, 1, 1], alpha: 1, kind: layer.kind }], box, r, { origin }).then(({ canvas }) => canvasRgba(canvas))
-          : Promise.resolve(null));
-        p = renderLayerDiff(sides.base ? gerberOf(layer, 'base') : null, sides.head ? gerberOf(layer, 'head') : null, box, r,
-          { origin, kind: layer.kind === 'drill' ? 'drill' : 'gerber', colors: GPU_DIFF_COLORS })
-          .catch(() => Promise.all([one('base'), one('head')]).then(([b, h]) => ensure(b, h, box, r)).then(([b, h]) => diffRasters(b, h, box, r, { mode: 'alpha', tol: 1 })));
-      } else {
-        const r = rasterScale(box.w, box.h, 12);
-        const one = (side) => (svgOf(layer, side) && sides[side]
-          ? loadImage(svgOf(layer, side)).then((img) => rasterize(img, svgBoxes.get(svgOf(layer, side)) || box, box, r))
-          : Promise.resolve(null));
-        p = Promise.all([one('base'), one('head')]).then(([b, h]) => ensure(b, h, box, r)).then(([b, h]) => diffRasters(b, h, box, r, { mode: 'ink', tol: 1 }));
-      }
-      diffCache.set(key, p);
+    if (useGl) {
+      const drill = layer.kind === 'drill';
+      return memo(`diff|${layer.id}`, () => Promise.all(['base', 'head'].map((s) => (sides[s] ? source(gerberOf(layer, s), layer.id, drill) : null)))
+        .then(([b, h]) => v2.diff(b, h, { colors: GPU_DIFF_COLORS, style: { unchanged: { alpha: 0.45 } }, regions: true })));
     }
-    return diffCache.get(key);
-  }
-  function ensure(b, h, box, r) {
-    if (b || h) return [b, h];
-    const w = Math.max(1, Math.round(box.w * r)); const hh = Math.max(1, Math.round(box.h * r));
-    return [{ data: new Uint8ClampedArray(w * hh * 4), w, h: hh }, null];
+    const one = (s) => (sides[s] && svgOf(layer, s) ? svgImage(svgOf(layer, s)) : Promise.resolve(null));
+    return memo(`diff|svg|${layer.id}|${boxKey(box)}`, () => Promise.all([one('base'), one('head')])
+      .then(([b, h]) => v2.inkdiff(b && { src: b.src, rect: b.rect }, h && { src: h.src, rect: h.rect }, stage.frame.bounds(box), { mode: 'ink', tol: 1 })));
   }
 
   // --- modes / views
   let modeToken = 0;
-  function setMode(m) {
+  let diffShown = null; // the diff content on show (its render reports the changed areas)
+  async function setMode(m) {
     const token = ++modeToken;
     mode = m;
     if (m !== 'single') setPreferredMode(m); // the mode on show is the one the next view opens in
     modeBar.select(m);
     updateLayerNote();
     markFocus();
-    for (const c of modeCleanups.splice(0)) c();
-    clear(extra); clear(legendBox);
     if (!stage) return;
-    if (boxKey(worldBox()) !== boxKey(stage.box)) { buildStage(); return; } // a doc layer came or went: new frame
-    clear(stageWrap);
+    const box = worldBox();
+    if (boxKey(box) !== boxKey(stage.box)) { stage.setBox(box); stageWrap.dataset.world = boxKey(box); } // a doc layer came or went: new frame, same region
     stageWrap.className = `stage-wrap board${m === 'side' ? ' split' : ''}${view === 'layers' || (solo && m !== 'diff') ? ' dark' : ''}`;
-    let panes;
+    let content;
+    const layer = focus || pickDiffLayer(layers, view);
     if (m === 'diff') {
-      const layer = focus || pickDiffLayer(layers, view);
-      const under = makeSide(sides.head ? 'head' : 'base', false);
-      if (under) under.classList.add('faint');
-      const holder = el('div', { class: 'diff-holder' }, el('div', { class: 'loading' }, 'Computing diff…'));
-      stage.place(holder, worldBox());
-      panes = [stage.pane(`diff: ${layer ? layer.id : '—'}`, under, holder)];
+      const [under, diff] = await Promise.all([makeSide(sides.head ? 'head' : 'base', false), layer ? diffContent(layer) : null]);
+      content = { underlay: under, diff };
+    } else {
+      const [base, head] = await Promise.all([makeSide('base'), makeSide('head')]);
+      content = { base, head };
+    }
+    if (destroyed || token !== modeToken) return false;
+    cmp?.destroy();
+    clear(extra); clear(legendBox);
+    diffShown = content.diff ?? null;
+    if (m === 'diff') {
       legendBox.append(...legend());
       // only the listed changes that can alter this layer get a box: the diff itself has to pop
       stage.setMarks(changeItems.filter((c) => c.box && layer && (c.layer === layer.id || c.layers.includes(layer.id))).map((c) => ({ box: c.box, cls: 'outline' })));
-      if (layer) {
-        computeDiff(layer).then((d) => {
-          if (destroyed || token !== modeToken) return;
-          const c = d.canvas.cloneNode(false);
-          c.getContext('2d').drawImage(d.canvas, 0, 0);
-          c.className = 'diff-canvas';
-          clear(holder).append(c);
-          legendBox.append(el('span', { class: 'muted' }, `${layer.id}: ${d.regions.length} changed area${d.regions.length === 1 ? '' : 's'}`));
-          if (!changeItems.length) {
-            changes.set(d.regions.map((q, i) => ({ title: `${layer.id} change ${i + 1}`, detail: `${q.w.toFixed(2)} × ${q.h.toFixed(2)} mm`, kind: 'visual', box: q })));
-            stage.setMarks(d.regions.map((q) => ({ box: q })));
-          }
-        }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Diff failed: ${e.message}`)); });
-      }
     } else {
       stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
-      const c = comparePanes(stage, m, makeSide, extra, { single: sides.head ? 'head' : 'base', onSlide: () => writeView() });
-      modeCleanups.push(c.cleanup);
-      panes = c.panes;
     }
-    stageWrap.append(...panes);
-    stage.setPanes(panes);
+    cmp = showCompare(stage, m, content, extra, {
+      single: sides.head ? 'head' : 'base',
+      labels: { base: 'base', head: 'head', diff: `diff: ${layer ? layer.id : '—'}` },
+      onSlide: () => writeView(),
+    });
+    return true;
   }
 
-  // A new stage (other board view, or the frame grew / shrank for a doc layer): the same region of the
-  // board stays on show (KiCad mm, so also across top <-> bottom), the measure tool stays on.
-  function buildStage(region = stage ? stage.region() : null) {
-    const old = stage;
+  function onRender(e) {
+    if (destroyed || !diffShown || e.content !== diffShown || !e.info?.regions) return;
+    const regions = e.info.regions.map((q) => stage.frame.box(q));
+    const layer = focus || pickDiffLayer(layers, view);
+    legendBox.querySelector('.diff-count')?.remove();
+    legendBox.append(el('span', { class: 'muted diff-count' }, `${layer.id}: ${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
+    if (!changeItems.length) {
+      changes.set(regions.map((q, i) => ({ title: `${layer.id} change ${i + 1}`, detail: `${q.w.toFixed(2)} × ${q.h.toFixed(2)} mm`, kind: 'visual', box: q })));
+      stage.setMarks(regions.map((q) => ({ box: q })));
+    }
+  }
+
+  // The stage is made once; another board view mirrors it (bottom) and keeps the region on show
+  // (view2d's world is the board frame, so the same region also across top <-> bottom).
+  function buildStage() {
     const box = worldBox();
-    const sameBox = old && boxKey(old.box) === boxKey(box);
-    const measuring = old?.measuring ? old.measurePoints : null;
-    stage?.destroy();
-    if (old && !sameBox) renderR = 0; // a bigger / smaller area: pick the resolution again
-    stage = createStage({ box, readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
-    stage.observe(stageWrap);
+    stage = createKiprStage(v2, stageWrap, { box, origin, flip: view === 'bottom', renderer: useGl ? getRenderer : null, readout, zoomLabel: zoomLbl, boxes: boxesShown() });
     stageWrap.dataset.world = boxKey(box); // KiCad mm x,y,w,h of the frame (for tests and scripts)
-    stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     stage.onMeasure((t) => { measureOut.textContent = t; });
-    stage.onTransform(resharpen);
     stage.onTransform(() => writeView());
-    if (measuring) stage.setMeasuring(true, measuring); // points are KiCad mm: valid in any frame
-    if (!renderR) renderR = wantR();
-    setMode(mode);
-    if (region) stage.showRegion(region);
+    stage.stage.on('render', onRender);
+    stage.stage.on('error', (e) => showNote(`Render failed: ${e.error?.message || e.error}`));
+    return setMode(mode);
   }
 
   function setView(v) {
     view = v;
     preferred.view = v;
     viewBar.select(solo ? null : v);
-    buildStage();
+    stage?.setFlip(v === 'bottom');
+    setMode(mode);
   }
 
   function refresh() { setMode(mode); }
-
-  // re-render sharper when zoomed in (gerber mode only)
-  const resharpen = debounce(() => {
-    if (destroyed || !stage) return;
-    const r = wantR();
-    if (r > renderR * 1.3 || r < renderR / 2.5) {
-      renderR = r;
-      setMode(mode);
-    }
-  }, 250);
 
   function toggleMeasure() {
     const on = !stage?.measuring;
@@ -477,29 +420,38 @@ export function createLayoutView(project, container, ctx) {
     if (!on) measureOut.textContent = '';
   }
 
-  // --- start: read SVG viewBoxes (fallback placement), then build
+  // --- start: view2d and the SVG viewBoxes (fallback placement), then build
+  let v2 = null;
   const svgPaths = useGl ? [] : [...new Set(layers.flatMap((l) => [svgOf(l, 'base'), svgOf(l, 'head')]).filter(Boolean))];
-  Promise.all(svgPaths.map((p) => fetchText(p).then((t) => [p, parseViewBox(t)]).catch(() => [p, null]))).then((pairs) => {
+  Promise.all([loadView2d(), ...svgPaths.map((p) => fetchText(p).then((t) => [p, parseViewBox(t)]).catch(() => [p, null]))]).then(([mod, ...pairs]) => {
     if (destroyed) return;
+    v2 = mod;
+    setCompareSliders({ swipe: v2.parseSlider(params.sw), opacity: v2.parseSlider(params.op) });
     svgBoxes = new Map(pairs.filter(([, v]) => v));
     renderLayerPanel();
-    buildStage();
+    return buildStage();
+  }).then(() => {
+    if (destroyed || !stage) return;
+    // the deep link's change / spot / region, once the panes are there (zooms are sized to them)
     const ci = Number.parseInt(params.c, 10);
     const at = parseAt(params.at);
     if (Number.isInteger(ci) && ci >= 0 && ci < changes.items.length) changes.select(ci);
     else if (at) { stage.zoomTo(at); stage.highlight(at); }
-    const z = parseZoom(params.z);
+    const z = v2.parseRegion(params.z);
     if (z) stage.showRegion(z); // a link / reload with a zoom region: exactly that region
     updateLayerNote();
     pushRoute(); // the URL names the whole view from the start (layer, view, mode)
+  }).catch((e) => {
+    if (destroyed) return;
+    showNote(e.message);
   });
 
   return {
-    destroy() { destroyed = true; resharpen.cancel(); writeView.cancel(); stopFill(); boxes.stop(); for (const c of modeCleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; writeView.cancel(); stopFill(); boxes.stop(); cmp?.destroy(); stage?.destroy(); },
     // back / forward, or a link to this view: apply what the URL says, keep what it does not mention
     onParams(p, item) {
       writeView.cancel();
-      if (setCompareSliders({ swipe: parseSlider(p.sw), opacity: parseSlider(p.op) }) && stage && mode !== 'diff') setMode(mode);
+      if (setCompareSliders({ swipe: view2dNow()?.parseSlider(p.sw), opacity: view2dNow()?.parseSlider(p.op) }) && stage && mode !== 'diff') setMode(mode);
       if (p.view && p.view !== view && VIEWS.some(([v]) => v === p.view)) setView(p.view);
       const l = item ? layers.find((x) => x.id === item) : null;
       if (l && (l !== focus || !solo)) selectLayer(l, false);
@@ -509,9 +461,9 @@ export function createLayoutView(project, container, ctx) {
       const reselect = Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length;
       if (reselect) changes.select(ci);
       const at = parseAt(p.at);
-      const z = parseZoom(p.z);
+      const z = view2dNow().parseRegion(p.z);
       if (!stage) return;
-      if (z) { if (!sameZoom(z, stage.region())) stage.showRegion(z); } else if (at) { stage.zoomTo(at); stage.highlight(at); } else if (!reselect && stage.region()) stage.fit();
+      if (z) { if (!view2dNow().sameRegion(z, stage.region())) stage.showRegion(z); } else if (at) { stage.zoomTo(at); stage.highlight(at); } else if (!reselect && stage.region()) stage.fit();
     },
     onKey(e) {
       if (e.key === 'n') { changes.next(); return true; }
@@ -522,7 +474,7 @@ export function createLayoutView(project, container, ctx) {
       if (e.key === 'v') { const i = VIEWS.findIndex(([v]) => v === view); showBoard(solo ? view : VIEWS[(i + 1) % VIEWS.length][0]); pushRoute(); return true; }
       if (e.key === 'm') {
         const i = modes.findIndex(([m]) => m === mode);
-        setMode(modes[(i + 1) % modes.length][0]); pushRoute(); return true;
+        setMode(modes[(i + 1) % modes.length][0]).then((shown) => { if (shown) pushRoute(); }); pushRoute(); return true;
       }
       if (e.key === '[' || e.key === ']') {
         // in the order of the layer list (top of the stack first), wrapping around
@@ -541,7 +493,3 @@ function pick(list, want, pref) {
   return list[0][0];
 }
 
-function canvasRgba(canvas) {
-  const g = canvas.getContext('2d', { willReadFrequently: true });
-  return { data: g.getImageData(0, 0, canvas.width, canvas.height).data, w: canvas.width, h: canvas.height };
-}

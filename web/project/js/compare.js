@@ -1,6 +1,6 @@
-// Base/head compare panes on a panzoom stage: side by side, onion skin, swipe, single. Generic over what
-// the content is (sheet <img>s, gerber canvases, layer SVG stacks): the caller passes node factories.
-import { el } from './util.js';
+// Base/head compare on boarddd/view2d's createCompare: side by side, diff, onion skin, swipe, single.
+// What stays here is kipr's: one onion opacity and swipe position for every view, the mode the next
+// view opens in, and the toolbar sliders.
 import { sliderLabel } from './widgets.js';
 
 // one onion opacity and swipe position for every view: kept across layers, sheets, tabs and projects
@@ -25,44 +25,27 @@ export function setCompareSliders({ opacity, swipe } = {}) {
 }
 
 /**
- * mode: 'side' | 'onion' | 'swipe' | 'single'
- * make(side) -> Node placed in the world (or null when that side does not exist)
- * Returns {panes, cleanup()}; appends sliders to `extra`; onSlide() after the user moves one.
+ * Show `mode` ('side' | 'diff' | 'onion' | 'swipe' | 'single') on a kipr stage (stage2d.js).
+ * content: {base, head, diff, underlay} (view2d content, arrays or null); a missing side says so.
+ * Appends the onion / swipe slider to `extra`; onSlide() after the user moves one (slider or divider).
+ * Returns the view2d compare (destroy() it before the next one).
  */
-export function comparePanes(stage, mode, make, extra, { single = 'head', labels = { base: 'base', head: 'head' }, onSlide = null } = {}) {
-  const cleanups = [];
-  const missing = (text) => el('div', { class: 'missing-msg' }, text);
-  let panes;
-  if (mode === 'side') {
-    panes = [stage.pane(labels.base, make('base') || missing(`not in ${labels.base}`)), stage.pane(labels.head, make('head') || missing(`not in ${labels.head}`))];
-  } else if (mode === 'onion') {
-    const head = make('head');
-    if (head) head.style.opacity = String(shared.opacity);
-    panes = [stage.pane(`${labels.base} + ${labels.head}`, make('base'), head)];
-    extra.append(sliderLabel(labels.base, labels.head, shared.opacity, (v) => { shared.opacity = v; if (head) head.style.opacity = String(v); onSlide?.(); }, 'Head opacity'));
+export function showCompare(kstage, mode, content, extra, { single = 'head', labels = { base: 'base', head: 'head', diff: 'diff' }, onSlide = null } = {}) {
+  const v2mode = mode === 'single' ? single : mode;
+  let slider = null;
+  const cmp = kstage.v2.createCompare(kstage.stage, {
+    base: content.base ?? null, head: content.head ?? null, diff: content.diff ?? null, underlay: content.underlay ?? null,
+    mode: v2mode, opacity: shared.opacity, swipe: shared.swipe, labels,
+    onChange: (s) => { shared.swipe = s.swipe; if (slider) slider.value = String(s.swipe); onSlide?.(); },
+  });
+  if (mode === 'onion') {
+    const l = sliderLabel(labels.base, labels.head, shared.opacity, (v) => { shared.opacity = v; cmp.setOpacity(v); onSlide?.(); }, 'Head opacity');
+    slider = l.querySelector('input');
+    extra.append(l);
   } else if (mode === 'swipe') {
-    const head = make('head');
-    const handle = el('div', { class: 'swipe-handle' });
-    const p = stage.pane(null, make('base'), head);
-    p.append(el('div', { class: 'pane-label left' }, labels.base), el('div', { class: 'pane-label' }, labels.head), handle);
-    panes = [p];
-    const apply = () => {
-      if (!head) return;
-      const cut = shared.swipe * p.clientWidth;
-      const wx = (cut - stage.view.tx) / stage.view.s; // world px of the divider
-      const left = parseFloat(head.style.left) || 0;
-      const width = parseFloat(head.style.width) || stage.W;
-      // clip-path is in the node's own box; in a flipped (bottom) world the node is mirrored, so its
-      // local x runs right-to-left and the part left of the divider is its right-hand end
-      const px = Math.max(0, Math.min(width, wx - left));
-      head.style.clipPath = stage.flip ? `inset(0 ${px}px 0 0)` : `inset(0 0 0 ${px}px)`;
-      handle.style.left = `${cut}px`;
-    };
-    cleanups.push(stage.onTransform(apply));
-    extra.append(sliderLabel(labels.base, labels.head, shared.swipe, (v) => { shared.swipe = v; apply(); onSlide?.(); }, 'Swipe position', 0.001));
-    requestAnimationFrame(apply);
-  } else {
-    panes = [stage.pane(labels[single], make(single) || missing(`not in ${labels[single]}`))];
+    const l = sliderLabel(labels.base, labels.head, shared.swipe, (v) => { shared.swipe = v; cmp.setSwipe(v); onSlide?.(); }, 'Swipe position', 0.001);
+    slider = l.querySelector('input');
+    extra.append(l);
   }
-  return { panes, cleanup() { for (const c of cleanups) c(); } };
+  return cmp;
 }

@@ -243,8 +243,9 @@ export async function addBoardLayers(renderer, board, options = {}) {
       const { source, name } = unwrap(drill);
       const text = await sourceToText(source);
       // KiCad writes a header-only NPTH file for a board without such holes;
-      // the renderer rejects a drill file with no holes, so skip it.
-      if (parseExcellon(text).length === 0) continue;
+      // the renderer rejects a drill file with no holes, so skip it. An ODB++
+      // drill layer (loadOdbJob) is an envelope, not Excellon: it counts when it has features.
+      if (text.startsWith("%ODB++LAYER%") ? !hasGeometry(text) : parseExcellon(text).length === 0) continue;
       const id = await renderer.renderLayer(
         { source: text, name: name ?? "drill.drl", kind: "drill" },
         { color: palette.plating },

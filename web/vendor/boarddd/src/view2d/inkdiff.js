@@ -1,5 +1,5 @@
 // Pixel "ink" diff of two renders of the same area (schematic sheets, PCB layers). Pure: works on
-// RGBA byte arrays, no DOM, so it is unit-tested in node and reusable for any pair of rasters.
+// RGBA byte arrays, no DOM. Ported from kipr web/project/js/inkdiff.js.
 //
 //   ink      a pixel something was drawn on: opaque enough and not near-white paper.
 //   removed  ink in base with no head ink within `tol` pixels   -> red
@@ -128,4 +128,15 @@ export function orMask(a, b) {
   const o = new Uint8Array(a.length);
   for (let i = 0; i < a.length; i++) o[i] = a[i] | b[i];
   return o;
+}
+
+/**
+ * The whole ink diff of two same-size RGBA rasters (either may be null: nothing drawn): coloured
+ * RGBA, counts and changed regions in pixels (y down). `mode`: 'ink' (paper ignored) or 'alpha'.
+ */
+export function inkDiff(base, head, w, h, { mode = 'ink', tol = 1, colors = DIFF_COLORS, gap = 6, minPixels = 4, max = 200 } = {}) {
+  const mk = (x) => (x ? (mode === 'alpha' ? alphaMask(x, w, h) : inkMask(x, w, h)) : new Uint8Array(w * h));
+  const d = diffMasks(mk(base), mk(head), w, h, tol);
+  const rgba = paintDiff(new Uint8ClampedArray(w * h * 4), d, colors);
+  return { rgba, counts: d.counts, regions: regions(orMask(d.removed, d.added), w, h, { gap, minPixels, max }) };
 }

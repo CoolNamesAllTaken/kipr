@@ -1,16 +1,13 @@
 // Schematic diff: per-sheet list, side-by-side / ink diff / onion skin / swipe, change list that zooms.
-import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam, fillViewport } from './util.js';
-import { createStage, PX_PER_MM } from './panzoom.js';
+// The stage, the sheet rasters and the ink diff are boarddd/view2d (stage2d.js); this is the app around it.
+import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam, fillViewport, OFFLINE } from './util.js';
+import { loadView2d, view2dNow, createKiprStage } from './stage2d.js';
 import { createChangeList, describeChange } from './changes.js';
-import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
-import { formatZoom, parseZoom, sameZoom, sameSize, sliderParam, parseSlider, stepItem, sheetNote } from './viewstate.js';
+import { showCompare, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
+import { sameSize, stepItem, sheetNote } from './viewstate.js';
 
-// Base raster resolution (px/mm): shared by the first display bitmaps and the ink diff, so a sheet is
-// drawn once on open. Real KiCad sheets are megabytes of SVG and drawing one is the expensive part.
-const SHEET_R = 6;
 const MODES = [['side', 'Side by side'], ['diff', 'Diff'], ['onion', 'Onion skin'], ['swipe', 'Swipe']];
 
 export function sheetList(project) {
@@ -33,7 +30,6 @@ export function createSchematicView(project, container, ctx) {
   // the compare modes are the project's: a sheet only in head or base of a modified project keeps the
   // chosen mode (its missing side is empty), so stepping through sheets never switches mode
   const bothSides = project.status !== 'added' && project.status !== 'removed';
-  setCompareSliders({ swipe: parseSlider(ctx.route.params.sw), opacity: parseSlider(ctx.route.params.op) });
 
   const sheetNav = el('nav', { class: 'side-list', 'aria-label': 'Sheets' });
   const mainBox = el('div', { class: 'diff-main' });
@@ -81,7 +77,7 @@ export function createSchematicView(project, container, ctx) {
     destroy() { sheetView?.destroy(); },
     // back / forward, or a link to this view: another sheet opens with the URL's state
     onParams(params, item) {
-      const slid = setCompareSliders({ swipe: parseSlider(params.sw), opacity: parseSlider(params.op) });
+      const slid = setCompareSliders({ swipe: view2dNow()?.parseSlider(params.sw), opacity: view2dNow()?.parseSlider(params.op) });
       const s = item ? sheets.find((x) => x.id === item) : null;
       if (s && s !== sheet) openSheet(s, { ...params, mode: params.mode || sheetView?.mode });
       else sheetView?.onParams(params, slid);
@@ -102,11 +98,12 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   }
   let mode = modes.some(([m]) => m === params.mode) ? params.mode : modes.some(([m]) => m === preferredMode()) ? preferredMode() : modes[0][0];
   let destroyed = false;
-  let stage = null;
+  let stage = null; // createKiprStage(): view2d stage in KiCad terms
+  let cmp = null;
+  let v2 = null;
   let vbs = { base: null, head: null };
-  let diff = null; // {canvas, counts, regions} once computed
-  let diffPromise = null;
-  const cleanups = [];
+  let srcs = { base: null, head: null }; // image sources: URLs, or SVG text from disk
+  let content = null; // {base, head, diff} view2d content, made once per sheet
 
   const readout = el('span', { class: 'readout' });
   const zoomLbl = el('span', { class: 'readout zoom' });
@@ -128,8 +125,10 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   // the URL holds the sheet's view: compare mode, change, zoom region, sliders (zoom / sliders once settled)
   function viewParams() {
     const sl = compareSliders();
-    const z = formatZoom(stage?.region());
-    const out = { mode, z, sw: sliderParam(sl.swipe, mode === 'swipe'), op: sliderParam(sl.opacity, mode === 'onion') };
+    const v = view2dNow();
+    if (!v) return { mode }; // not loaded yet: the URL keeps the rest
+    const z = v.formatRegion(stage?.region());
+    const out = { mode, z, sw: v.formatSlider(sl.swipe, mode === 'swipe'), op: v.formatSlider(sl.opacity, mode === 'onion') };
     if (z) out.at = null;
     return out;
   }
@@ -170,112 +169,70 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  // Sheets are shown as bitmaps rasterised at the current zoom (re-sharpened when it settles). Past the
-  // pixel budget the vector <img> takes over; by then only a small part of the sheet is on screen.
-  let dispR = 0;
-  function img(side) {
-    const ok = side === 'base' ? hasBase : hasHead;
-    if (!ok) return null;
-    const src = side === 'base' ? sheet.base : sheet.head;
-    const at = vbs[side] || worldBox();
-    const holder = stage.place(el('div', { class: 'layer-holder', dataset: { side } }), at);
-    if (dispR >= rasterScale(at.w, at.h, 64)) {
-      holder.append(el('img', { src, alt: `${side} ${sheet.title || sheet.id}`, draggable: 'false', class: 'sheet-img' }));
-      return holder;
-    }
-    holder.append(el('div', { class: 'loading small' }, 'Rendering…'));
-    bitmapOf(src, at, dispR).then((c) => {
-      if (destroyed) return;
-      const copy = c.cloneNode(false);
-      copy.getContext('2d').drawImage(c, 0, 0);
-      copy.className = 'layer-canvas';
-      clear(holder).append(copy);
-    }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Could not load: ${e.message}`)); });
-    return holder;
+  // The sheets are view2d images over their viewBoxes (re-rasterised sharper as the zoom settles); the
+  // diff is their ink diff over the whole sheet frame. Made once per sheet, so the tiles are kept.
+  function makeContent() {
+    const f = stage.frame;
+    const img = (side) => (srcs[side] ? v2.image(srcs[side], f.bounds(vbs[side] || worldBox())) : null);
+    const base = img('base');
+    const head = img('head');
+    const diff = v2.inkdiff(base && { src: base.src, rect: base.rect }, head && { src: head.src, rect: head.rect }, f.bounds(worldBox()), { mode: 'ink', regionGapMm: 3 });
+    return { base, head, diff };
   }
-  const wantR = () => displayScale(stage ? stage.view.s * PX_PER_MM : 2, worldBox().w, worldBox().h, window.devicePixelRatio || 1, SHEET_R);
-  const resharpen = debounce(() => {
-    if (destroyed || !stage || mode === 'diff') return;
-    const r = wantR();
-    if (r > dispR * 1.3 || r < dispR / 2.5) { dispR = r; setMode(mode); }
-  }, 250);
 
-  let modeToken = 0;
   function setMode(m) {
-    const token = ++modeToken;
     mode = m;
     if (m !== 'single') setPreferredMode(m); // the mode on show is the one the next view opens in
     modeBar.select(m);
     updateNote();
-    for (const c of cleanups.splice(0)) c();
-    clear(extra); clear(legendBox);
     if (!stage) return;
-    clear(stageWrap);
+    cmp?.destroy();
+    clear(extra); clear(legendBox);
     stageWrap.className = `stage-wrap paper${m === 'side' ? ' split' : ''}`;
-    let panes;
-    if (m === 'diff') {
-      const holder = el('div', { class: 'diff-holder' }, el('div', { class: 'loading' }, 'Computing diff…'));
-      stage.place(holder, worldBox());
-      panes = [stage.pane('diff', holder)];
-      legendBox.append(...legend());
-      computeDiff().then((d) => {
-        if (destroyed || token !== modeToken) return;
-        clear(holder).append(d.canvas);
-        d.canvas.className = 'diff-canvas';
-        legendBox.append(el('span', { class: 'muted' }, `${d.regions.length} changed area${d.regions.length === 1 ? '' : 's'}`));
-      }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Diff failed: ${e.message}`)); });
-    } else {
-      const c = comparePanes(stage, m, img, extra, { single: hasHead ? 'head' : 'base', onSlide: () => writeView() });
-      cleanups.push(c.cleanup);
-      panes = c.panes;
-    }
-    stageWrap.append(...panes);
-    stage.setPanes(panes);
+    if (m === 'diff') legendBox.append(...legend());
+    cmp = showCompare(stage, m, m === 'diff' ? { diff: content.diff } : { base: content.base, head: content.head }, extra,
+      { single: hasHead ? 'head' : 'base', onSlide: () => writeView() });
   }
 
-  function computeDiff() {
-    if (!diffPromise) {
-      const box = worldBox();
-      const r = Math.min(SHEET_R, rasterScale(box.w, box.h, SHEET_R));
-      const bm = (side) => (side === 'base' ? hasBase : hasHead) ? bitmapOf(sheet[side], vbs[side] || box, r) : null;
-      diffPromise = Promise.all([bm('base'), bm('head')]).then(([bi, hi]) => {
-        const base = bi ? rasterize(bi, vbs.base || box, box, r) : null;
-        const head = hi ? rasterize(hi, vbs.head || box, box, r) : null;
-        diff = diffRasters(base, head, box, r, { mode: 'ink', regionGapMm: 3 });
-        if (!contractChanges.length && diff.regions.length) {
-          changes.set(diff.regions.map((q, i) => ({ title: `ink change ${i + 1}`, detail: `${q.w.toFixed(1)} × ${q.h.toFixed(1)} mm`, kind: 'visual', box: q })));
-          stage.setMarks(diff.regions.map((q) => ({ box: q })));
-        }
-        return diff;
-      });
+  function onRender(e) {
+    if (destroyed || e.content !== content?.diff || !e.info?.regions) return;
+    const regions = e.info.regions.map((q) => stage.frame.box(q));
+    legendBox.querySelector('.diff-count')?.remove();
+    if (mode === 'diff') legendBox.append(el('span', { class: 'muted diff-count' }, `${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
+    if (!contractChanges.length && regions.length) {
+      changes.set(regions.map((q, i) => ({ title: `ink change ${i + 1}`, detail: `${q.w.toFixed(1)} × ${q.h.toFixed(1)} mm`, kind: 'visual', box: q })));
+      stage.setMarks(regions.map((q) => ({ box: q })));
     }
-    return diffPromise;
   }
 
-  // viewBoxes first (they define the world), then build the stage
-  Promise.all(['base', 'head'].map((side) => (assetUrl(sheet[side]) ? fetchText(sheet[side]).then(parseViewBox).catch(() => null) : null)))
-    .then(([b, h]) => {
+  // view2d and the sheets' viewBoxes first (they define the world), then build the stage
+  const sideSrc = (side) => (assetUrl(sheet[side]) ? (OFFLINE ? fetchText(sheet[side]) : Promise.resolve(assetUrl(sheet[side]))) : Promise.resolve(null));
+  Promise.all([loadView2d(), ...['base', 'head'].map((side) => (assetUrl(sheet[side]) ? fetchText(sheet[side]).then(parseViewBox).catch(() => null) : null)),
+    sideSrc('base').catch(() => null), sideSrc('head').catch(() => null)])
+    .then(([mod, b, h, sb, sh]) => {
       if (destroyed) return;
+      v2 = mod;
+      setCompareSliders({ swipe: v2.parseSlider(params.sw), opacity: v2.parseSlider(params.op) });
       vbs = { base: b, head: h };
-      stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown() });
-      stage.observe(stageWrap);
-      stage.onTransform(resharpen);
+      srcs = { base: sb, head: sh };
+      clear(stageWrap);
+      stage = createKiprStage(v2, stageWrap, { box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown() });
       stage.onTransform(() => writeView());
+      stage.stage.on('render', onRender);
       stage.setMarks(contractChanges.filter((c) => c.box).map((c) => ({ box: c.box })));
+      content = makeContent();
       setMode(mode); // lays out the panes and fits
       // zoom: the URL's region, else (another sheet picked) the previous sheet's region when the paper is
       // the same size; sheets of other sizes are fitted
-      const z = parseZoom(params.z) || (params.keep?.region && sameSize(params.keep.box, worldBox()) ? params.keep.region : null);
+      const z = v2.parseRegion(params.z) || (params.keep?.region && sameSize(params.keep.box, worldBox()) ? params.keep.region : null);
       if (z) stage.showRegion(z);
-      dispR = wantR();
-      setMode(mode);
       const ci = Number.parseInt(params.c, 10);
       const at = parseAtParam(params.at);
       if (Number.isInteger(ci) && ci >= 0 && ci < changes.items.length) changes.select(ci);
       else if (at) showAt(at);
       if (z && (Number.isInteger(ci) || at)) stage.showRegion(z); // the region was saved after that zoom
       writeRoute();
-    });
+    }).catch((e) => { if (!destroyed) clear(stageWrap).append(el('div', { class: 'empty' }, e.message)); });
 
   // "at=x,y[,w,h]" (links from the ERC/DRC tab, e.g. a grid finding): zoom there and outline it
   function showAt(box) { stage.zoomTo(box); stage.highlight(box); }
@@ -284,18 +241,18 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
     get mode() { return mode; },
     get box() { return stage ? worldBox() : null; },
     region() { return stage?.region() || null; },
-    destroy() { destroyed = true; resharpen.cancel(); writeView.cancel(); stopFill(); boxes.stop(); for (const c of cleanups) c(); stage?.destroy(); },
+    destroy() { destroyed = true; writeView.cancel(); stopFill(); boxes.stop(); cmp?.destroy(); stage?.destroy(); },
     onParams(p, slid = false) {
       writeView.cancel();
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
-      else if (slid && stage && mode !== 'diff') setMode(mode);
+      else if (slid && stage && mode !== 'diff') setMode(mode); // new slider values from the URL
       const ci = Number.parseInt(p.c, 10);
       const reselect = Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length;
       if (reselect) changes.select(ci);
       const at = parseAtParam(p.at);
-      const z = parseZoom(p.z);
+      const z = view2dNow().parseRegion(p.z);
       if (!stage) return;
-      if (z) { if (!sameZoom(z, stage.region())) stage.showRegion(z); } else if (at) showAt(at); else if (!reselect && stage.region()) stage.fit();
+      if (z) { if (!view2dNow().sameRegion(z, stage.region())) stage.showRegion(z); } else if (at) showAt(at); else if (!reselect && stage.region()) stage.fit();
     },
     onKey(e) {
       if (e.key === 'n') { changes.next(); return true; }
