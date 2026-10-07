@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import re
 
-from kipr.common.sexpr import Node
+from boarddd.io.kicad.sexpr import Node
 
 MM_PER_MIL = 0.0254
 GRID_100MIL = 2.54

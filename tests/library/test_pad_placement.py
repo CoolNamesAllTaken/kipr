@@ -18,10 +18,10 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from kipr.common.sexpr import parse
-from kipr.library.render import fp as fpmod
+from boarddd.io.kicad.sexpr import parse
+from boarddd.render import footprint as fpmod
 from kipr.library.render import model3d
-from kipr.library.render.geom import rot
+from boarddd.render.geom import rot
 
 HERE = Path(__file__).resolve().parent
 FIX = HERE / "fixtures" / "pad_placement"
@@ -101,13 +101,13 @@ class PadPlacement(unittest.TestCase):
             gold = g["copper_polygon"]
             # model3d.py: GLB / 3D preview copper
             self.assertSameCorners(model3d.pad_geom(p).exterior.coords, gold, where + " model3d")
-            # fp.py: the 2D SVG path, placed the way _pad_svg's transform places it
+            # boarddd.render.footprint: the 2D SVG path, placed the way _pad_svg's transform places it
             d = fpmod._pad_shape_d(p)
             local = [(float(x), float(y)) for x, y in re.findall(r"[ML](-?[\d.]+) (-?[\d.]+)", d)]
             ox, oy = p["offset"]
             placed = [(p["x"] + dx, p["y"] + dy) for dx, dy in (rot(ox + x, oy + y, p["angle"]) for x, y in local)]
             self.assertSameCorners(placed, gold, where + " svg", tol=2e-4)  # SVG numbers have 4 decimals
-            # fp.py: the footprint bbox covers the corners, not just w x h
+            # boarddd.render.footprint: the footprint bbox covers the corners, not just w x h
             bb = fpmod.BBox()
             fpmod._pad_bbox(p, bb)
             self.assertNear([bb.x0, bb.y0, bb.x1, bb.y1], g["copper_bbox"], where + " bbox")

@@ -1,4 +1,6 @@
-from kipr.project import diff_pcb, pcb
+from boarddd.io.kicad import pcb
+
+from kipr.project import diff_pcb
 
 HEADER = """(kicad_pcb (version 20250114) (generator "pcbnew")
   (general (thickness 1.6))

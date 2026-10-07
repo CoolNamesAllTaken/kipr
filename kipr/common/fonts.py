@@ -513,7 +513,7 @@ def text_index(board_text: str, faces) -> dict:
     out = {"uuids": {}, "texts": {}}
     if not wanted or "(face" not in board_text:
         return out
-    from .sexpr import parse
+    from boarddd.io.kicad.sexpr import parse
     root = parse(board_text)
     stack = [root]
     while stack:

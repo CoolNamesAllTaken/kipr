@@ -372,10 +372,10 @@ kipr library ci post-review --site /tmp/cr-site --repo PantsForBirds/kicad-libs 
 
 | Path | What |
 |---|---|
-| `kipr/common/sexpr.py` | s-expression parser with source spans (KiCad 5–10, `\|base64\|` data) |
+| boarddd (`boarddd.io.kicad.sexpr`, `boarddd.render.{footprint,symbol,geom}`) | s-expression parser with source spans; the footprint / symbol SVG renderers (kipr's, moved to boarddd) |
 | `kipr/common/git.py`, `kipr/common/kicad_cli.py` | read-only git access; finding/running kicad-cli |
 | `kipr/library/layout.py` | the configurable library directories |
-| `kipr/library/render/` | change detection, re-encode detection (`reencode.py`), footprint/symbol SVG renderers, PNG/diff, 3D (GLB, STEP copies, stock models) |
+| `kipr/library/render/` | change detection, re-encode detection (`reencode.py`), PNG/diff, 3D (GLB, STEP copies, stock models) |
 | `kipr/library/checks/` | KLC-style rules (`kicad_checks.py`), official KLC checker glue (`klc_utils.py`) |
 | `kipr/library/report.py`, `kipr/library/site.py` | the HTML report; copies the viewer + file:// support into OUT |
 | `kipr/library/ci/` | GitHub glue (above) |

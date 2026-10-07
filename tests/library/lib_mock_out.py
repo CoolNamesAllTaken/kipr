@@ -17,7 +17,7 @@ import struct
 import subprocess
 import zlib
 
-from kipr.common import sexpr
+from boarddd.io.kicad import sexpr
 
 
 def tiny_png(w=64, h=48, rgb=(40, 40, 40)) -> bytes:

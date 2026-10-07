@@ -19,7 +19,7 @@ sys.path.insert(0, HERE)
 import fixture_repo  # noqa: E402
 import lib_mock_out as make_mock_out  # noqa: E402
 
-from kipr.common import sexpr  # noqa: E402
+from boarddd.io.kicad import sexpr  # noqa: E402
 from kipr.library.checks import kicad_checks as kc  # noqa: E402
 from kipr.library.checks import klc_utils  # noqa: E402
 from kipr.library.checks import main as cr  # noqa: E402

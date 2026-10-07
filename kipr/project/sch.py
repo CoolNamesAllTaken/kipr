@@ -13,8 +13,8 @@ import re
 from dataclasses import dataclass, field
 
 from . import geom
-from kipr.common.sexpr import Node, dumps, parse
-from .pcb import pt, rnd, shape_points
+from boarddd.io.kicad.sexpr import Node, dumps, parse
+from boarddd.io.kicad.pcb import pt, rnd, shape_points
 
 # Paper sizes in mm (landscape), see KiCad's PAGE_INFO.
 PAPER = {"A5": (210, 148), "A4": (297, 210), "A3": (420, 297), "A2": (594, 420), "A1": (841, 594),

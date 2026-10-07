@@ -20,9 +20,9 @@ import subprocess
 import sys
 
 from kipr.common import kicad_cli
-from kipr.common.sexpr import dumps, parse
+from boarddd.io.kicad.sexpr import dumps, parse
 from kipr.library.render import reencode as rc
-from kipr.library.render.sym import parse_library
+from boarddd.render.symbol import parse_library
 
 
 def git(repo, *a):

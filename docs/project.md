@@ -378,7 +378,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/review.py` | orchestration, `project-review.json` |
 | `kipr/project/discover.py` | changed projects, dependencies, checkout |
 | `kipr/project/export.py` | kicad-cli jobs, export cache, file-name mapping |
-| `kipr/project/pcb.py`, `sch.py` | s-expression models of boards and schematic hierarchies |
+| `boarddd.io.kicad.pcb` (`load`), `kipr/project/sch.py` | s-expression models of boards (boarddd's KiCad reader) and schematic hierarchies |
 | `kipr/project/diff_pcb.py`, `diff_sch.py`, `diff_net.py` | semantic diffs, BOM, netlist, ERC/DRC deltas |
 | `kipr/project/grid.py` | schematic connection grid check (`checks.grid`) |
 | `kipr/project/impedance.py` | controlled-impedance check (`checks.impedance`, boarddd's KiCad reader, field solver and closed-form models) |
@@ -386,7 +386,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/cli.py` | `kipr project [review\|site\|report\|ci]` |
 | `kipr/project/site.py`, `report.py` | viewer copy + file:// support, no-JS HTML report |
 | `kipr/project/web` | symlink to `web/project/` (the viewer, shipped in the wheel as package data) |
-| `kipr/common/git.py`, `kicad_cli.py`, `sexpr.py` | shared git (renames, blob ids, `git archive`), kicad-cli (option probing) and s-expression helpers |
+| `kipr/common/git.py`, `kicad_cli.py` | shared git (renames, blob ids, `git archive`), kicad-cli (option probing); s-expressions are `boarddd.io.kicad.sexpr` |
 | `.github/workflows/project-review*.yml` | reusable workflows |
 
 ## Tests

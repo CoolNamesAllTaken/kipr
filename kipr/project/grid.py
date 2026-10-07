@@ -18,7 +18,7 @@ import posixpath
 from dataclasses import dataclass, field
 
 from . import geom, sch
-from .pcb import pt
+from boarddd.io.kicad.pcb import pt
 
 MIL_MM = 0.0254
 TOLERANCE_MM = 0.001  # float noise; KiCad stores schematic coordinates in 100 nm steps

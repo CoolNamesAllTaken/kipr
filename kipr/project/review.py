@@ -12,8 +12,10 @@ import time
 import traceback
 from dataclasses import dataclass, field
 
+from boarddd.io.kicad import pcb
+
 from .. import __version__
-from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, impedance, models, pcb, sch
+from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, impedance, models, sch
 from ..common import fonts as fonts_mod
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
@@ -49,7 +51,7 @@ class Side:
     pcb_text: str | None = None  # the board as committed (the checkout's copy may get model fallbacks)
     model_subs: dict = field(default_factory=dict)  # {path in the board: path used for the export}
     model_counts: dict | None = None
-    board: pcb.Board | None = None
+    board: pcb.PcbFile | None = None
     schem: sch.SchematicSet | None = None
     futures: dict = field(default_factory=dict)
     results: dict = field(default_factory=dict)
@@ -572,7 +574,7 @@ class ProjectReview:
         t1 = time.monotonic()
         pcb_changes, components = [], []
         if b.board is not None or h.board is not None:
-            empty = pcb.Board([], [], {}, [], [], [], {}, None, {}, None, {})
+            empty = pcb.PcbFile([], [], {}, [], [], [], {}, None, {}, None, {})
             pcb_changes, components = diff_pcb.diff_boards(b.board or empty, h.board or empty)
         self.timings["diff"] = time.monotonic() - t1
         self.wait_exports()

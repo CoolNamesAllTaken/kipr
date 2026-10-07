@@ -18,9 +18,9 @@ from pathlib import Path
 import pytest
 
 from kipr.common import kicad_cli
-from kipr.common.sexpr import parse
+from boarddd.io.kicad.sexpr import parse
 from kipr.library.render import reencode as rc
-from kipr.library.render.sym import parse_library
+from boarddd.render.symbol import parse_library
 
 FX = Path(__file__).parent / "fixtures" / "reencode"
 SYM8 = (FX / "Custom_RF_Amplifier.k8.kicad_sym").read_text(encoding="utf-8")
