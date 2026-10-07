@@ -6,7 +6,10 @@ import { inkMask, alphaMask, dilate, diffMasks, paintDiff, regions } from '../..
 import {
   sortLayers, copperIndex, isDocLayer, docExtent, frameBox, faceLayers, kicadBoxToGerber, gerberPointToKicad, boardRect, gerberOrigin, boardStyle, union, grow, layerColor,
 } from '../../web/project/js/board.js';
-import { fitTransform, zoomAbout } from '../../web/project/js/panzoom.js';
+import { fitTransform, zoomAbout, regionOf, viewForRegion } from '../../web/project/js/panzoom.js';
+import {
+  mergeParams, formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, sameSize, stepItem, rememberRoute, routeFor, layerNote, sheetNote,
+} from '../../web/project/js/viewstate.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
 import { matchesQuery, statusCounts, sheetSpotHash, gridGroups } from '../../web/project/js/tables.js';
 import { faceOf, pickDiffLayer, parseAt } from '../../web/project/js/layout.js';
@@ -298,8 +301,8 @@ test('grid findings: per-sheet groups and links to the spot on the sheet', () =>
   const items = [{ sheet: 'root', ref: 'U1' }, { sheet: 'root/power', text: '+3V3' }, { sheet: 'root', ref: 'R1' }, 'junk'];
   assert.deepEqual(gridGroups(items).map((g) => [g.sheet, g.items.length]), [['root', 2], ['root/power', 1]]);
   assert.equal(sheetSpotHash('demo', 'root/power', [198.73, 128.73, 2.54, 2.54], [200, 130]),
-    '#/p/demo/schematic/root%2Fpower?at=198.73%2C128.73%2C2.54%2C2.54');
-  assert.equal(sheetSpotHash('demo', 'root', 'junk', [200, 130]), '#/p/demo/schematic/root?at=200%2C130');
+    '#/p/demo/schematic/root%2Fpower?at=198.73,128.73,2.54,2.54');
+  assert.equal(sheetSpotHash('demo', 'root', 'junk', [200, 130]), '#/p/demo/schematic/root?at=200,130');
   assert.equal(sheetSpotHash('demo', 'root', null, ['x', 1]), '#/p/demo/schematic/root');
   assert.deepEqual(parseAtParam('198.73,128.73,2.54,2.54'), { x: 198.73, y: 128.73, w: 2.54, h: 2.54 });
   assert.deepEqual(parseAtParam('200,130'), { x: 198, y: 128, w: 4, h: 4 });
@@ -340,4 +343,115 @@ test('boxes: default shown, toggle remembered, deep link wins without being reme
     delete globalThis.localStorage;
     resetBoxes();
   }
+});
+
+// --- view state kept across layer / sheet / tab changes (viewstate.js) ----------------------------
+
+test('viewstate: mergeParams keeps what a view does not name, null removes', () => {
+  const cur = { view: 'top', mode: 'swipe', c: '2', z: '120,80,30', sw: '0.3', boxes: '0' };
+  // a layer change names only the layer-related keys: mode, slider, zoom, boxes stay
+  assert.deepEqual(mergeParams(cur, { view: 'top', mode: 'swipe', c: null }), { view: 'top', mode: 'swipe', z: '120,80,30', sw: '0.3', boxes: '0' });
+  assert.deepEqual(mergeParams(cur, { z: null, at: undefined, q: '' }), { view: 'top', mode: 'swipe', c: '2', sw: '0.3', boxes: '0' });
+  assert.deepEqual(mergeParams(null, { a: 1 }), { a: 1 });
+  assert.deepEqual(mergeParams({ a: '1' }, null), { a: '1' });
+  assert.deepEqual(cur.c, '2', 'input not mutated');
+});
+
+test('viewstate: zoom region in the URL round trips', () => {
+  for (const r of [{ cx: 124.76, cy: 88.68, w: 7.027 }, { cx: -10.5, cy: 0, w: 300 }, { cx: 1.2345, cy: 2.3456, w: 0.5 }]) {
+    const back = parseZoom(formatZoom(r));
+    assert.ok(sameZoom(back, r), `${JSON.stringify(r)} -> ${formatZoom(r)}`);
+  }
+  assert.equal(formatZoom(null), null);
+  assert.equal(formatZoom({ cx: 1, cy: 2, w: 0 }), null);
+  assert.equal(formatZoom({ cx: NaN, cy: 2, w: 3 }), null);
+  for (const bad of ['', '1,2', '1,2,3,4', 'a,b,c', '1,2,-3', '1,2,0', '1,2,1e9', undefined, 5]) assert.equal(parseZoom(bad), null, String(bad));
+  assert.ok(sameZoom(null, null));
+  assert.ok(!sameZoom(null, { cx: 0, cy: 0, w: 1 }));
+  assert.ok(!sameZoom({ cx: 0, cy: 0, w: 10 }, { cx: 0.5, cy: 0, w: 10 }));
+});
+
+test('viewstate: sliders in the URL (default 0.5 omitted)', () => {
+  assert.equal(sliderParam(0.5), null);
+  assert.equal(sliderParam(0.3), '0.3');
+  assert.equal(sliderParam(0.12345), '0.123');
+  assert.equal(sliderParam(1.5), '1');
+  assert.equal(parseSlider('0.3'), 0.3);
+  for (const bad of [undefined, '', 'x', '-0.1', '1.1']) assert.equal(parseSlider(bad), 0.5, String(bad));
+  assert.equal(parseSlider(sliderParam(0.7)), 0.7);
+});
+
+test('viewstate: stepping through layers / sheets', () => {
+  const l = ['a', 'b', 'c'];
+  assert.equal(stepItem(l, 'a', 1), 'b');
+  assert.equal(stepItem(l, 'c', 1), 'c'); // stops at the end
+  assert.equal(stepItem(l, 'a', -1), 'a');
+  assert.equal(stepItem(l, 'c', 1, true), 'a'); // wraps
+  assert.equal(stepItem(l, 'a', -1, true), 'c');
+  assert.equal(stepItem(l, 'zz', 1), 'a');
+  assert.equal(stepItem(l, 'zz', -1), 'c');
+  assert.equal(stepItem([], 'a', 1), null);
+});
+
+test('viewstate: sheet zoom kept only for the same paper size', () => {
+  assert.ok(sameSize({ w: 297, h: 210 }, { w: 297.2, h: 210 }));
+  assert.ok(!sameSize({ w: 297, h: 210 }, { w: 420, h: 297 }));
+  assert.ok(!sameSize(null, { w: 1, h: 1 }));
+});
+
+test('viewstate: each tab remembers its route (not boxes / at)', () => {
+  const mem = new Map();
+  rememberRoute(mem, { slug: 'a', tab: 'layout', item: 'B.Cu', params: { mode: 'diff', z: '1,2,3', boxes: '0', at: '4,5' } });
+  rememberRoute(mem, { slug: 'a', tab: 'schematic', item: 'root/power', params: { mode: 'swipe', sw: '0.3' } });
+  rememberRoute(mem, { slug: null, tab: null, item: null, params: {} }); // overview: nothing
+  assert.deepEqual(routeFor(mem, 'a', 'layout'), { slug: 'a', tab: 'layout', item: 'B.Cu', params: { mode: 'diff', z: '1,2,3' } });
+  assert.deepEqual(routeFor(mem, 'a', 'schematic').params, { mode: 'swipe', sw: '0.3' });
+  assert.deepEqual(routeFor(mem, 'b', 'layout'), { slug: 'b', tab: 'layout', item: null, params: {} });
+  assert.equal(formatHash(routeFor(mem, 'a', 'layout')), '#/p/a/layout/B.Cu?mode=diff&z=1,2,3');
+  // the copy is the caller's: changing it does not change the memory
+  routeFor(mem, 'a', 'layout').params.mode = 'side';
+  assert.equal(routeFor(mem, 'a', 'layout').params.mode, 'diff');
+  assert.equal(mem.size, 2);
+});
+
+test('viewstate: notes when the kept mode does not fit the layer / sheet', () => {
+  const L = (status) => ({ id: 'In1.Cu', status });
+  assert.equal(layerNote(L('modified'), 'diff'), null);
+  assert.match(layerNote(L('unchanged'), 'diff'), /identical/);
+  assert.match(layerNote(L('added'), 'diff'), /only in head/);
+  assert.match(layerNote(L('removed'), 'diff'), /only in base/);
+  assert.equal(layerNote(L('added'), 'diff', { bothSides: false }), null); // an added project: every layer is
+  assert.equal(layerNote(L('modified'), 'swipe'), null); // no layer picked yet: nothing to explain
+  assert.match(layerNote(L('modified'), 'swipe', { picked: true, view: 'top' }), /Swipe shows the top face/);
+  assert.match(layerNote(L('modified'), 'side', { picked: true, view: 'layers' }), /ticked layers/);
+  assert.equal(layerNote(null, 'diff'), null);
+  const S = (status) => ({ id: 'root', status });
+  assert.equal(sheetNote(S('modified'), 'diff'), null);
+  assert.match(sheetNote(S('unchanged'), 'diff'), /identical/);
+  assert.equal(sheetNote(S('unchanged'), 'side'), null);
+  assert.match(sheetNote(S('added'), 'side', { hasBase: false }), /only in head.*base side is empty/);
+  assert.match(sheetNote(S('removed'), 'diff', { hasHead: false }), /only in base.*removed/);
+  assert.equal(sheetNote(S('added'), 'single', { hasBase: false, bothSides: false }), null);
+});
+
+test('panzoom: region of a view round trips (also mirrored), independent of pane size', () => {
+  const box = { x: 100, y: 50, w: 80, h: 60 };
+  for (const flip of [false, true]) {
+    const v = { tx: -300, ty: -120, s: 3.5 };
+    const r = regionOf(v, 800, 600, box, flip);
+    const v2 = viewForRegion(r, 800, 600, box, flip);
+    for (const k of ['tx', 'ty', 's']) assert.ok(Math.abs(v2[k] - v[k]) < 1e-9, `${flip} ${k}`);
+    // a pane of another size shows the same centre and width
+    const r2 = regionOf(viewForRegion(r, 400, 900, box, flip), 400, 900, box, flip);
+    for (const k of ['cx', 'cy', 'w']) assert.ok(Math.abs(r2[k] - r[k]) < 1e-9, `${flip} ${k} other pane`);
+  }
+  // the fitted view of the whole world is centred on it
+  const fit = fitTransform({ x: 0, y: 0, w: box.w * 4, h: box.h * 4 }, 800, 600, 0);
+  const r = regionOf(fit, 800, 600, box);
+  assert.ok(Math.abs(r.cx - 140) < 1e-9 && Math.abs(r.cy - 80) < 1e-9);
+  // the same KiCad point is the centre in the top and the mirrored bottom view
+  const top = viewForRegion({ cx: 110, cy: 60, w: 20 }, 800, 600, box, false);
+  const bottom = viewForRegion({ cx: 110, cy: 60, w: 20 }, 800, 600, box, true);
+  assert.ok(Math.abs(regionOf(bottom, 800, 600, box, true).cx - 110) < 1e-9);
+  assert.notEqual(top.tx, bottom.tx);
 });

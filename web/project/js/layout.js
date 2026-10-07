@@ -7,7 +7,8 @@ import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes } from './compare.js';
+import { comparePanes, compareSliders, setCompareSliders } from './compare.js';
+import { formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, stepItem, layerNote } from './viewstate.js';
 import {
   layerList, sortLayers, defaultOn, docExtent, frameBox, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
   layerColor, cssColor, grow, union,
@@ -65,6 +66,8 @@ export function createLayoutView(project, container, ctx) {
   let view = pick(VIEWS, params.view, preferred.view);
   for (const l of layers) if (!layerVisible.has(l.id)) layerVisible.set(l.id, defaultOn(l));
   let focus = layers.find((l) => l.id === ctx.route.item) || pickDiffLayer(layers, view);
+  let picked = false; // a layer was chosen by hand (for the note in modes that show a face, not one layer)
+  setCompareSliders({ swipe: parseSlider(params.sw), opacity: parseSlider(params.op) });
   let destroyed = false;
   let stage = null;
   let svgBoxes = new Map(); // svg path -> viewBox
@@ -85,11 +88,14 @@ export function createLayoutView(project, container, ctx) {
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const note = el('div', { class: 'notice small' });
   note.hidden = true;
+  const layerNoteEl = el('div', { class: 'notice small layer-note', role: 'status' });
+  layerNoteEl.hidden = true;
+  const layerNoteElBox = el('div', { class: 'view-note' }, layerNoteEl);
   const stageWrap = el('div', { class: 'stage-wrap board' });
   const legendBox = el('div', { class: 'legend' });
   const layerPanel = el('div', { class: 'layer-panel' });
   const changeBox = el('div', { class: 'diff-changes card' });
-  const mainCol = el('div', { class: 'diff-main' }, toolbar, note, stageWrap, legendBox);
+  const mainCol = el('div', { class: 'diff-main' }, toolbar, note, layerNoteElBox, stageWrap, legendBox);
   container.append(el('div', { class: 'diff-grid' },
     el('div', { class: 'side-col card' }, el('h3', {}, 'Layers'), layerPanel),
     mainCol,
@@ -140,9 +146,10 @@ export function createLayoutView(project, container, ctx) {
       if (it.layer) {
         const l = layers.find((x) => x.id === it.layer);
         const face = faceOf(it.layer);
-        if (l && mode === 'diff') { focus = l; renderLayerPanel(); }
+        if (l && mode === 'diff' && l !== focus) { focus = l; renderLayerPanel(); }
         if (face && view !== 'layers' && face !== view) setView(face);
         else if (l && mode === 'diff') setMode('diff');
+        updateLayerNote();
       }
       pushRoute(i);
       if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box, it.sides); }
@@ -151,8 +158,42 @@ export function createLayoutView(project, container, ctx) {
   changes.set(changeItems);
   changes.setMinor(minorGroups);
 
-  function pushRoute(c = changes.current) {
-    ctx.setRoute({ item: focus?.id || null, params: { view, mode, c: c >= 0 ? c : null } }, true);
+  // The URL holds the whole view: layer (item), board view, compare mode, change, zoom region, sliders.
+  function pushRoute(c = changes.current, replace = true) {
+    writeView.cancel();
+    ctx.setRoute({ item: focus?.id || null, params: { view, mode, c: c >= 0 ? c : null, ...viewParams() } }, replace);
+  }
+  function viewParams() {
+    const sl = compareSliders();
+    const z = formatZoom(stage?.region());
+    const out = { z, sw: sliderParam(sl.swipe), op: sliderParam(sl.opacity) };
+    if (z) out.at = null; // zoomed somewhere else since: the region replaces a link's at=
+    return out;
+  }
+  // zoom / pan and slider moves: replace the URL once they settle
+  const writeView = debounce(() => { if (!destroyed && stage) ctx.setRoute({ params: viewParams() }, true); }, 200);
+
+  /**
+   * Select layer l: only the selection changes. The compare mode, board view, sliders, Boxes, ticked
+   * layers and zoom region stay; Diff re-renders for the new layer (a doc layer reframes the world but
+   * keeps the region on show). A new history entry unless `push` is false (back / forward).
+   */
+  function selectLayer(l, push = true) {
+    if (!l) return;
+    picked = true;
+    if (l !== focus) {
+      focus = l;
+      renderLayerPanel();
+      if (mode === 'diff') setMode('diff');
+    }
+    updateLayerNote();
+    if (push) pushRoute(changes.current, false);
+  }
+
+  function updateLayerNote() {
+    const t = layerNote(focus, mode, { view, bothSides, picked });
+    layerNoteEl.hidden = !t;
+    layerNoteEl.textContent = t || '';
   }
 
   // --- layer panel
@@ -171,10 +212,10 @@ export function createLayoutView(project, container, ctx) {
       sw.style.background = cssColor(layerColor(l));
       ul.append(el('li', { class: `layer-row${focus === l ? ' focus' : ''}` },
         cb, sw,
-        el('button', { class: 'layer-name', title: 'Diff this layer', onclick: () => { focus = l; renderLayerPanel(); if (mode !== 'diff') { setMode('diff'); } else setMode('diff'); pushRoute(); } }, l.id),
+        el('button', { class: 'layer-name', title: 'Select this layer for Diff ([ / ] step); the compare mode and zoom stay', 'aria-current': focus === l ? 'true' : null, onclick: () => selectLayer(l) }, l.id),
         badge('status', l.status)));
     }
-    layerPanel.append(ul, el('p', { class: 'hint' }, 'Checkboxes: layers of the Layers view. Click a name to diff that layer.'));
+    layerPanel.append(ul, el('p', { class: 'hint' }, 'Checkboxes: layers of the Layers view. Click a name (or [ / ]) to pick the layer Diff shows.'));
   }
 
   // --- world box
@@ -315,6 +356,7 @@ export function createLayoutView(project, container, ctx) {
     const token = ++modeToken;
     mode = m;
     modeBar.select(m);
+    updateLayerNote();
     for (const c of modeCleanups.splice(0)) c();
     clear(extra); clear(legendBox);
     if (!stage) return;
@@ -348,7 +390,7 @@ export function createLayoutView(project, container, ctx) {
       }
     } else {
       stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
-      const c = comparePanes(stage, m, makeSide, extra, { single: sides.head ? 'head' : 'base' });
+      const c = comparePanes(stage, m, makeSide, extra, { single: sides.head ? 'head' : 'base', onSlide: () => writeView() });
       modeCleanups.push(c.cleanup);
       panes = c.panes;
     }
@@ -356,11 +398,13 @@ export function createLayoutView(project, container, ctx) {
     stage.setPanes(panes);
   }
 
-  function buildStage() {
+  // A new stage (other board view, or the frame grew / shrank for a doc layer): the same region of the
+  // board stays on show (KiCad mm, so also across top <-> bottom), the measure tool stays on.
+  function buildStage(region = stage ? stage.region() : null) {
     const old = stage;
-    const keep = old ? { ...old.view } : null;
     const box = worldBox();
     const sameBox = old && boxKey(old.box) === boxKey(box);
+    const measuring = old?.measuring ? old.measurePoints : null;
     stage?.destroy();
     if (old && !sameBox) renderR = 0; // a bigger / smaller area: pick the resolution again
     stage = createStage({ box, readout, zoomLabel: zoomLbl, flip: view === 'bottom', boxes: boxesShown() });
@@ -369,9 +413,11 @@ export function createLayoutView(project, container, ctx) {
     stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     stage.onMeasure((t) => { measureOut.textContent = t; });
     stage.onTransform(resharpen);
+    stage.onTransform(() => writeView());
+    if (measuring) stage.setMeasuring(true, measuring); // points are KiCad mm: valid in any frame
     if (!renderR) renderR = wantR();
     setMode(mode);
-    if (keep && sameBox && old.flip === stage.flip) { Object.assign(stage.view, keep); stage.apply(); }
+    if (region) stage.showRegion(region);
   }
 
   function setView(v) {
@@ -411,17 +457,29 @@ export function createLayoutView(project, container, ctx) {
     const at = parseAt(params.at);
     if (Number.isInteger(ci) && ci >= 0 && ci < changes.items.length) changes.select(ci);
     else if (at) { stage.zoomTo(at); stage.highlight(at); }
+    const z = parseZoom(params.z);
+    if (z) stage.showRegion(z); // a link / reload with a zoom region: exactly that region
+    updateLayerNote();
+    pushRoute(); // the URL names the whole view from the start (layer, view, mode)
   });
 
   return {
-    destroy() { destroyed = true; resharpen.cancel(); stopFill(); boxes.stop(); for (const c of modeCleanups) c(); stage?.destroy(); },
-    onParams(p) {
+    destroy() { destroyed = true; resharpen.cancel(); writeView.cancel(); stopFill(); boxes.stop(); for (const c of modeCleanups) c(); stage?.destroy(); },
+    // back / forward, or a link to this view: apply what the URL says, keep what it does not mention
+    onParams(p, item) {
+      writeView.cancel();
+      if (setCompareSliders({ swipe: parseSlider(p.sw), opacity: parseSlider(p.op) }) && stage && mode !== 'diff') setMode(mode);
       if (p.view && p.view !== view && VIEWS.some(([v]) => v === p.view)) setView(p.view);
+      const l = item ? layers.find((x) => x.id === item) : null;
+      if (l && l !== focus) selectLayer(l, false);
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
       const ci = Number.parseInt(p.c, 10);
-      if (Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length) changes.select(ci);
+      const reselect = Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length;
+      if (reselect) changes.select(ci);
       const at = parseAt(p.at);
-      if (at && stage) { stage.zoomTo(at); stage.highlight(at); }
+      const z = parseZoom(p.z);
+      if (!stage) return;
+      if (z) { if (!sameZoom(z, stage.region())) stage.showRegion(z); } else if (at) { stage.zoomTo(at); stage.highlight(at); } else if (!reselect && stage.region()) stage.fit();
     },
     onKey(e) {
       if (e.key === 'n') { changes.next(); return true; }
@@ -436,11 +494,8 @@ export function createLayoutView(project, container, ctx) {
         setMode(preferred.mode); pushRoute(); return true;
       }
       if (e.key === '[' || e.key === ']') {
-        const i = layers.indexOf(focus);
-        focus = layers[(i + (e.key === ']' ? 1 : -1) + layers.length) % layers.length];
-        renderLayerPanel();
-        if (mode === 'diff') setMode('diff');
-        pushRoute();
+        // in the order of the layer list (top of the stack first), wrapping around
+        selectLayer(stepItem([...layers].reverse(), focus, e.key === ']' ? 1 : -1, true));
         return true;
       }
       if (e.key === 'Escape') { stage?.highlight(null); if (stage?.measuring) toggleMeasure(); return true; }

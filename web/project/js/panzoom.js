@@ -19,6 +19,24 @@ export function zoomAbout(v, px, py, factor, minS = 0.02, maxS = 2000) {
   return { s, tx: px - (px - v.tx) * f, ty: py - (py - v.ty) * f };
 }
 
+/**
+ * The region a view shows in a pw x ph pane: centre in KiCad mm and visible width in mm. box is the
+ * stage's world box (mm), flip the mirrored bottom view.
+ */
+export function regionOf(v, pw, ph, box, flip = false) {
+  const wx = (pw / 2 - v.tx) / v.s / PX_PER_MM;
+  const wy = (ph / 2 - v.ty) / v.s / PX_PER_MM;
+  return { cx: flip ? box.x + box.w - wx : box.x + wx, cy: box.y + wy, w: pw / (v.s * PX_PER_MM) };
+}
+
+/** Inverse of regionOf: the view {tx, ty, s} that centres region r in a pw x ph pane. */
+export function viewForRegion(r, pw, ph, box, flip = false) {
+  const s = pw / (r.w * PX_PER_MM);
+  const wx = (flip ? box.x + box.w - r.cx : r.cx - box.x) * PX_PER_MM;
+  const wy = (r.cy - box.y) * PX_PER_MM;
+  return { s, tx: pw / 2 - wx * s, ty: ph / 2 - wy * s };
+}
+
 export const FLASH_MS = 1000; // with the boxes hidden, a selected change is outlined this long
 
 export function createStage({ box, readout = null, zoomLabel = null, flip = false, boxes = true }) {
@@ -28,6 +46,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   let panes = [];
   let fitted = false;
   let autoFit = false; // still the fitted view (not panned or zoomed since): re-fit when the panes resize
+  let sized = null; // pane size {pw, ph} the view was last set for: a resize keeps the centre on show
   let marks = [];
   let hl = null;
   let hlSides = null; // {base, head}: per-pane highlight for things that moved
@@ -50,7 +69,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     overlay.style.height = `${H}px`;
     if (flip) overlay.style.transform = 'scaleX(-1)';
     world.append(overlay);
-    const p = el('div', { class: 'pane' }, world, label ? el('div', { class: 'pane-label' }, label) : null);
+    const p = el('div', { class: `pane${measuring ? ' measuring' : ''}` }, world, label ? el('div', { class: 'pane-label' }, label) : null);
     p._world = world;
     p._side = label === 'base' || label === 'head' ? label : null;
     p._overlay = overlay;
@@ -73,7 +92,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   function setPanes(list) {
     panes = list;
     drawOverlay();
-    if (!fitted || autoFit) fit(); else apply();
+    if (!fitted || autoFit) fit(); else { sized = paneSize(); apply(); }
   }
 
   function apply() {
@@ -95,8 +114,27 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
   function fit() {
     const { pw, ph } = paneSize();
     Object.assign(view, fitTransform({ x: 0, y: 0, w: W, h: H }, pw, ph, 0.02));
+    sized = { pw, ph };
     fitted = true;
     autoFit = true;
+    apply();
+  }
+
+  /** The region on show ({cx, cy, w}, see regionOf), or null while it is still the fitted view. */
+  function region() {
+    if (!fitted || autoFit) return null;
+    const { pw, ph } = paneSize();
+    return regionOf(view, pw, ph, box, flip);
+  }
+
+  /** Show region r (from region() of this or another stage, or a z= link); null: fit. */
+  function showRegion(r) {
+    if (!r) { fit(); return; }
+    const { pw, ph } = paneSize();
+    Object.assign(view, viewForRegion(r, pw, ph, box, flip));
+    sized = { pw, ph };
+    fitted = true;
+    autoFit = false;
     apply();
   }
 
@@ -109,6 +147,7 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     const [x0, y0] = mmToWorld(flip ? cx + w / 2 : cx - w / 2, cy - h / 2);
     const { pw, ph } = paneSize();
     Object.assign(view, fitTransform({ x: x0, y: y0, w: w * PX_PER_MM, h: h * PX_PER_MM }, pw, ph, pad));
+    sized = { pw, ph };
     fitted = true;
     autoFit = false;
     apply();
@@ -165,9 +204,9 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     return `Δx ${dx.toFixed(3)}  Δy ${dy.toFixed(3)}  d ${Math.hypot(dx, dy).toFixed(3)} mm`;
   }
   const measureListeners = new Set();
-  function setMeasuring(on) {
+  function setMeasuring(on, points = []) {
     measuring = !!on;
-    measure = [];
+    measure = measuring ? points.slice(0, 2) : [];
     for (const p of panes) p.classList.toggle('measuring', measuring);
     drawOverlay();
     for (const fn of measureListeners) fn(measureText());
@@ -237,16 +276,23 @@ export function createStage({ box, readout = null, zoomLabel = null, flip = fals
     p.addEventListener('dblclick', () => fit());
   }
 
-  const ro = new ResizeObserver(() => { if (autoFit) fit(); else if (fitted) apply(); });
+  const ro = new ResizeObserver(() => {
+    if (autoFit) { fit(); return; }
+    if (!fitted) return;
+    const { pw, ph } = paneSize();
+    if (sized) { view.tx += (pw - sized.pw) / 2; view.ty += (ph - sized.ph) / 2; }
+    sized = { pw, ph };
+    apply();
+  });
   cleanup.push(() => ro.disconnect(), () => clearTimeout(flashTimer));
 
   return {
     box, W, H, view, flip,
-    pane, place, setPanes, fit, zoomTo, apply, toMm, setMarks, highlight, setBoxes, get boxes() { return boxesOn; },
+    pane, place, setPanes, fit, zoomTo, region, showRegion, apply, toMm, setMarks, highlight, setBoxes, get boxes() { return boxesOn; },
     observe(container) { ro.observe(container); },
     onTransform(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onMeasure(fn) { measureListeners.add(fn); },
-    setMeasuring, get measuring() { return measuring; },
+    setMeasuring, get measuring() { return measuring; }, get measurePoints() { return measure.slice(); },
     /** Pane-space x of a world mm x (for the swipe divider). */
     paneX(p, mmX) { return view.tx + mmToWorld(mmX, 0)[0] * view.s; },
     destroy() { for (const fn of cleanup) fn(); listeners.clear(); },

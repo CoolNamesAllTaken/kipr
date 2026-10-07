@@ -5,7 +5,8 @@ import { createChangeList, describeChange } from './changes.js';
 import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes } from './compare.js';
+import { comparePanes, compareSliders, setCompareSliders } from './compare.js';
+import { formatZoom, parseZoom, sameZoom, sameSize, sliderParam, parseSlider, stepItem, sheetNote } from './viewstate.js';
 
 // Base raster resolution (px/mm): shared by the first display bitmaps and the ink diff, so a sheet is
 // drawn once on open. Real KiCad sheets are megabytes of SVG and drawing one is the expensive part.
@@ -30,6 +31,10 @@ export function createSchematicView(project, container, ctx) {
   }
   let sheet = pickSheet(sheets, ctx.route.item);
   let sheetView = null;
+  // the compare modes are the project's: a sheet only in head or base of a modified project keeps the
+  // chosen mode (its missing side is empty), so stepping through sheets never switches mode
+  const bothSides = project.status !== 'added' && project.status !== 'removed';
+  setCompareSliders({ swipe: parseSlider(ctx.route.params.sw), opacity: parseSlider(ctx.route.params.op) });
 
   const sheetNav = el('nav', { class: 'side-list', 'aria-label': 'Sheets' });
   const mainBox = el('div', { class: 'diff-main' });
@@ -43,7 +48,7 @@ export function createSchematicView(project, container, ctx) {
       sheetNav.append(el('button', {
         class: `side-item${s === sheet ? ' active' : ''}${s.status === 'unchanged' ? ' dim' : ''}`,
         'aria-current': s === sheet ? 'true' : null,
-        onclick: () => openSheet(s, {}),
+        onclick: () => switchSheet(s),
       },
       el('span', { class: 'side-name', title: s.id }, s.title || s.id),
       el('span', { class: 'side-meta' }, s.page ? el('span', { class: 'muted' }, `p.${s.page}`) : null, badge('status', s.status), n ? el('span', { class: 'count' }, String(n)) : null)));
@@ -55,34 +60,44 @@ export function createSchematicView(project, container, ctx) {
     renderNav();
     sheetView?.destroy();
     clear(mainBox); clear(changeBox);
-    ctx.setRoute({ item: s.id, params: { mode: params.mode || null, c: params.c ?? null } }, true);
-    sheetView = createSheetView(project, s, mainBox, changeBox, ctx, params);
+    sheetView = createSheetView(project, s, mainBox, changeBox, ctx, params, bothSides);
+  }
+
+  /**
+   * The user picked sheet s (click, [ / ]): only the sheet changes. The compare mode and sliders stay;
+   * the zoom region stays when the new sheet has the same size (else it is fitted). New history entry.
+   */
+  function switchSheet(s) {
+    if (!s || s === sheet) return;
+    const keep = sheetView ? { region: sheetView.region(), box: sheetView.box } : null;
+    const params = { ...ctx.route.params, mode: sheetView?.mode || ctx.route.params.mode, c: null, at: null, z: null };
+    ctx.setRoute({ item: s.id, params }, false);
+    openSheet(s, { ...params, keep });
   }
 
   renderNav();
-  sheetView = createSheetView(project, sheet, mainBox, changeBox, ctx, ctx.route.params);
-
-  const step = (d) => {
-    const i = sheets.indexOf(sheet);
-    const n = sheets[Math.min(Math.max(i + d, 0), sheets.length - 1)];
-    if (n !== sheet) openSheet(n, { mode: sheetView?.mode });
-  };
+  sheetView = createSheetView(project, sheet, mainBox, changeBox, ctx, ctx.route.params, bothSides);
 
   return {
     destroy() { sheetView?.destroy(); },
-    onParams(params) { sheetView?.onParams(params); },
+    // back / forward, or a link to this view: another sheet opens with the URL's state
+    onParams(params, item) {
+      const slid = setCompareSliders({ swipe: parseSlider(params.sw), opacity: parseSlider(params.op) });
+      const s = item ? sheets.find((x) => x.id === item) : null;
+      if (s && s !== sheet) openSheet(s, { ...params, mode: params.mode || sheetView?.mode });
+      else sheetView?.onParams(params, slid);
+    },
     onKey(e) {
-      if (e.key === ']') { step(1); return true; }
-      if (e.key === '[') { step(-1); return true; }
+      if (e.key === ']' || e.key === '[') { switchSheet(stepItem(sheets, sheet, e.key === ']' ? 1 : -1)); return true; }
       return sheetView?.onKey(e) || false;
     },
   };
 }
 
-function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
+function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSides = true) {
   const hasBase = !!assetUrl(sheet.base);
   const hasHead = !!assetUrl(sheet.head);
-  const modes = hasBase && hasHead ? MODES : [['single', hasHead ? 'Head (added)' : 'Base (removed)'], ['diff', 'Diff']];
+  const modes = bothSides || (hasBase && hasHead) ? MODES : [['single', hasHead ? 'Head (added)' : 'Base (removed)'], ['diff', 'Diff']];
   if (!hasBase && !hasHead) {
     mainBox.append(el('div', { class: 'empty' }, 'No SVG export for this sheet.'));
   }
@@ -96,7 +111,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
 
   const readout = el('span', { class: 'readout' });
   const zoomLbl = el('span', { class: 'readout zoom' });
-  const modeBar = createModeBar(modes, mode, (m) => { preferredMode = m; setMode(m); });
+  const modeBar = createModeBar(modes, mode, (m) => { preferredMode = m; setMode(m); writeRoute(); });
   const extra = el('div', { class: 'toolbar-extra' });
   const title = el('div', { class: 'view-title' },
     el('strong', {}, sheet.title || sheet.id), el('span', { class: 'muted' }, sheet.file || ''), badge('status', sheet.status));
@@ -105,8 +120,27 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const stageWrap = el('div', { class: 'stage-wrap paper' }, el('div', { class: 'loading' }, 'Loading sheet…'));
   const legendBox = el('div', { class: 'legend' });
-  mainBox.append(title, toolbar, stageWrap, legendBox);
+  const noteEl = el('div', { class: 'notice small sheet-note', role: 'status' });
+  noteEl.hidden = true;
+  const noteElBox = el('div', { class: 'view-note' }, noteEl);
+  mainBox.append(title, toolbar, noteElBox, stageWrap, legendBox);
   const stopFill = fillViewport(stageWrap, { until: mainBox, watch: [title, toolbar, legendBox] });
+
+  // the URL holds the sheet's view: compare mode, change, zoom region, sliders (zoom / sliders once settled)
+  function viewParams() {
+    const sl = compareSliders();
+    const z = formatZoom(stage?.region());
+    const out = { mode, z, sw: sliderParam(sl.swipe), op: sliderParam(sl.opacity) };
+    if (z) out.at = null;
+    return out;
+  }
+  function writeRoute(extra = {}) { writeView.cancel(); ctx.setRoute({ item: sheet.id, params: { ...viewParams(), ...extra } }, true); }
+  const writeView = debounce(() => { if (!destroyed && stage) ctx.setRoute({ params: viewParams() }, true); }, 200);
+  function updateNote() {
+    const t = sheetNote(sheet, mode, { hasBase, hasHead, bothSides });
+    noteEl.hidden = !t;
+    noteEl.textContent = t || '';
+  }
 
   // --- change list: contract changes; if there are none, the pixel diff's regions
   const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null });
@@ -119,7 +153,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
     title: 'Changes',
     empty: sheet.status === 'unchanged' ? 'Sheet unchanged.' : 'No itemised changes for this sheet.',
     onSelect: (i, it) => {
-      ctx.setRoute({ params: { mode, c: i } }, true);
+      writeRoute({ c: i >= 0 ? i : null });
       if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box, it.sides); }
     },
   });
@@ -172,6 +206,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
     const token = ++modeToken;
     mode = m;
     modeBar.select(m);
+    updateNote();
     for (const c of cleanups.splice(0)) c();
     clear(extra); clear(legendBox);
     if (!stage) return;
@@ -190,7 +225,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
         legendBox.append(el('span', { class: 'muted' }, `${d.regions.length} changed area${d.regions.length === 1 ? '' : 's'}`));
       }).catch((e) => { clear(holder).append(el('div', { class: 'missing-msg' }, `Diff failed: ${e.message}`)); });
     } else {
-      const c = comparePanes(stage, m, img, extra, { single: hasHead ? 'head' : 'base' });
+      const c = comparePanes(stage, m, img, extra, { single: hasHead ? 'head' : 'base', onSlide: () => writeView() });
       cleanups.push(c.cleanup);
       panes = c.panes;
     }
@@ -225,14 +260,21 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
       stage = createStage({ box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown() });
       stage.observe(stageWrap);
       stage.onTransform(resharpen);
+      stage.onTransform(() => writeView());
       stage.setMarks(contractChanges.filter((c) => c.box).map((c) => ({ box: c.box })));
       setMode(mode); // lays out the panes and fits
+      // zoom: the URL's region, else (another sheet picked) the previous sheet's region when the paper is
+      // the same size; sheets of other sizes are fitted
+      const z = parseZoom(params.z) || (params.keep?.region && sameSize(params.keep.box, worldBox()) ? params.keep.region : null);
+      if (z) stage.showRegion(z);
       dispR = wantR();
       setMode(mode);
       const ci = Number.parseInt(params.c, 10);
       const at = parseAtParam(params.at);
       if (Number.isInteger(ci) && ci >= 0 && ci < changes.items.length) changes.select(ci);
       else if (at) showAt(at);
+      if (z && (Number.isInteger(ci) || at)) stage.showRegion(z); // the region was saved after that zoom
+      writeRoute();
     });
 
   // "at=x,y[,w,h]" (links from the ERC/DRC tab, e.g. a grid finding): zoom there and outline it
@@ -240,13 +282,20 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
 
   return {
     get mode() { return mode; },
-    destroy() { destroyed = true; resharpen.cancel(); stopFill(); boxes.stop(); for (const c of cleanups) c(); stage?.destroy(); },
-    onParams(p) {
+    get box() { return stage ? worldBox() : null; },
+    region() { return stage?.region() || null; },
+    destroy() { destroyed = true; resharpen.cancel(); writeView.cancel(); stopFill(); boxes.stop(); for (const c of cleanups) c(); stage?.destroy(); },
+    onParams(p, slid = false) {
+      writeView.cancel();
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
+      else if (slid && stage && mode !== 'diff') setMode(mode);
       const ci = Number.parseInt(p.c, 10);
-      if (Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length) changes.select(ci);
+      const reselect = Number.isInteger(ci) && ci !== changes.current && ci < changes.items.length;
+      if (reselect) changes.select(ci);
       const at = parseAtParam(p.at);
-      if (at && stage) showAt(at);
+      const z = parseZoom(p.z);
+      if (!stage) return;
+      if (z) { if (!sameZoom(z, stage.region())) stage.showRegion(z); } else if (at) showAt(at); else if (!reselect && stage.region()) stage.fit();
     },
     onKey(e) {
       if (e.key === 'n') { changes.next(); return true; }
@@ -257,7 +306,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params) {
         const i = modes.findIndex(([m]) => m === mode);
         preferredMode = modes[(i + 1) % modes.length][0];
         setMode(preferredMode);
-        ctx.setRoute({ params: { mode: preferredMode, c: changes.current >= 0 ? changes.current : null } }, true);
+        writeRoute();
         return true;
       }
       if (e.key === 'Escape') { stage?.highlight(null); return true; }
