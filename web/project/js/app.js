@@ -316,6 +316,7 @@ function copyLink(btn) {
 const SHORTCUTS = [
   ['1 – 6', 'switch tab (Schematic, Layout, 3D, BOM, Netlist, ERC/DRC)'],
   ['j / k', 'next / previous project'],
+  ['↑ / ↓', 'layer above / below in the layer list (layout; stops at the ends)'],
   ['[ / ]', 'previous / next layer (layout: that one layer, base vs head, in any compare mode) or sheet (schematic); the mode, slider and zoom stay'],
   ['n / p', 'next / previous change (zooms to it)'],
   ['m', 'cycle compare mode (side by side, diff, onion, swipe)'],
@@ -344,7 +345,9 @@ function toggleHelp(force) {
 }
 
 function onKey(e) {
-  if (e.target.closest?.('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  // a ticked layer checkbox keeps focus: ↑ / ↓ still step layers from there
+  const field = e.target.closest?.('input, textarea, select');
+  if ((field && !(field.type === 'checkbox' && e.key.startsWith('Arrow'))) || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape' && $('#help') && !$('#help').hidden) { toggleHelp(false); return; }
   if (e.key === '?') { toggleHelp(); return; }
   if (state.view?.onKey?.(e)) { e.preventDefault(); return; }

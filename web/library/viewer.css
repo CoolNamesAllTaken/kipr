@@ -116,6 +116,8 @@ h1 { font-size: 20px; }
 .layers { display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; font-size: 12px; margin-bottom: 6px; }
 .layers-title { font-weight: 600; color: var(--muted); margin-right: 2px; }
 .layer-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+.layers.soloing .layer-toggle:not(.solo) { opacity: 0.45; }
+.layer-toggle.solo { background: var(--accent-soft); outline: 1px solid var(--accent); border-radius: 3px; padding: 0 3px; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; background: #888; display: inline-block; }
 .swatch[data-layer="F.Cu"] { background: #c83434; } .swatch[data-layer="B.Cu"] { background: #4d7fc4; }
 .swatch[data-layer="F.SilkS"] { background: #f2eda1; } .swatch[data-layer="B.SilkS"] { background: #e8b2a7; }

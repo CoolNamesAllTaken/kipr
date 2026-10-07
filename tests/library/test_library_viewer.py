@@ -128,6 +128,12 @@ class ScreenshotTests(unittest.TestCase):
         r = run_tool("stage_height.py", "--site", str(mock_site()), "--shots", str(shots_dir("stage-height")))
         self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
 
+    def test_layer_keys(self):
+        """Up / Down solo a footprint layer, front to back, stopping at the ends."""
+        r = run_tool("layer_keys.py", "--site", str(mock_site()), "--shots", str(shots_dir("layer-keys")))
+        self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
+        self.assertIn("layer keys: ok", r.stdout)
+
 
 @unittest.skipUnless(HAVE_PW, "needs playwright + chromium (python -m playwright install chromium)")
 class ColorTests(unittest.TestCase):
