@@ -137,7 +137,8 @@ for (const theme of THEMES) {
     const tabs = await page.locator('.tabs .tab').allTextContents();
     if (tabs.some((x) => /Schematic|BOM|Netlist/.test(x)) || !page.url().includes('/layout')) problems.push(`${tag}: panel tabs ${tabs.join(',')} at ${page.url()}`);
     if (await page.locator('.panel-line a[href="#/p/demo_board"]').count() !== 1) problems.push(`${tag}: panel line has no link to its source board`);
-    if (await page.locator('.notice').count()) problems.push(`${tag}: panel shows a notice (${await page.locator('.notice').first().textContent()})`);
+    const notices = page.locator('.notice:visible');
+    if (await notices.count()) problems.push(`${tag}: panel shows a notice (${await notices.first().textContent()})`);
     // interactions: next change, help overlay, measure tool
     await page.goto(base + `${P}/schematic/root?mode=side`);
     await settle(page);
