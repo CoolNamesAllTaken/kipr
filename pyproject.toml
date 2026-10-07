@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "KiCad review: visual and semantic diffs of symbols, footprints, schematics, layouts and 3D PCBAs"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # boarddd's floor
 dependencies = [
     # library review: 2D renders -> PNG, diff.png, KiCad 10 embedded models;
     # project report: sheet/layer PNGs (cairosvg + Pillow)
@@ -16,6 +16,9 @@ dependencies = [
     "pillow>=10",
     "numpy>=1.24",
     "zstandard>=0.22",
+    # project review: board model, KiCad stackup/net-class readers and closed-form impedance (checks.impedance).
+    # Pinned to a commit of boarddd main (PR #15) until the v0.4.0 tag; keep in step with web/project/vendor/boarddd.
+    "boarddd @ git+https://github.com/CoolNamesAllTaken/boarddd@e592c88f64f70b82740c0ac72a8990e1c4ae3837#subdirectory=python",
 ]
 
 [project.optional-dependencies]

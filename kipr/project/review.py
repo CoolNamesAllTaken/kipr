@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, field
 
 from .. import __version__
-from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, models, pcb, sch
+from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, impedance, models, pcb, sch
 from ..common import fonts as fonts_mod
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
@@ -543,6 +543,24 @@ class ProjectReview:
             self.err(f"schematic grid check failed: {e}")
             return None
 
+    def impedance(self):
+        """checks.impedance: net classes with an impedance target, closed-form Z per layer (kipr.project.impedance)."""
+        sides = {}
+        for s in self.sides.values():
+            if s.root is None or not s.pcb or s.pcb_text is None:
+                sides[s.name] = None
+                continue
+            pro = os.path.join(s.root, s.pro) if s.pro and os.path.isfile(os.path.join(s.root, s.pro)) else None
+            sides[s.name] = (os.path.join(s.root, s.pcb), pro, s.pcb_text)
+        t0 = time.monotonic()
+        try:
+            return impedance.check(sides, self.err)
+        except Exception as e:  # noqa: BLE001  a review aid: never fail the project
+            self.err(f"impedance check failed: {e}")
+            return None
+        finally:
+            self.timings["impedance"] = time.monotonic() - t0
+
     # -- main ------------------------------------------------------------------------------
     def run(self) -> dict:
         t0 = time.monotonic()
@@ -569,6 +587,7 @@ class ProjectReview:
         fonts = self.font_section()
         checks = self.checks((fonts or {}).get("missing") or ())
         checks["grid"] = self.grid()
+        checks["impedance"] = self.impedance()
         self.timings["assemble"] = time.monotonic() - t2
         self.timings["total"] = time.monotonic() - t0
         comp_count = {"added": 0, "removed": 0, "moved": 0, "changed": 0, "minor": 0}
@@ -591,6 +610,7 @@ class ProjectReview:
             "erc": {"new": len(checks["erc"]["new"]), "fixed": len(checks["erc"]["fixed"])} if checks.get("erc") else None,
             "drc": {"new": len(checks["drc"]["new"]), "fixed": len(checks["drc"]["fixed"])} if checks.get("drc") else None,
             "grid": {"count": checks["grid"]["count"], "points": checks["grid"]["points"]} if checks.get("grid") else None,
+            "impedance": dict(checks["impedance"]["count"]) if checks.get("impedance") else None,
             "fonts_missing": len((fonts or {}).get("missing") or []),
         }
         doc.update({"schematic": schematic, "pcb": pcbs, "pcba3d": p3d, "bom": bom, "netlist": net,
@@ -719,7 +739,7 @@ def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb,
                 traceback.print_exc()
                 doc["projects"].append({"slug": slug, "name": proj.name, "path": proj.path, "status": proj.status,
                                         "summary": None, "schematic": None, "pcb": None, "pcba3d": None,
-                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None}, "fonts": None,
+                                        "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None, "impedance": None}, "fonts": None,
                                         "errors": pr.errors + [f"internal error: {e!r}"]})
     finally:
         if exporter:

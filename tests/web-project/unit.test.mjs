@@ -14,7 +14,7 @@ import {
   mergeParams, sameSize, stepItem, rememberRoute, routeFor, layerNote, sheetNote,
 } from '../../web/project/js/viewstate.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
-import { matchesQuery, statusCounts, sheetSpotHash, gridGroups } from '../../web/project/js/tables.js';
+import { matchesQuery, statusCounts, sheetSpotHash, gridGroups, impedanceSideTitle } from '../../web/project/js/tables.js';
 import { faceOf, pickDiffLayer, parseAt } from '../../web/project/js/layout.js';
 import { pickSheet } from '../../web/project/js/schematic.js';
 import { describeChange } from '../../web/project/js/changes.js';
@@ -397,4 +397,14 @@ test('viewer.css carries view2d STAGE_CSS verbatim (the CSP refuses the <style> 
   const { STAGE_CSS } = await import('../../web/vendor/boarddd/src/view2d/stage.js');
   const css = (await import('node:fs')).readFileSync(new URL('../../web/project/viewer.css', import.meta.url), 'utf8');
   assert.ok(css.includes(STAGE_CSS.trim()), 'viewer.css: paste the vendored STAGE_CSS between the STAGE_CSS markers');
+});
+
+test('impedance row tooltip: inputs, widths, notes; missing side', () => {
+  const t = impedanceSideTitle('head', { structure: 'coplanar_grounded', model: 'cpwg', nets: ['/RF'], length_mm: 41.25,
+    widths: [{ width: 0.26, length_mm: 40 }, { width: 0.2, length_mm: 1.25 }], coplanar_gap: 0.15,
+    params: { w: 0.26, h: 0.2104, er: 4.4 }, validity: ['w/h = 9 is outside'], notes: ['coplanar with a plane below'], error: null });
+  assert.match(t, /^head: coplanar_grounded \(cpwg\), 1 net\(s\), 41\.3 mm routed/);
+  assert.match(t, /widths: 0\.26 mm × 40\.0 mm, 0\.2 mm × 1\.3 mm/);
+  assert.match(t, /coplanar gap: 0\.15 mm\ninputs: w 0\.26, h 0\.2104, er 4\.4\n⚠ w\/h = 9 is outside\n· coplanar with a plane below$/);
+  assert.equal(impedanceSideTitle('base', null), 'base: —');
 });

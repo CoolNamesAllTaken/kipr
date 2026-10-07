@@ -172,3 +172,25 @@ def test_schematic_grid_check(doc):
                           text=True, check=True).stdout
     line = text.split("\n")[f["line"] - 1]
     assert line.strip().startswith('(label "LED_A"')
+
+
+def test_impedance_check(doc):
+    """CHANGES.md "Impedance": SE_50_MS on pic_programmer's Net-(D8-A) (out of tolerance on both sides; width
+    0.5 -> 0.4 mm and core 1.51 -> 1.2 mm on head), and a new SE_50_MS class on complex_hierarchy's LED_A."""
+    pic = proj(doc, "pic_programmer")
+    z = pic["checks"]["impedance"]
+    assert z["method"].startswith("closed-form estimate") and z["classes"] == ["SE_50_MS"]
+    assert z["stackup_changes"] == [{"layer": "dielectric 1", "field": "thickness", "base": 1.51, "head": 1.2}]
+    (r,) = z["rows"]
+    assert (r["class"], r["layer"], r["status"]) == ("SE_50_MS", "B.Cu", "changed")
+    assert (r["base"]["width"], r["head"]["width"]) == (0.5, 0.4)
+    assert r["base"]["model"] == "coated_microstrip" and r["base"]["params"]["h"] == 1.51 and r["head"]["params"]["h"] == 1.2
+    assert set(r["flags"]) == {"width_change", "stackup_shift", "violation"} and r["severity"] == "warn"
+    assert r["shift_pct"] < -5 and r["head"]["within"] is False
+    assert pic["summary"]["impedance"] == {"rows": 1, "violations": 1, "new_violations": 0, "stackup_shifts": 1,
+                                           "width_changes": 1}
+    ch = proj(doc, "complex_hierarchy")["checks"]["impedance"]
+    (r,) = ch["rows"]
+    assert (r["class"], r["layer"], r["status"], r["base"]) == ("SE_50_MS", "B.Cu", "added", None)
+    assert r["head"]["width"] == 0.15 and r["flags"] == ["new_violation"] and r["severity"] == "bad"
+    assert r["head"]["Z"] > 100 and r["head"]["validity"]  # 0.15 mm on 1.6 mm FR4: far from 50 Ω, outside the mask fit

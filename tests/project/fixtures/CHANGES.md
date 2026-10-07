@@ -64,6 +64,18 @@ DRC (`--schematic-parity --severity-all`): base 0 violations / 0 unconnected / 6
 footprints use the project library nickname `complex_hierarchy:` while the symbols name
 `Capacitor_THT:` etc.
 
+## Impedance (`checks.impedance`)
+
+Both boards are 2-layer 1.6 mm FR4 demos, not impedance-controlled, so a 50 Ω microstrip would need ~3 mm.
+The classes exist to exercise the check (`scripts/impedance_classes.py`):
+
+| # | project | base | head | expected row |
+|---|---|---|---|---|
+| 18 | pic_programmer | net class `SE_50_MS` (pattern `Net-(D8-A)`): 0.5 mm on B.Cu over the 1.51 mm core, about 105 Ω | D8-A tracks 0.4 mm (3 segments) and core `dielectric 1` 1.51 → 1.2 mm | B.Cu `changed`, flags `width_change`, `stackup_shift` (≈ −8 % from the core alone), `violation` (out of tolerance on both sides), severity `warn` |
+| 19 | complex_hierarchy | — | net class `SE_50_MS` (pattern `/status_led/LED_A`): the 0.15 mm LED_A track on B.Cu | B.Cu `added`, ≈ 143 Ω, flag `new_violation`, severity `bad`; w/h outside the mask model's range |
+
+The pic_programmer core change also shows in the gbrjob; the D8-A width change is a routing change.
+
 ## Things that deliberately do NOT change
 
 - pic_programmer: board outline (only complex_hierarchy changes its outline), everything in
