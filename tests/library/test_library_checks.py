@@ -175,6 +175,69 @@ class FootprintCheckTests(unittest.TestCase):
         self.assertFalse(kc._seg_hits_pad((-0.9, -0.1), (-0.9, 0.1), 0.06, pad))
 
 
+NO_CRTYD_FP = os.path.join(HERE, "fixtures", "courtyard", "Custom_TestPoint.pretty",
+                           "TestPoint_Pad_D1.5mm_NoCourtyard.kicad_mod")
+
+
+def _no_crtyd_text():
+    with open(NO_CRTYD_FP) as fh:
+        return fh.read()
+
+
+class CourtyardExemptTests(unittest.TestCase):
+    """`(attr ... allow_missing_courtyard)` ("Exclude from courtyard requirements")."""
+
+    def run_fp(self, text):
+        fp = sexpr.parse(text)
+        return kc.check_footprint(fp, kc.LineMap(fp.line, 1), None)
+
+    def courtyard(self, f, c):
+        return ([x for x in f if "courtyard" in x["message"].lower()],
+                {x["name"]: x for x in c if "ourtyard" in x["name"]})
+
+    def test_attr_parsing(self):
+        self.assertTrue(kc.courtyard_exempt(sexpr.parse(_no_crtyd_text())))
+        for attr in ("(attr smd)", "(attr exclude_from_pos_files exclude_from_bom)", "(attr virtual)", ""):
+            self.assertFalse(kc.courtyard_exempt(sexpr.parse(f'(footprint "X" {attr})')), attr)
+        # stock KiCad net ties: with other attributes, no courtyard
+        self.assertTrue(kc.courtyard_exempt(sexpr.parse(
+            '(footprint "NetTie" (attr exclude_from_pos_files exclude_from_bom allow_missing_courtyard))')))
+
+    def test_missing_courtyard_skipped(self):
+        f, c = self.courtyard(*self.run_fp(_no_crtyd_text()))
+        self.assertEqual(f, [])
+        self.assertEqual((c["Courtyard present"]["result"], c["Courtyard present"]["detail"]),
+                         ("skipped", "excluded from courtyard requirements"))
+
+    def test_without_attr_is_an_error(self):
+        f, c = self.courtyard(*self.run_fp(_no_crtyd_text().replace(" allow_missing_courtyard", "")))
+        self.assertEqual([(x["severity"], x["message"]) for x in f], [("error", "Footprint has no courtyard (F.CrtYd).")])
+        self.assertEqual(c["Courtyard present"]["result"], "fail")
+
+    def test_coverage_skipped(self):
+        small = FP_OK.replace("(start -1.48 -0.73) (end 1.48 0.73)", "(start -1.0 -0.5) (end 1.0 0.5)")
+        f, _ = self.courtyard(*self.run_fp(small))
+        self.assertTrue(any("outside the courtyard" in x["message"] for x in f))  # baseline
+        exempt = small.replace('(layer "F.Cu")', '(layer "F.Cu")\n\t(attr smd allow_missing_courtyard)', 1)
+        f, c = self.courtyard(*self.run_fp(exempt))
+        self.assertEqual(f, [])
+        self.assertEqual(c["Courtyard present"]["result"], "pass")
+        self.assertEqual(c["Courtyard encloses pads and body"]["result"], "skipped")
+        self.assertNotIn("Courtyard encloses all pads", c)
+
+    def test_klc_missing_courtyard_waived(self):
+        f53 = {"severity": "warning", "category": "klc", "line": None,
+               "message": "KLC F5.3: No courtyard found!; - Add courtyard around footprint "
+                          "([F5.3](https://klc.kicad.org/footprint/f5/f5.3/))"}
+        other53 = dict(f53, message="KLC F5.3: Courtyard width error (expected width = 0.05mm)")
+        f93 = dict(f53, message="KLC F9.3: 3D model file path missing")
+        r = klc_utils.waive_missing_courtyard(klc_utils.KlcResult(findings=[f53, other53, f93]))
+        self.assertEqual(r.findings, [other53, f93])
+        self.assertEqual(r.waived, ["F5.3"])
+        r = klc_utils.waive_missing_courtyard(klc_utils.KlcResult(findings=[f93]))
+        self.assertEqual(r.waived, [])
+
+
 class ModelNameTests(unittest.TestCase):
     def test_package_dimension_mismatch(self):
         msg = kc.model_name_mismatch("SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm",
@@ -238,6 +301,16 @@ class KlcUtilsTests(unittest.TestCase):
         self.assertIn("could not parse", r.error)
 
     @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
+    def test_real_checker_ignores_courtyard_exemption(self):
+        # kicad-library-utils raises F5.3 despite allow_missing_courtyard; kipr waives it (Item.analyse)
+        r = klc_utils.run(os.environ["CR_KLC_UTILS"], "footprint", "Custom_TestPoint",
+                          "TestPoint_Pad_D1.5mm_NoCourtyard", _no_crtyd_text())
+        self.assertTrue(r.ok, r.error)
+        self.assertTrue(any(x["message"].startswith("KLC F5.3: No courtyard found") for x in r.findings), r.findings)
+        r = klc_utils.waive_missing_courtyard(r)
+        self.assertFalse(any("F5.3" in x["message"] for x in r.findings), r.findings)
+
+    @unittest.skipUnless(os.environ.get("CR_KLC_UTILS"), "set CR_KLC_UTILS to a kicad-library-utils checkout")
     def test_real_checker_crash_is_not_a_pass(self):
         # a symbol property without (effects) crashes kicad-library-utils' parser (IndexError)
         r = klc_utils.run(os.environ["CR_KLC_UTILS"], "symbol", "Custom_Test", "AMP1", SYM_KLC.replace(
@@ -279,6 +352,11 @@ if mode == "pass":
     report(CASE); sys.exit(0)
 if mode == "errors":
     report(FAIL); sys.exit(3)
+if mode == "nocourtyard":   # the real checker's text for a footprint without courtyard
+    report('<testcase name="X - Errors"><failure message="F5.3" type="FAILURE">F5.3: Courtyard layer requirements'
+           '\n    https://klc.kicad.org/footprint/f5/f5.3/\n    No courtyard found!\n    - Add courtyard around footprint'
+           '</failure></testcase>')
+    sys.exit(3)
 if mode == "crash":
     print('Traceback (most recent call last):\n  File "x.py", line 1, in <module>\nIndexError: list index out of range',
           file=sys.stderr)
@@ -436,6 +514,39 @@ class KlcFailSafeTests(unittest.TestCase):
         self.assertEqual(retried["klc"]["status"], "ok")
         self.assertEqual(retried["klc"]["attempts"], 2)
         self.assertIn("retried once", next(c for c in retried["checks"] if c["name"].startswith("KiCad KLC"))["detail"])
+
+    def test_checks_stage_courtyard_exempt(self):
+        """An exempt footprint without courtyard: no kipr or KLC courtyard findings, checks skipped."""
+        from unittest import mock
+        out = os.path.join(self.tmp, "out")
+        build_synthetic_out(out)
+        fp = "footprint:Custom_Test:R_0603_1608Metric"
+        src = os.path.join(out, "items", "footprint__Custom_Test__R_0603_1608Metric", "head.kicad_mod")
+
+        def stage(text):
+            with open(src, "w") as fh:
+                fh.write(text)
+            if os.path.exists(self.counter):
+                os.remove(self.counter)
+            with mock.patch.dict(os.environ, {"FAKE_KLC_MODE": "nocourtyard", "FAKE_KLC_COUNTER": self.counter}):
+                self.assertEqual(cr.run(cr.parse_args(["--out", out, "--klc-utils", self.klu])), 0)
+            with open(os.path.join(out, "review.json")) as fh:
+                return json.load(fh)["items"][fp]
+
+        e = stage(_no_crtyd_text())
+        self.assertEqual([x["message"] for x in e["findings"] if "ourtyard" in x["message"]], [])
+        self.assertEqual(e["klc"], {"status": "ok", "attempts": 1, "waived": ["F5.3"]})
+        checks = {c["name"]: c for c in e["checks"]}
+        self.assertEqual(checks["Courtyard present"]["result"], "skipped")
+        self.assertEqual(checks["KLC F5.3 courtyard present"]["result"], "skipped")
+        self.assertIn("excluded from courtyard requirements", checks["KLC F5.3 courtyard present"]["detail"])
+        self.assertEqual(checks["KiCad KLC checker (kicad-library-utils)"]["result"], "pass")
+
+        e = stage(_no_crtyd_text().replace(" allow_missing_courtyard", ""))
+        msgs = [x["message"] for x in e["findings"]]
+        self.assertIn("Footprint has no courtyard (F.CrtYd).", msgs)
+        self.assertTrue(any(m.startswith("KLC F5.3: No courtyard found!") for m in msgs), msgs)
+        self.assertNotIn("waived", e["klc"])
 
 
 class SymbolCheckTests(unittest.TestCase):

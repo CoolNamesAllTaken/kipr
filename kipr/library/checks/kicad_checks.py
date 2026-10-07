@@ -20,6 +20,11 @@ KICAD_LIBS_PREFIX = "${KICAD_LIBS_DIR}/"
 
 _URL_RE = re.compile(r"https?://\S+", re.I)
 
+# "Exclude from courtyard requirements" in the footprint properties: `(attr ... allow_missing_courtyard)`.
+# The only spelling in KiCad 7-10 files; KiCad 5/6 had no such option.
+COURTYARD_EXEMPT_ATTRS = ("allow_missing_courtyard",)
+COURTYARD_EXEMPT_NOTE = "excluded from courtyard requirements"
+
 
 class LineMap:
     """Maps a line in the item's standalone source to a line in the repo file.
@@ -223,6 +228,12 @@ def _union(a, b):
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def courtyard_exempt(fp: Node) -> bool:
+    """Is the footprint excluded from courtyard requirements?"""
+    attr = fp.child("attr")
+    return bool(attr) and any(a in COURTYARD_EXEMPT_ATTRS for a in attr.atoms())
+
+
 def footprint_stats(fp: Node) -> dict:
     pads = parse_pads(fp)
     numbered = [p for p in pads if p["number"]]
@@ -316,8 +327,14 @@ def check_footprint(fp: Node, lm: LineMap, model3d_manifest: list | None, repo_p
 
     # --- courtyard ---
     crt = graphic_segments(fp, lambda l: l.endswith(".CrtYd"))
-    C.append(check("Courtyard present", "pass" if crt else "fail", f"{len(crt)} courtyard segments"))
-    if not crt and not virtual:
+    exempt = courtyard_exempt(fp)
+    C.append(check("Courtyard present", "pass" if crt else "skipped" if exempt else "fail",
+                   COURTYARD_EXEMPT_NOTE if exempt and not crt else f"{len(crt)} courtyard segments"))
+    if exempt:
+        # Like KiCad DRC, no missing-courtyard error; coverage is not required either.
+        if crt:
+            C.append(check("Courtyard encloses pads and body", "skipped", COURTYARD_EXEMPT_NOTE))
+    elif not crt and not virtual:
         F.append(finding("error", "Footprint has no courtyard (F.CrtYd).", lm(fp.line),
                          "Add a courtyard 0.25 mm around body and pads (KLC F5.3)."))
     elif crt:

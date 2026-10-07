@@ -165,6 +165,8 @@ class Item:
             # checked as they are: on an upgraded footprint the checker misses e.g. unlocked RefDes.
             if upgrader is not None and (res.version_mismatch if self.kind == "symbol" else res.parse_failed):
                 res, upgraded = self.klc_on_upgraded_copy(klu_dir, upgrader, res)
+            if self.kind == "footprint" and res.ok and kc.courtyard_exempt(self.node):
+                res = klc_utils.waive_missing_courtyard(res)
             self.add_klc(res, klc_error_severity, upgraded)
         for w in self.raw.get("warnings") or []:
             self.add([kc.finding("info", f"Render: {w}")])
@@ -214,7 +216,13 @@ class Item:
             if res.retried_because:
                 detail += f" (retried once: {res.retried_because})"
                 self.klc["retried_because"] = res.retried_because
-            self.add(res.findings, [kc.check(name, "fail" if res.findings else "pass", detail)])
+            checks = [kc.check(name, "fail" if res.findings else "pass", detail)]
+            if "F5.3" in res.waived:
+                self.klc["waived"] = list(res.waived)
+                checks.append(kc.check("KLC F5.3 courtyard present", "skipped",
+                                       f"{kc.COURTYARD_EXEMPT_NOTE}; kipr drops the checker's "
+                                       "\"No courtyard found!\", which ignores this footprint attribute"))
+            self.add(res.findings, checks)
             return
         self.klc = {"status": "error", "reason": res.error, "attempts": res.attempts}
         msg = f"KLC could not check this item: {res.error}."
@@ -385,7 +393,7 @@ def item_entry(item: Item, verdict: str, summary: str, datasheet_used: str | Non
     e = {"verdict": verdict, "summary": summary, "datasheet_used": datasheet_used,
          "findings": findings, "checks": item.checks}
     if item.klc is not None:
-        e["klc"] = item.klc  # additive: {"status": "ok"|"error", "reason"?, "attempts", "retried_because"?}
+        e["klc"] = item.klc  # additive: {"status": "ok"|"error", "reason"?, "attempts", "retried_because"?, "waived"?}
     return e
 
 
