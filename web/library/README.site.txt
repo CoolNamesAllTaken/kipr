@@ -6,9 +6,9 @@ request (unzipped from the CI artifact). Two ways to open it:
 
 1. Double-click index.html (Chrome, Edge or Firefox).
    Overview, item list, all 2D view modes, details, text diffs and the checks work straight
-   from disk. The 3D view also works in Chromium-based browsers; it needs internet access
-   (three.js and the STEP kernel come from cdn.jsdelivr.net). If the 3D tab shows an error, use
-   option 2.
+   from disk. The 3D view also works in Chromium-based browsers, without internet access
+   (everything it needs is in this folder); STEP models load more slowly than with option 2.
+   If the 3D tab shows an error, use option 2.
 
 2. Run a tiny local web server (Python 3, no packages needed):
 

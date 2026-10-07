@@ -27,11 +27,11 @@ Opened from disk, browsers block `fetch()`, ES module scripts and workers from f
 | manifest / review / diffs | `fetch()` | `data.js` (`window.CR_DATA = {manifest, review, texts}`) |
 | 2D renders, downloads, datasheet | files next to the page | the same files (`<img>` and links work from disk) |
 | 3D inputs (geom JSON, layer SVGs, STEP) | `fetch()` | `offline/<slug>.js`, loaded with `<script>` when the 3D tab opens: text and base64 STEP |
-| STEP worker | `js/step_worker.js` | the same source started from a `blob:` URL; main thread if no worker can start |
-| three.js / occt-import-js | jsDelivr (pinned) | jsDelivr (pinned); `import()` of the three.js ESM build still works from a classic script |
+| 3D view | `js/view3d.js` (ES module; imports boarddd and three.js from `vendor/`) | `js/view3d.bundle.js`: the same, prebuilt as one classic script (`node build_view3d.mjs`, committed; `--check` in CI) |
+| STEP kernel | occt-import-js from `vendor/`, in boarddd's Worker | occt-import-js from `vendor/` with a `<script>`, on the main thread; its WASM from `offline/occt-import-js.js` (base64) |
 
 Board textures are painted into a canvas, and a `file://` image would taint it, so offline the layer SVGs come from the
-pack as same-origin `blob:` URLs. If the 3D view still fails (no network, a browser policy), the 3D tab says to run
+pack as same-origin `blob:` URLs. If the 3D view still fails (a browser policy), the 3D tab says to run
 `python3 serve.py`, which serves the folder on `127.0.0.1` so everything runs in http mode.
 
 Verified in headless Chromium 153: every 2D mode, details, diffs, findings and the full 3D view work from file://
@@ -39,8 +39,9 @@ Verified in headless Chromium 153: every 2D mode, details, diffs, findings and t
 it also blocks `fetch()` from file:// and runs classic scripts, so the non-3D parts use the same path.
 
 Size: the generated files add `data.js` (manifest + review + diff patches, about 50-75 KB for the demo PR) and, per
-footprint, its 3D inputs again with the STEP models as base64 (+33 %; about 1.5 MB for the demo PR). `bundle.js` is
-about 100 KB. Files over 50 MB are left out of the packs (the 3D view then asks for `serve.py`).
+footprint, its 3D inputs again with the STEP models as base64 (+33 %; about 1.5 MB for the demo PR), plus, when an
+item has a STEP model, occt-import-js's WASM once (`offline/occt-import-js.js`, about 10 MB). `bundle.js` is about
+100 KB; `vendor/` (boarddd, three.js, occt-import-js) is copied into every site (about 10 MB). Files over 50 MB are left out of the packs (the 3D view then asks for `serve.py`).
 
 ## Features
 
@@ -59,14 +60,17 @@ about 100 KB. Files over 50 MB are left out of the packs (the 3D view then asks 
   - Footprints get per-layer toggles built by stacking the per-layer SVGs (All / Front / Back / Copper presets).
     Mask/paste layers start hidden.
   - The cursor readout is in mm (footprint coordinates, y down). It uses `view.viewbox` if present, otherwise the SVG `viewBox`.
-- **3D view (footprints):** the part on its footprint, built in the browser (CONTRACT.md Addendum 2).
+- **3D view (footprints):** the part on its footprint, built in the browser (CONTRACT.md Addendum 2) with
+  [boarddd](https://github.com/CoolNamesAllTaken/boarddd) (`vendor/boarddd`: footprint, models, scene).
   - A 1.6 mm board over `geom.bbox` (or the Edge.Cuts outline) with the drill holes cut through. The top and bottom
-    faces are painted from the F/B layer SVGs: mask, copper under mask, mask openings.
-  - Copper pads and plated barrels as geometry. Silkscreen and fab/courtyard are decal planes.
+    faces are painted from the F/B layer SVGs: mask, copper under mask, mask openings (`js/view3d.js`).
+  - Copper pads and plated barrels as geometry. Silkscreen and fab/courtyard are decals painted from the SVGs.
   - STEP models (`model3d_by_side[side][].file`) are tessellated by occt-import-js in a Web Worker and placed with KiCad's
-    model transform: `T(offset) · Rz(-rz) · Ry(-ry) · Rx(-rx) · S(scale)` in KiCad's 3D frame.
+    model transform: `T(offset) · Rz(-rz) · Ry(-ry) · Rx(-rx) · S(scale)` in KiCad's 3D frame. STEP colours as KiCad
+    shows them, per face where the file has them.
   - Toggles for board / pads / silk / fab / model. Modes: head, base, side by side, translucent overlay
-    (head cyan, base magenta). Top / bottom / side / iso / reset cameras.
+    (head cyan, base magenta); side by side is one camera over two panes. Top / bottom / side / iso / reset cameras,
+    and a view cube.
 - **Details:**
   - Source links to GitHub at head/base SHA with line ranges, plus downloads of the standalone item source.
   - Datasheet: the PDF copy in the report (`datasheet.file`), then the URL.
@@ -76,7 +80,7 @@ about 100 KB. Files over 50 MB are left out of the packs (the 3D view then asks 
 - **Checks panel:** verdict, summary, datasheet, findings sorted by severity (each links to the file line on
   GitHub), and a table of the rules checked.
 - Degrades when data is missing: no review.json, added items (no base), deleted items (no head), symbols
-  (no layers/3D), missing model files, and no network (3D shows a message; everything else still works).
+  (no layers/3D) and missing model files. Nothing needs network access.
 - Light/dark theme follows `prefers-color-scheme`.
 
 ## Security
@@ -88,11 +92,10 @@ Everything in the report is derived from a pull request, and all PR reports shar
 - URLs are filtered: absolute `http(s)` only for external links. Asset paths must be relative, with no `..`, no scheme
   and no backslashes. GitHub links are built from a validated `owner/repo`, hex SHA and path.
 - Render images (SVG/PNG) are loaded with `<img>`, so SVG scripts never run. The viewer never links to a raw SVG.
-- CSP in `index.html`: scripts from self and `cdn.jsdelivr.net` only (plus `wasm-unsafe-eval` for the STEP kernel),
-  no inline script, `object-src 'none'`, `base-uri 'none'`. The meta policy also allows `'unsafe-eval'` and `blob:`
-  workers, which only the file:// mode needs (occt-import-js uses `new Function`, and a `blob:` worker inherits the page's
-  policy). Over http(s) `js/boot.js` adds a second policy without them before loading the app, so the effective policy
-  there is the same as before. The viewer itself never evals anything.
+- CSP in `index.html`: scripts, workers and connections from self only (plus `wasm-unsafe-eval` for the STEP kernel),
+  no inline script, `object-src 'none'`, `base-uri 'none'`. The meta policy also allows `'unsafe-eval'`, which only the
+  file:// mode needs (occt-import-js uses `new Function`, and runs on the main thread there). Over http(s) `js/boot.js`
+  adds a second policy without it before loading the app. The viewer itself never evals anything.
 - `data.js` and the packs are generated by `kipr library site` with every `<`, `>`, `&`, U+2028/2029 escaped, so PR text
   can't break out of the script. It only embeds files that the manifest names inside the site (packs: inside
   `items/<slug>/` of that item) and only for slugs matching `[A-Za-z0-9._-]+`.
@@ -102,13 +105,12 @@ Everything in the report is derived from a pull request, and all PR reports shar
 
 ## Third-party code
 
-Loaded at runtime from jsDelivr, pinned in `js/config.js`, unmodified:
+Vendored in `web/vendor/` (shared with the project viewer; `vendor/` here is a symlink to it), pinned and refreshed by
+`bash web/vendor/sync_vendor.bash` (see `web/vendor/README.md`):
 
+- [boarddd](https://github.com/CoolNamesAllTaken/boarddd), MIT
 - [three.js](https://github.com/mrdoob/three.js) 0.185.1, MIT
 - [occt-import-js](https://github.com/kovacsv/occt-import-js) 0.0.23, LGPL-2.1 (OpenCascade, LGPL-2.1 with exception)
-
-To self-host, put the same files under `web/library/vendor/` together with their licence files, point `js/config.js` at
-them and add `vendor` to `DIRS` in `kipr/library/site.py`.
 
 ## Development / tests
 

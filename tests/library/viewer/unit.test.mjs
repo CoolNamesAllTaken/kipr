@@ -1,7 +1,12 @@
 // Unit tests for the pure parts of the viewer.   node --test tests/library/viewer/unit.test.mjs
+// The 3D view's KiCad geometry is boarddd/geom (web/vendor/boarddd, tested in boarddd itself); the
+// checks below pin what the library view relies on against the vendored copy.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelMatrix, applyMatrix, padToPcb, padDrill, padCopperSides, padOutline, padOffset, padHoleCenter, slotPoints, padDrillSlot, padDrillRing } from '../../../web/library/js/kicad3d.js';
+import {
+  kicadModelMatrix as modelMatrix, applyMatrix, padToKicad as padToPcb, padDrill, padCopperSides, padOutline, padOffset,
+  padHoleCenter, slotPoints, padDrillSlot, padDrillLoop as padDrillRing,
+} from '../../../web/vendor/boarddd/src/geom/index.js';
 import { safeUrl, assetUrl, githubBlobUrl } from '../../../web/library/js/util.js';
 import { diffRows } from '../../../web/library/js/details.js';
 

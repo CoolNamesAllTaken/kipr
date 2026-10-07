@@ -105,5 +105,5 @@ The publish (and, for libraries, cleanup) callers and all inputs are in
 
 ## License
 
-MIT (see [LICENSE](LICENSE)). Vendored third-party code keeps its own (MIT) license: three.js in
-`web/project/pcba3d/vendor/` and our fork of wasm-gerber-viewer's renderer in `web/project/vendor/`.
+MIT (see [LICENSE](LICENSE)). Vendored third-party code keeps its own license: boarddd and three.js (MIT) and
+occt-import-js (LGPL-2.1) in `web/vendor/`, our fork of wasm-gerber-viewer's renderer (MIT) in `web/project/vendor/`.

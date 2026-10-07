@@ -2,7 +2,10 @@
 //     node pad_placement.mjs <file with {name: {geom, models}} JSON>   -> prints {name: {pads, models}} JSON
 // Used by tests/library/test_pad_placement.py, which compares the result with KiCad's own (golden.json).
 import { readFileSync } from 'node:fs';
-import { applyMatrix, modelMatrix, padHoleCenter, padDrill, padOutline, padToPcb } from '../../../web/library/js/kicad3d.js';
+// The library 3D view places pads and models with boarddd/geom (web/vendor/boarddd).
+import {
+  applyMatrix, kicadModelMatrix as modelMatrix, padHoleCenter, padDrill, padOutline, padToKicad as padToPcb,
+} from '../../../web/vendor/boarddd/src/geom/index.js';
 
 const bbox = (pts) => {
   const xs = pts.map((p) => p[0]);

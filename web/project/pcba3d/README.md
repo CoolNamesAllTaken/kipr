@@ -21,8 +21,10 @@ h.dispose();              // (alias: destroy) frees the WebGL context and emptie
   The handle also has `setBoardSource('gerber' | 'glb')`.
 - The module takes its styles from the host's `--bg --panel --text --muted --border --accent --add --del`,
   with fallbacks, and follows `data-theme` on `<html>`. It loads `pcba3d.css` itself. It needs
-  no importmap and no CDN: three.js is vendored in `vendor/` with relative imports. The gerber
-  renderer is the project viewer's shared copy in `../vendor/wasm-gerber-renderer/` (see below).
+  no importmap and no CDN: [boarddd](https://github.com/CoolNamesAllTaken/boarddd) and three.js
+  are vendored once for both viewers in `web/vendor/` (here `../vendor/boarddd` and
+  `../vendor/three`, symlinks), with relative imports. The gerber renderer is the project
+  viewer's shared copy in `../vendor/wasm-gerber-renderer/` (see below).
 - It is CSP-clean for the project viewer (`style-src 'self'`): no inline style attributes or
   `<style>` tags, only classes and `element.style`.
 
@@ -46,7 +48,17 @@ h.dispose();              // (alias: destroy) frees the WebGL context and emptie
 - **Loading**: per-side progress bars. If one GLB is missing or broken, the other side still
   works and the error is shown. A project that is added or removed shows one side only.
 
-## The board from the fab outputs (`gerberboard.js`, `boardgeom.js`)
+## What is boarddd's and what is kipr's
+
+boarddd does the 3D: the viewer (renderer, trackball, KiCad-like lighting, render on demand,
+view cube, presets, and the side-by-side panes drawn with one camera), loading and preparing
+the GLBs (units, up axis, board bodies, matching meshes to refs), and the board from the fab
+outputs (solid, holes, barrels, gerber faces, copper diff). This module keeps what is kipr's:
+the contract (`index.js`, `assets.js`, `diff.js`), the diff UI (modes, change list, markers,
+chips, tags, minor, hover card, explode; `viewer.js`), and the adapters that feed boarddd the
+contract's data (`scene.js`, `gerberboard.js`).
+
+## The board from the fab outputs (`gerberboard.js`, boarddd/board)
 
 When the project has `pcb.layers`, each side's board is rebuilt from its fab files and replaces
 the GLB's board bodies. The **Fab / GLB** switch goes back to the GLB's bodies, and so does any
@@ -118,7 +130,7 @@ node web/project/pcba3d/build_offline.mjs --check     # CI: fail if the committe
 - For the shell: on `file://`, load `pcba3d.bundle.js` plus the packs and call
   `window.KIPR_PCBA3D.mountPcba3d` instead of importing `index.js`.
 
-## How meshes become refs (`match.js`, `scene.js`)
+## How meshes become refs (`scene.js`, boarddd/models)
 
 KiCad 10.0.6 GLBs (checked on the pic_programmer and complex_hierarchy demos) are in metres
 with +Y up, x = KiCad x and z = KiCad y. Each component is a node named by its refdes, with an
@@ -147,8 +159,8 @@ per side before merging. Frames are only drawn when something changes.
 
 ## Prior art (credited in the code)
 
-Camera handling (trackball without damping), lighting, the view cube and position matching are
-ported from gentoo's `viewer3d.js`. The see-through two-colour comparison follows
+Camera handling (trackball without damping), lighting, the view cube and position matching came
+from gentoo's `viewer3d.js` and now live in boarddd, which credits them. The see-through two-colour comparison follows
 `compare3d.js` (PantsForBirds/internal, branch john/gentoo, `fab/static/fab/`). The API shape
 (`setMode`, groups, view presets) follows kicad-libs' `tools/component-review/viewer/js/view3d.js`.
 

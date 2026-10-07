@@ -9,6 +9,7 @@ on:
       - "kipr/common/**"
       - "kipr/library/**"
       - "web/library/**"
+      - "web/vendor/**"
       - "tests/library/**"
       - "pyproject.toml"
       - ".github/workflows/library-*.yml"
@@ -36,6 +37,8 @@ jobs:
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fonts-dejavu-core libcairo2
           python -m pip install -q -e ".[3d,test]"
           python -m playwright install --with-deps chromium
+      - name: 3D file:// bundle is fresh
+        run: node web/library/build_view3d.mjs --check
       - name: Tests
         # per-test limit: a stuck browser test fails with its name instead of running into the job timeout
         run: python -m pytest tests/library -q --timeout=600 --durations=15

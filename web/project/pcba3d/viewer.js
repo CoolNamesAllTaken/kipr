@@ -1,19 +1,18 @@
 // The 3D PCBA diff view: one canvas, one camera, two prepared sides (scene.js).
 //
-// Side-by-side is one renderer drawing the base scene into the left half and the head scene into
-// the right half with the SAME camera, so the two views cannot drift apart and a drag anywhere
-// turns both. Overlay and highlight draw both sides into the full canvas with materials swapped
-// per component status. Frames only render when something changed (camera, mode, hover), so a
-// board of hundreds of parts costs nothing while it is just being looked at.
+// The renderer, camera, trackball, lighting, view cube and render-on-demand loop are boarddd's
+// createViewer (web/vendor/boarddd/src/scene). Side-by-side is its panes: the base drawn into the
+// left half and the head into the right half with the SAME camera, so the two views cannot drift
+// apart and a drag anywhere turns both. Overlay and highlight draw both sides into the full canvas
+// with materials swapped per component status: that, the change markers, hover and explode are
+// kipr's and stay here. Frames only render when something changed (camera, mode, hover).
 //
-// Camera handling (trackball, no damping), lighting and the view cube follow gentoo's
-// viewer3d.js (PantsForBirds/internal, branch john/gentoo, fab/static/fab/viewer3d.js);
-// see viewcube.js. The see-through two-colour comparison follows gentoo's compare3d.js.
+// The see-through two-colour comparison follows gentoo's compare3d.js (PantsForBirds/internal,
+// branch john/gentoo, fab/static/fab/).
 
-import * as THREE from './vendor/three/three.module.js';
-import { TrackballControls } from './vendor/three/addons/TrackballControls.js';
-import { ViewCube, FACES } from './viewcube.js';
-import { disposeObject } from './scene.js';
+import * as THREE from '../vendor/three/three.module.js';
+import { createViewer, VIEWS as BOARDDD_VIEWS } from '../vendor/boarddd/src/scene/index.js';
+import { disposeObject } from '../vendor/boarddd/src/models/index.js';
 import { tagsOf } from './diff.js';
 
 export const STATUS_COLORS = {
@@ -23,12 +22,7 @@ export const MODES = ['side', 'overlay', 'highlight'];
 const EXPLODE_MM = { component: 10, silk: 3, mask: 2, copper: 1, substrate: 0, loose: 10 };
 const CLICK_SLOP_PX = 5;
 
-export const VIEWS = {
-  top: FACES.Top,
-  bottom: FACES.Bottom,
-  iso: { dir: [0.55, -1, 0.95], up: [0, 0, 1] },
-  isoBottom: { dir: [0.55, -1, -0.95], up: [0, 0, -1] },
-};
+export const VIEWS = BOARDDD_VIEWS;
 
 function ghost(color, opacity) {
   return new THREE.MeshStandardMaterial({
@@ -57,33 +51,27 @@ export class Pcba3dView {
     this.explode = 0;
     this.selected = null;
     this.hovered = null;
-    this.dirty = true;
     this.disposed = false;
+    this.pointer = null;
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.canvas = this.renderer.domElement;
-    this.canvas.className = 'kp3d-canvas';
-    host.appendChild(this.canvas);
-
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
-    this.camera.up.set(0, 0, 1);
-    this.camera.position.set(0, -100, 100);
-    // Sky/ground pair so tops and sides are not one flat colour, plus a headlight so the
-    // underside is lit when the board is turned over.
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.0));
-    const head = new THREE.DirectionalLight(0xffffff, 1.3);
-    head.position.set(0.3, 0.6, 1);
-    this.camera.add(head);
-    this.scene.add(this.camera);
-    this.helpers = new THREE.Group();
-    this.scene.add(this.helpers);
+    this.viewer = createViewer(host, { controls: 'trackball', preserveDrawingBuffer: true });
+    this.renderer = this.viewer.renderer;
+    this.scene = this.viewer.scene;
+    this.camera = this.viewer.camera;
+    this.canvas = this.viewer.canvas;
+    this.canvas.classList.add('kp3d-canvas');
+    // Markers per side, so side-by-side shows each side's own in its own half.
+    this.helpers = { base: new THREE.Group(), head: new THREE.Group() };
     // One holder per side: side-by-side shows one holder per viewport. Each holds the side's GLB
     // root and, when there is one, the board built from its fab outputs (gerberboard.js).
     this.holders = { base: new THREE.Group(), head: new THREE.Group() };
     this.fab = { base: new THREE.Group(), head: new THREE.Group() };
-    for (const k of ['base', 'head']) { this.holders[k].add(this.fab[k]); this.scene.add(this.holders[k]); }
+    for (const k of ['base', 'head']) {
+      this.holders[k].name = `pcba3d-holder-${k}`;
+      this.holders[k].userData.side = k;
+      this.holders[k].add(this.fab[k], this.helpers[k]);
+      this.viewer.add(this.holders[k]);
+    }
     this.gerber = null;              // buildGerberBoards() result
     this.boardSource = 'gerber';     // 'gerber' (fab outputs) | 'glb' (the GLB's own board bodies)
     this.diffMaterials = null;       // {top, bottom} once the copper diff is rendered
@@ -97,40 +85,22 @@ export class Pcba3dView {
       silk: ghost(0xf0f0f0, 0.55),
     };
 
-    this.cube = new ViewCube();
-    this.raycaster = new THREE.Raycaster();
-    this.pointer = null;
     this.pressed = null;
-    this.cubeDown = false;
-
-    // Before the trackball's own listener, so a press on the cube never starts a drag.
-    this.canvas.addEventListener('pointerdown', (e) => this._down(e), true);
-    this.controls = new TrackballControls(this.camera, this.canvas);
-    this.controls.staticMoving = true;   // no coasting: where you let go is where it stops
-    this.controls.rotateSpeed = 4.0;
-    this.controls.zoomSpeed = 1.6;
-    this.controls.panSpeed = 0.8;
-    this.controls.addEventListener('change', () => { this.dirty = true; });
-    this.canvas.addEventListener('pointermove', (e) => { this.pointer = e; });
-    this.canvas.addEventListener('pointerup', (e) => this._up(e));
-    this.canvas.addEventListener('pointerleave', () => {
-      this.pointer = null;
-      if (this.cube.setHover(null)) this.dirty = true;
-      this._setHovered(null);
+    // Hover: at most one pick per frame. Clicks: a press and release in place (not on the cube).
+    this.canvas.addEventListener('pointerdown', (e) => {
+      this.pressed = this.viewer.cubeAt(e.clientX, e.clientY) ? null : { x: e.clientX, y: e.clientY, id: e.pointerId };
     });
-
-    this.resizeObserver = new ResizeObserver(() => this.resize());
-    this.resizeObserver.observe(host);
-    this.resize();
-    const loop = () => {
-      if (this.disposed) return;
-      this.raf = requestAnimationFrame(loop);
-      this.controls.update();
-      if (this.pointer) { const e = this.pointer; this.pointer = null; this._hover(e); }
-      if (this.dirty) { this.dirty = false; this.render(); }
-    };
-    loop();
+    this.canvas.addEventListener('pointerup', (e) => this._up(e));
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this.pointer) requestAnimationFrame(() => { const p = this.pointer; this.pointer = null; if (p && !this.disposed) this._hover(p); });
+      this.pointer = e;
+    });
+    this.canvas.addEventListener('pointerleave', () => { this.pointer = null; this._setHovered(null); });
   }
+
+  /** Draw again (boarddd draws on demand). */
+  redraw() { if (!this.disposed) this.viewer.requestRender(); }
+  get controls() { return this.viewer.controls; }
 
   /* ─── Sides and state ──────────────────────────────────────────────────────── */
 
@@ -198,9 +168,11 @@ export class Pcba3dView {
     this.applyMode();
   }
 
+  /** The host's panel colour behind the board; the view cube follows its lightness. */
   setBackground(color) {
-    this.scene.background = new THREE.Color(color);
-    this.dirty = true;
+    const c = new THREE.Color(color);
+    this.viewer.setTheme(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.2 ? 'dark' : 'light');
+    this.viewer.setBackground(color);
   }
 
   /** Emphasise only components with one of these tags (added, removed, moved, rotated, changed, ...). */
@@ -208,7 +180,7 @@ export class Pcba3dView {
     this.emphasis = tags ? new Set(tags) : null;
     this.applyMode();
     this._updateHelpers();
-    this.dirty = true;
+    this.redraw();
   }
 
   emphasised(ref) {
@@ -271,7 +243,9 @@ export class Pcba3dView {
     }
     this._applyFab();
     this._updateHelpers();
-    this.dirty = true;
+    const panes = this.mode === 'side' ? [[this.holders.base], [this.holders.head]] : null;
+    if (!!panes !== !!this.viewer.panes) this.viewer.setPanes(panes);
+    this.redraw();
   }
 
   /** The fab board: normal faces side by side; the copper diff on the head's in the overlays. */
@@ -359,22 +333,13 @@ export class Pcba3dView {
       }
     }
     this._updateHelpers();
-    this.dirty = true;
+    this.redraw();
   }
 
   /* ─── Camera ───────────────────────────────────────────────────────────────── */
 
   resize() {
-    const r = this.host.getBoundingClientRect();
-    const w = Math.max(1, Math.floor(r.width)), h = Math.max(1, Math.floor(r.height));
-    this.width = w; this.height = h;
-    this.renderer.setSize(w, h, false);
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
-    this.camera.aspect = (this.mode === 'side' ? w / 2 : w) / h;
-    this.camera.updateProjectionMatrix();
-    this.controls.handleResize();
-    this.dirty = true;
+    this.viewer.resize();
   }
 
   sceneBox() {
@@ -389,34 +354,13 @@ export class Pcba3dView {
   }
 
   /** Look at `box` from a named view direction (or keep the current direction). */
-  frame(box, view = null, pad = 1.08) {
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
-    let dir, up;
-    if (view) {
-      dir = new THREE.Vector3(...view.dir).normalize();
-      up = new THREE.Vector3(...view.up);
-    } else {
-      dir = this.camera.position.clone().sub(this.controls.target).normalize();
-      up = this.camera.up.clone();
-    }
-    const vfov = THREE.MathUtils.degToRad(this.camera.fov);
-    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
-    const dist = (radius * pad) / Math.tan(Math.min(vfov, hfov) / 2);
-    this.controls.target.copy(center);
-    this.camera.position.copy(center).addScaledVector(dir, dist);
-    this.camera.up.copy(up);
-    this.camera.near = Math.max(dist / 1000, 0.01);
-    this.camera.far = dist * 100;
-    this.camera.lookAt(center);
-    this.camera.updateProjectionMatrix();
-    this.controls.update();
-    this.dirty = true;
+  frame(box, view = null, pad = 1.0) {
+    this.viewer.fit(view, box, pad);
   }
 
-  /** Fit the whole board from a preset ('top' | 'bottom' | 'iso' | a view-cube face) or as is. */
+  /** Fit the whole board from a preset ('top' | 'bottom' | 'iso' | 'isoBottom' | a view-cube face) or as is. */
   fit(name = null) {
-    const view = name ? (VIEWS[name] || FACES[name[0].toUpperCase() + name.slice(1)]) : null;
+    const view = name ? VIEWS[name] || VIEWS[name.toLowerCase()] : null;
     this.frame(this.sceneBox(), view);
   }
 
@@ -449,17 +393,19 @@ export class Pcba3dView {
     if (ref === this.hovered) return;
     this.hovered = ref || null;
     this._updateHelpers();
-    this.dirty = true;
+    this.redraw();
   }
 
   select(ref) {
     this.selected = ref || null;
     this._updateHelpers();
-    this.dirty = true;
+    this.redraw();
   }
 
   _updateHelpers() {
-    for (const h of this.helpers.children.slice()) { this.helpers.remove(h); h.geometry?.dispose(); h.material?.dispose(); }
+    for (const g of Object.values(this.helpers)) {
+      for (const h of g.children.slice()) { g.remove(h); h.geometry?.dispose(); h.material?.dispose(); }
+    }
     const add = (ref, color, grow, opacity) => {
       for (const [k, side] of Object.entries(this.sides)) {
         const e = side?.comps.get(ref);
@@ -468,13 +414,15 @@ export class Pcba3dView {
         const box = new THREE.Box3();
         for (const o of e.objects) box.union(new THREE.Box3().setFromObject(o));
         box.expandByScalar(grow);
+        // the box is in world space; the holders are not transformed
         const helper = new THREE.Box3Helper(box, color);
         helper.userData.side = k;
+        helper.raycast = () => {};
         helper.material.depthTest = false;
         helper.material.transparent = opacity < 1;
         helper.material.opacity = opacity;
         helper.renderOrder = 10;
-        this.helpers.add(helper);
+        this.helpers[k].add(helper);
       }
     };
     // Change markers: a box in the status colour around every changed part, so a moved 0402
@@ -492,96 +440,43 @@ export class Pcba3dView {
 
   /* ─── Drawing ──────────────────────────────────────────────────────────────── */
 
-  _showOnly(which) {
-    for (const k of ['base', 'head']) this.holders[k].visible = !which || k === which;
-    for (const h of this.helpers.children) h.visible = !which || h.userData.side === which;
-  }
-
+  /** Draw now (tests time this; normally boarddd draws on demand). */
   render() {
-    const { renderer, width: w, height: h } = this;
-    renderer.setScissorTest(false);
-    renderer.setViewport(0, 0, w, h);
-    renderer.clear();
-    if (this.mode === 'side') {
-      const half = Math.floor(w / 2);
-      renderer.setScissorTest(true);
-      for (const [k, x, vw] of [['base', 0, half], ['head', half, w - half]]) {
-        renderer.setViewport(x, 0, vw, h);
-        renderer.setScissor(x, 0, vw, h);
-        this._showOnly(k);
-        if (this.sides[k] || this.gerber?.sides[k]) renderer.render(this.scene, this.camera);
-        else { renderer.setClearColor(this.scene.background || 0x000000); renderer.clear(); }
-      }
-      renderer.setScissorTest(false);
-      this._showOnly(null);
-    } else {
-      this._showOnly(null);
-      renderer.render(this.scene, this.camera);
-    }
-    this.cube.draw(renderer, this.camera, this.controls.target, w, h);
-    renderer.setViewport(0, 0, w, h);
+    this.viewer.render();
   }
 
   /* ─── Pointer ──────────────────────────────────────────────────────────────── */
-
-  _local(e) {
-    const r = this.canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
-
-  _down(e) {
-    const p = this._local(e);
-    this.pressed = { x: e.clientX, y: e.clientY, id: e.pointerId };
-    const face = this.cube.faceAt(p.x, p.y, this.width, this.height);
-    this.cubeDown = face !== null;
-    if (this.cubeDown) { e.stopImmediatePropagation(); e.preventDefault(); }
-  }
 
   _up(e) {
     const press = this.pressed;
     this.pressed = null;
     if (!press || press.id !== e.pointerId) return;
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > CLICK_SLOP_PX) return;
-    const p = this._local(e);
-    if (this.cubeDown) {
-      this.cubeDown = false;
-      const face = this.cube.faceAt(p.x, p.y, this.width, this.height);
-      if (face) this.frame(this.sceneBox(), FACES[face]);
-      return;
-    }
-    const hit = this.pick(p.x, p.y);
+    const hit = this.pickClient(e.clientX, e.clientY);
     this.onPick(hit ? hit.ref : null);
   }
 
-  /** Component under a canvas point: {ref, side} or null. */
+  /** Component under a client point: {ref, side, distance} or null (only what that pane shows). */
+  pickClient(clientX, clientY) {
+    const meshes = new Set();
+    for (const side of Object.values(this.sides)) for (const m of side?.meshes || []) meshes.add(m);
+    const hit = this.viewer.pick(clientX, clientY, { filter: (o) => meshes.has(o) });
+    if (!hit) return null;
+    let side = null;
+    for (let o = hit.object; o && !side; o = o.parent) side = o.userData?.side || null;
+    const distance = this.camera.position.distanceTo(new THREE.Vector3(...hit.point));
+    return { ref: hit.object.userData.ref, side, distance };
+  }
+
+  /** Component under a canvas point (CSS px from the canvas' top left): {ref, side} or null. */
   pick(px, py) {
-    const { width: w, height: h } = this;
-    let sides = ['base', 'head'], x0 = 0, vw = w;
-    if (this.mode === 'side') {
-      const half = Math.floor(w / 2);
-      if (px < half) { sides = ['base']; vw = half; } else { sides = ['head']; x0 = half; vw = w - half; }
-    }
-    const ndc = new THREE.Vector2(((px - x0) / vw) * 2 - 1, -(py / h) * 2 + 1);
-    this.raycaster.setFromCamera(ndc, this.camera);
-    let best = null;
-    for (const k of sides) {
-      const side = this.sides[k];
-      if (!side) continue;
-      const targets = side.meshes.filter((m) => m.visible);
-      const hit = this.raycaster.intersectObjects(targets, false)[0];
-      if (hit && (!best || hit.distance < best.distance)) best = { ref: hit.object.userData.ref, side: k, distance: hit.distance };
-    }
-    return best;
+    const r = this.canvas.getBoundingClientRect();
+    return this.pickClient(r.left + px, r.top + py);
   }
 
   _hover(e) {
-    const p = this._local(e);
-    const face = this.cube.faceAt(p.x, p.y, this.width, this.height);
-    if (this.cube.setHover(face)) this.dirty = true;
-    this.canvas.style.cursor = face ? 'pointer' : '';
-    if (face !== null || e.buttons) { this._setHovered(null); return; }
-    const hit = this.pick(p.x, p.y);
-    this._setHovered(hit, e);
+    if (e.buttons || this.viewer.cubeAt(e.clientX, e.clientY)) { this._setHovered(null); return; }
+    this._setHovered(this.pickClient(e.clientX, e.clientY), e);
   }
 
   _setHovered(hit, e) {
@@ -589,31 +484,23 @@ export class Pcba3dView {
     if (ref !== this.hovered) {
       this.hovered = ref;
       this._updateHelpers();
-      this.dirty = true;
+      this.redraw();
     }
     this.onHover(hit ? { ...hit, clientX: e.clientX, clientY: e.clientY } : null);
   }
 
   /** PNG data URL of the current view. */
   capture() {
-    this.render();
-    return this.canvas.toDataURL('image/png');
+    return this.viewer.capture({ viewCube: true });
   }
 
   dispose() {
     this.disposed = true;
-    cancelAnimationFrame(this.raf);
-    this.resizeObserver.disconnect();
-    this.controls.dispose();
-    for (const k of ['base', 'head']) if (this.sides[k]) disposeObject(this.sides[k].root);
     this.gerber?.dispose();
     for (const m of Object.values(this.diffMaterials || {})) m.dispose();
     for (const m of Object.values(this.materials)) m.dispose();
     for (const m of this._tintList || []) m.dispose();
-    for (const h of this.helpers.children) { h.geometry?.dispose(); h.material?.dispose(); }
-    this.cube.dispose();
-    this.renderer.dispose();
-    this.renderer.forceContextLoss?.();
-    this.canvas.remove();
+    for (const g of Object.values(this.helpers)) for (const h of g.children) { h.geometry?.dispose(); h.material?.dispose(); }
+    this.viewer.dispose();   // the sides' GLB roots and the fab boards with it
   }
 }
