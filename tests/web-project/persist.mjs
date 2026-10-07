@@ -44,10 +44,10 @@ const snapshot = () => page.evaluate(() => {
     view: document.querySelector('.seg[aria-label="Board view"] .seg-btn[aria-selected="true"]')?.dataset.mode || null,
     slider: slider ? Number(slider.value) : null,
     zoom: document.querySelector('.readout.zoom')?.textContent,
-    transform: document.querySelector('.pane .world')?.style.transform,
+    transform: document.querySelector('.stage-wrap')?.dataset.view,
     boxes: document.querySelector('.boxes-toggle')?.getAttribute('aria-pressed'),
     ticked: [...document.querySelectorAll('.layer-list input[type=checkbox]')].map((c) => c.checked).join(''),
-    marks: document.querySelectorAll('svg.overlay .mark').length,
+    marks: document.querySelectorAll('svg.bd2-overlay .mark').length,
     item, hashMode: q.get('mode'), sw: q.get('sw'), z: q.get('z'), boxesParam: q.get('boxes'),
     selected: document.querySelector('.layer-row.focus .layer-name, .side-item.active .side-name')?.textContent || null,
     note: [...document.querySelectorAll('.layer-note, .sheet-note')].filter((n) => !n.hidden).map((n) => n.textContent).join(' '),
@@ -58,7 +58,7 @@ const snapshot = () => page.evaluate(() => {
 const pixels = () => page.evaluate(() => {
   let h = 0;
   let n = 0;
-  for (const c of document.querySelectorAll('.pane canvas.layer-canvas')) {
+  for (const c of document.querySelectorAll('.bd2-pane .bd2-slot canvas')) {
     if (!c.width || !c.height) continue;
     n++;
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -66,14 +66,14 @@ const pixels = () => page.evaluate(() => {
     for (let i = 0; i < d.length; i += step) h = (h * 31 + d[i] + 3 * d[i + 1] + 7 * d[i + 2] + 11 * d[i + 3]) % 2147483647;
     h = (h * 31 + c.width * 7 + c.height) % 2147483647;
   }
-  return { h, n, sides: [...document.querySelectorAll('.pane .layer-holder')].map((x) => x.dataset.side).sort().join(',') };
+  return { h, n, sides: [...document.querySelectorAll('.bd2-pane .bd2-slot')].map((x) => x.closest('.bd2-pane').dataset.side).sort().join(',') };
 });
 
 /** Clicking / stepping to another layer redrew the panes with it (a different picture, both sides). */
 async function redrawn(tag, before, id) {
   const now = await pixels();
   check(now.h !== before.h, `${tag}: the panes look the same as before (not redrawn for ${id})`);
-  const both = await page.evaluate(() => [...document.querySelectorAll('.pane .layer-holder')].length);
+  const both = await page.evaluate(() => [...document.querySelectorAll('.bd2-pane .bd2-slot')].length);
   check(both === 2, `${tag}: ${both} layer holders on show, expected base + head`);
   return now;
 }
@@ -103,7 +103,7 @@ function same(tag, s0, s1, item, { transform = true, exact = true } = {}) {
 }
 
 async function zoomIn(steps = 3) {
-  const bb = await page.locator('.pane').first().boundingBox();
+  const bb = await page.locator('.bd2-pane').first().boundingBox();
   await page.mouse.move(bb.x + bb.width * 0.45, bb.y + bb.height * 0.5);
   for (let i = 0; i < steps; i++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(60); }
   await page.mouse.move(bb.x + 5, bb.y + 5);
@@ -179,7 +179,7 @@ async function layout() {
     await stable();
     same(`layout side click ${id}`, s0, await snapshot(), id);
     px = await redrawn(`layout side click ${id}`, px, id);
-    check(await page.locator('.pane').count() === 2, `layout side click ${id}: not two panes`);
+    check(await page.locator('.bd2-pane').count() === 2, `layout side click ${id}: not two panes`);
   }
   for (const key of [']', '[', '[']) {
     const before = (await snapshot()).item;
@@ -201,7 +201,7 @@ async function layout() {
     await stable();
     const s1 = await snapshot();
     same(`layout diff click ${id}`, s0, s1, id);
-    check(await page.locator('.pane-label', { hasText: `diff: ${id}` }).count() === 1, `layout diff click ${id}: the diff pane does not show ${id}`);
+    check(await page.locator('.bd2-label', { hasText: `diff: ${id}` }).count() === 1, `layout diff click ${id}: the diff pane does not show ${id}`);
     if (id === 'B.SilkS') check(/identical/.test(s1.note), `layout diff on unchanged B.SilkS: no note (${s1.note})`);
   }
   await shot('layout-diff-after-clicks');

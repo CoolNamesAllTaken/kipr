@@ -137,7 +137,7 @@ for (const theme of THEMES) {
     await page.goto(base + `${P}/layout?view=top&mode=side`);
     await settle(page);
     await page.keyboard.press('r');
-    const pane = page.locator('.pane').first();
+    const pane = page.locator('.bd2-pane').first();
     await pane.scrollIntoViewIfNeeded();
     const bb = await pane.boundingBox();
     if (bb) {
@@ -161,7 +161,8 @@ async function checkDocLayer(page, tag, suffix) {
   const NOTE = { x: 210, y: 80, w: 30, h: 14 };
   const world = () => page.locator('.stage-wrap').getAttribute('data-world').then((v) => (v || '0,0,0,0').split(',').map(Number));
   const covers = ([x, y, w, h]) => x <= NOTE.x && y <= NOTE.y && x + w >= NOTE.x + NOTE.w && y + h >= NOTE.y + NOTE.h;
-  // max alpha of `sel`'s canvas in a 1.5 mm square around KiCad point (x, y); the canvas spans the frame
+  // max alpha of `sel`'s canvas in a 1.5 mm square around KiCad point (x, y); the canvas (view2d's
+  // whole-frame tile) spans the frame
   const inkAt = (sel, x, y) => world().then((wb) => page.evaluate(([sel, wb, x, y]) => {
     const c = document.querySelector(sel);
     if (!c) return -1;
@@ -182,7 +183,7 @@ async function checkDocLayer(page, tag, suffix) {
   await settle(page);
   await page.waitForTimeout(500);
   if (!covers(await world())) problems.push(`${tag} doc layer: frame ${await world()} does not cover the note after ticking Dwgs.User`);
-  const ink = await inkAt('.pane:nth-child(2) .layer-canvas', NOTE.x + 15, NOTE.y);
+  const ink = await inkAt('.bd2-pane[data-side="head"] .bd2-slot canvas', NOTE.x + 15, NOTE.y);
   if (!(ink > 64)) problems.push(`${tag} doc layer: no note pixels in the head pane (alpha ${ink})`);
   await page.screenshot({ path: path.join(a.shots, `doc-layer-on.${suffix}.png`) });
   await page.locator('#ly-Dwgs_User').uncheck(); // back to the default for the next run
@@ -193,7 +194,7 @@ async function checkDocLayer(page, tag, suffix) {
   await settle(page);
   await page.waitForTimeout(500);
   if (!covers(await world())) problems.push(`${tag} doc layer diff: frame ${await world()} does not cover the note`);
-  const added = await inkAt('.diff-canvas', NOTE.x + 15, NOTE.y + 12);
+  const added = await inkAt('.bd2-slot:not(.bd2-underlay) canvas', NOTE.x + 15, NOTE.y + 12);
   if (!(added > 64)) problems.push(`${tag} doc layer diff: the added note line is not drawn (alpha ${added})`);
   if (!/Dwgs\.User: [1-9]\d* changed area/.test(await page.locator('.legend').textContent())) problems.push(`${tag} doc layer diff: no changed area found`);
   await page.screenshot({ path: path.join(a.shots, `doc-layer-diff.${suffix}.png`) });
@@ -205,7 +206,7 @@ async function checkDocLayer(page, tag, suffix) {
  * outline for about a second, and the 3D Markers checkbox follows.
  */
 async function checkBoxes(page, tag, suffix) {
-  const marks = () => page.locator('svg.overlay .mark').count();
+  const marks = () => page.locator('svg.bd2-overlay .mark').count();
   const shot = (name) => page.screenshot({ path: path.join(a.shots, `${name}.${suffix}.png`) });
   await page.goto(base + `${P}/schematic/root?mode=side`);
   await settle(page);
@@ -221,11 +222,11 @@ async function checkBoxes(page, tag, suffix) {
   const before = await page.locator('.readout.zoom').textContent();
   await page.locator('.change').first().click();
   await page.waitForTimeout(150);
-  if (await page.locator('svg.overlay .hl.flash').count() < 1) problems.push(`${tag} boxes: no flash on a selected change`);
+  if (await page.locator('svg.bd2-overlay .hl.flash').count() < 1) problems.push(`${tag} boxes: no flash on a selected change`);
   if ((await page.locator('.readout.zoom').textContent()) === before) problems.push(`${tag} boxes: selecting a change did not zoom`);
   await shot('boxes-off-flash');
   await page.waitForTimeout(1300);
-  if (await page.locator('svg.overlay .hl').count()) problems.push(`${tag} boxes: the flash outline stayed`);
+  if (await page.locator('svg.bd2-overlay .hl').count()) problems.push(`${tag} boxes: the flash outline stayed`);
   // every compare mode, schematic and layout, plus a head-only project: still hidden (localStorage, no URL param)
   for (const hash of [`${P}/schematic/root?mode=diff`, `${P}/schematic/root?mode=onion`, `${P}/schematic/root?mode=swipe`,
     `${P}/layout?view=top&mode=side`, `${P}/layout/F.Cu?view=top&mode=diff`, `${P}/layout?view=layers&mode=onion`, `${P}/layout?view=top&mode=swipe`,
@@ -258,7 +259,7 @@ async function checkBoxes(page, tag, suffix) {
   const p2 = await ctx2.newPage();
   await p2.goto(base + `${P}/layout?view=top&mode=side&boxes=0`);
   await settle(p2);
-  if (await p2.locator('svg.overlay .mark').count()) problems.push(`${tag} boxes: boxes=0 deep link shows boxes`);
+  if (await p2.locator('svg.bd2-overlay .mark').count()) problems.push(`${tag} boxes: boxes=0 deep link shows boxes`);
   await ctx2.close();
 }
 

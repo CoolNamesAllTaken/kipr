@@ -99,14 +99,22 @@ export function withoutProfile(text) {
   return kept.join("");
 }
 
+/** The layer envelope `loadOdbJob()` hands out for an ODB++ layer (the wasm reads it like Gerber text). */
+const ODB_ENVELOPE = /^%ODB\+\+LAYER%/;
+/** An ODB++ pad, line, arc, surface, text or barcode record (upstream job-loader's check). */
+const ODB_FEATURE = /^[PLAST] |^B /m;
+
 /**
  * Whether a Gerber draws anything: a D01 (interpolate) or D03 (flash)
  * operation, or a region. Exporters write a header-only file for a layer with
  * nothing on it (KiCad's B.SilkS on a board without bottom silkscreen); the
- * renderer rejects such a file, so callers skip it.
+ * renderer rejects such a file, so callers skip it. An ODB++ layer envelope
+ * (`loadOdbJob()`) draws something when it has a feature record.
  */
 export function hasGeometry(text) {
-  return typeof text === "string" && /D0?[13]\*|G36\*/.test(text);
+  if (typeof text !== "string") return false;
+  if (ODB_ENVELOPE.test(text)) return ODB_FEATURE.test(text);
+  return /D0?[13]\*|G36\*/.test(text);
 }
 
 // ── Which layer is this? ────────────────────────────────────────────────────
@@ -217,6 +225,15 @@ const EXTENSION_RULES = new Map([
  */
 export function layerRole(name = "", content = "") {
   if (typeof content === "string" && content) {
+    // An ODB++ envelope says what it is; its Gerber-style name may still read as copper (`drill_plated_f.cu-b.cu.drl`).
+    const envelope = ODB_ENVELOPE.test(content) && /^kind=(\w+)$/m.exec(content.slice(0, 200));
+    if (envelope && (envelope[1] === "drill" || envelope[1] === "rout")) {
+      const plating = /^plating=(\w+)$/m.exec(content.slice(0, 300))?.[1];
+      if (plating === "plated" || plating === "non_plated") return { role: "drill", side: null, plated: plating === "plated" };
+      const lower = String(name).toLowerCase();
+      return { role: "drill", side: null, ...drillPlating(name), ...(/(^|[^a-z-])plated/.test(lower) ? { plated: true } : {}) };
+    }
+    if (envelope && envelope[1] === "profile") return { role: "outline", side: null };
     const found = fromFileFunction(content);
     if (found) return found;
     if (/^\s*M48\b/m.test(content.slice(0, 2000))) {
