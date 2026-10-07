@@ -33,6 +33,9 @@ python3 "$here/make_mock.py" --out "$mock" --site
 (cd "$root" && python3 -m kipr.project.report --out "$mock")
 echo "== screenshots (http)"
 node "$here/screens.mjs" --site "$mock" --shots "$shots/http" $quick
+echo "== view state kept across layers / sheets (mode, slider, zoom, boxes; back / forward, reload, tabs)"
+node "$here/persist.mjs" --site "$mock" --shots "$shots/persist"
+node "$here/persist.mjs" --site "$mock" --mode file
 echo "== stage fills the window (1920x1080, 2560x1440, 390x844)"
 node "$here/stage_height.mjs" --site "$mock" --shots "$shots/stage"
 echo "== screenshots (file://, like an unzipped artifact)"

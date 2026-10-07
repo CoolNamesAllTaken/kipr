@@ -4,7 +4,8 @@
 //   #/p/<slug>                          project, default tab
 //   #/p/<slug>/<tab>                    tab: schematic | layout | pcba3d | bom | netlist | checks
 //   #/p/<slug>/<tab>/<item>?k=v&...     item: sheet id (schematic) or layer id (layout), URI-encoded;
-//                                       params: mode, c (change index), view (top|bottom|layers), q (filter), ...
+//                                       params: mode, c (change index), view (top|bottom|layers), q (filter),
+//                                       z (zoom region), sw / op (sliders; viewstate.js), ...
 
 export const TABS = [
   ['schematic', 'Schematic'],
@@ -51,6 +52,6 @@ export function formatHash({ slug = null, tab = null, item = null, params = {} }
   }
   const q = Object.entries(params || {})
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v)).replace(/%2C/g, ',')}`); // z=1,2,3 stays readable
   return q.length ? `${h}?${q.join('&')}` : h;
 }
