@@ -510,14 +510,19 @@ IMP_FLAGS = {"new_violation": ("new", "out of tolerance, new"), "violation": ("m
 
 
 def impedance_section(z) -> str:
-    """checks.impedance: one row per class x layer, base -> head (closed-form estimates)."""
+    """checks.impedance: one row per class x layer, base -> head (field solver or closed-form estimates)."""
     z = d(z)
     if not z:
         return ""
     c = d(z.get("count"))
-    head = (f'<h3>Impedance <span class="muted">closed-form estimate (boarddd {esc(fmt(z.get("boarddd")))}, quasi-static, '
-            f'about ±2 % at best; fab tolerance is ±10 %): {esc(fmt(num(c.get("violations")) or 0))} of '
-            f'{esc(fmt(num(c.get("rows")) or 0))} out of tolerance</span></h3>')
+    how = ("field solver (boarddd {v}, 2D quasi-static, with its error estimate" if z.get("solver") == "field" else
+           "closed-form estimate (boarddd {v}, quasi-static, about ±2 % at best").format(v=esc(fmt(z.get("boarddd"))))
+    head = (f'<h3>Impedance <span class="muted">{how}; fab tolerance is ±10 %): {esc(fmt(num(c.get("violations")) or 0))} of '
+            f'{esc(fmt(num(c.get("rows")) or 0))} out of tolerance</span></h3>'
+            + (f'<p class="muted">{esc(z.get("solver_note"))}</p>' if z.get("solver_note") else "")
+            + '<p class="muted small">Every track width (and pair gap) is evaluated and weighted by its length; launch stubs '
+              '(another width ending on a pad), pair breakouts, short pieces and covered tracks are left out. Width, Z and '
+              'deviation are the longest-routed width’s; “out” is the controlled length out of tolerance.</p>')
     rows = [d(r) for r in lst(z.get("rows"))]
     if not rows:
         return head + '<p class="muted">No net class has an impedance target.</p>'
@@ -545,6 +550,17 @@ def impedance_section(z) -> str:
         if num(r.get("shift_pct")) is not None:
             flags += f' <span class="muted">stackup alone {num(r.get("shift_pct")):+.1f} %</span>'
         notes = [str(x) for x in lst(side.get("validity")) + lst(side.get("notes"))]
+        segs = [d(x) for x in lst(side.get("segments")) if d(x)]
+        if len(segs) > 1:
+            notes.insert(0, "widths: " + ", ".join(
+                f'{f(x.get("width"), 3)}' + (f'/{f(x.get("gap"), 3)}' if num(x.get("gap")) is not None else "")
+                + f' × {f(x.get("length_mm"))} mm → {f(x.get("Z"))} Ω' for x in segs))
+        exc = [d(x) for x in lst(side.get("excluded")) if d(x)]
+        if exc:
+            notes.append("left out: " + ", ".join(f'{f(x.get("width"), 3)} × {f(x.get("length_mm"))} mm {x.get("reason")}' for x in exc))
+        if num(side.get("error_pct")) is not None:
+            notes.append(f'field solver error estimate ±{num(side.get("error_pct")):.2f} %'
+                         + (f', closed form {f(side.get("Z_closedform"))} Ω' if num(side.get("Z_closedform")) is not None else ""))
         if side.get("error"):
             notes.insert(0, f"no Z: {side.get('error')}")
         sev = {"bad": "new", "warn": "modified"}.get(str(r.get("severity")), "unchanged")
@@ -556,6 +572,7 @@ def impedance_section(z) -> str:
                     (f"{geo(b)} → {geo(h)}" if b and h and geo(b) != geo(h) else geo(h or b)),
                     (f'{f(b.get("Z"))} → {f(h.get("Z"))}' if b and h and f(b.get("Z")) != f(h.get("Z")) else f((h or b).get("Z"))), zt,
                     (f'{num(h.get("deviation_pct")):+.1f} %' if num(h.get("deviation_pct")) is not None else "–"),
+                    (f'{f(h.get("length_out_mm"))} / {f(h.get("length_mm"))}' if num(h.get("length_out_mm")) is not None else "–"),
                     flags.strip() + (f'<br><span class="muted small">{esc("; ".join(notes))}</span>' if notes else "")])
     sc = [d(x) for x in lst(z.get("stackup_changes"))]
     stack = ""
@@ -563,7 +580,7 @@ def impedance_section(z) -> str:
         stack = ('<p class="muted">Stackup changes: ' + esc("; ".join(
             f'{x.get("layer")} {x.get("field")} {fmt(x.get("base"))} → {fmt(x.get("head"))}' for x in sc)) + "</p>")
     return (head + table(["", "Class", "Layer", "Structure", "Width / gap mm (base → head)", "Z Ω (base → head)", "Target",
-                          "Deviation", "Flags, notes"], trs) + stack)
+                          "Deviation", "Out / controlled mm", "Flags, notes"], trs) + stack)
 
 
 def grid_section(g) -> str:

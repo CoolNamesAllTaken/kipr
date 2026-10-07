@@ -44,12 +44,16 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fonts-dejavu-core libcairo2
-          python -m pip install -q -e ".[test]"
+          python -m pip install -q -e ".[test,field]"
           python -m playwright install --with-deps chromium
           # the viewer tests drive Chromium from node (playwright pinned in tests/web-project)
           (cd tests/web-project && npm ci --no-audit --no-fund && npx playwright install chromium)
       - name: pytest tests/project
         run: python -m pytest tests/project -q -rs
+      - name: checks.impedance with the closed-form fallback (no field solver)
+        env:
+          KIPR_IMPEDANCE_SOLVER: closedform
+        run: python -m pytest tests/project/test_impedance.py -q -rs
       - name: 3D file:// bundle is fresh
         run: node web/project/pcba3d/build_offline.mjs --check
       - name: Viewer, site and report (tests/web-project/run_all.sh)
@@ -104,6 +108,13 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install -q ".[test]"
+          # what the field solver costs in the KiCad image (project-review.yml installs kipr[field] the same way)
+          site=$("$RUNNER_TEMP/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          before=$(du -sm "$site" | cut -f1); t0=$(date +%s)
+          "$RUNNER_TEMP/venv/bin/pip" install -q ".[field]"
+          echo "[field] extra: $(( $(date +%s) - t0 )) s, +$(( $(du -sm "$site" | cut -f1) - before )) MB" | tee -a "$GITHUB_STEP_SUMMARY"
+          du -sh "$site"/scipy* "$site"/numpy* 2>/dev/null || true
+          "$RUNNER_TEMP/venv/bin/python" -c 'from kipr.project import impedance as im; print("impedance solver:", *im.pick_solver())'
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Build the fixture repo from KiCad's demos
         env:

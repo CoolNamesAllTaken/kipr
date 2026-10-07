@@ -111,7 +111,7 @@ export function summaryChips(summary) {
     ['ERC', n(obj(s.erc)?.new), 'new ERC violations'],
     ['DRC', n(obj(s.drc)?.new), 'new DRC violations'],
     ['grid', n(obj(s.grid)?.count), 'schematic items off the connection grid (warnings)'],
-    ['Z', n(obj(s.impedance)?.violations), `of ${n(obj(s.impedance)?.rows)} controlled-impedance class × layer out of tolerance (closed-form estimate${n(obj(s.impedance)?.new_violations) ? `, ${n(obj(s.impedance)?.new_violations)} new` : ''})`],
+    ['Z', n(obj(s.impedance)?.violations), `of ${n(obj(s.impedance)?.rows)} controlled-impedance class × layer out of tolerance (${obj(s.impedance)?.solver === 'field' ? 'field solver' : 'closed-form estimate'}${n(obj(s.impedance)?.new_violations) ? `, ${n(obj(s.impedance)?.new_violations)} new` : ''})`],
   ];
   return chips.filter(([, v]) => v > 0);
 }
@@ -218,7 +218,7 @@ function renderOverview(unknownSlug) {
       el('td', {}, el('a', { href: formatHash({ slug: p.slug }) }, String(p.name || p.slug)), el('div', { class: 'small muted path' }, String(p.path || ''))),
       el('td', {}, badge('status', p.status)),
       [s.sheets_changed, s.layers_changed, c.added, c.removed, c.moved, c.changed, s.nets_changed, obj(s.erc)?.new, obj(s.drc)?.new, obj(s.grid)?.count].map((v) => el('td', { class: 'num' }, n(v))),
-      el('td', { class: 'num', title: 'controlled-impedance class × layer out of tolerance / checked (closed-form estimate)' }, obj(s.impedance) ? `${n(s.impedance.violations)} / ${n(s.impedance.rows)}` : ''),
+      el('td', { class: 'num', title: `controlled-impedance class × layer out of tolerance / checked (${obj(s.impedance)?.solver === 'field' ? 'field solver' : 'closed-form estimate'})` }, obj(s.impedance) ? `${n(s.impedance.violations)} / ${n(s.impedance.rows)}` : ''),
       el('td', { class: 'num' }, errs ? el('span', { class: 'warn-text', title: 'non-fatal export problems' }, String(errs)) : ''));
   });
   main.append(el('section', { class: 'card' }, el('div', { class: 'scroll-x' }, el('table', { class: 'grid overview' },
