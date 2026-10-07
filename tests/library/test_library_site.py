@@ -31,7 +31,11 @@ class BundleTests(unittest.TestCase):
 
     def test_real_bundle_parses(self):
         bundle = build_site.make_bundle(VIEWER / "js")
-        self.assertIn("window.CR_STEP_WORKER_SRC", bundle)
+        self.assertIn('__defs["./panel3d.js"]', bundle)
+        # the 3D view imports vendor/ (boarddd, three.js): it is the prebuilt js/view3d.bundle.js instead
+        self.assertNotIn('__defs["./view3d.js"]', bundle)
+        self.assertNotIn("vendor/", bundle.split('__defs["./panel3d.js"]')[0])
+        self.assertTrue((VIEWER / "js" / "view3d.bundle.js").is_file())
         if shutil.which("node"):
             with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
                 f.write(bundle)
@@ -79,6 +83,23 @@ class OfflineDataTests(unittest.TestCase):
         self.assertEqual(sorted(files), ["items/fp/head_F.Cu.svg", "items/fp/head_geom.json", "items/fp/model_1.step"])
         self.assertEqual(files["items/fp/model_1.step"], {"b64": "SVNPLTEwMzAzLTIxOw=="})
         self.assertEqual(sorted(p.name for p in (self.out / "offline").iterdir()), ["fp.js"])
+
+    def test_occt_wasm_pack(self):
+        """With a STEP model in a pack, the STEP kernel's WASM goes into offline/ too (file:// can't fetch it)."""
+        wasm = self.out / build_site.OCCT_WASM
+        wasm.parent.mkdir(parents=True)
+        wasm.write_bytes(b"\0asm\1\0\0\0")
+        build_site.build_offline(self.out)
+        js = (self.out / "offline" / build_site.OCCT_PACK).read_text()
+        self.assertIn('window.CR_OCCT_WASM = "AGFzbQEAAAA=";', js)
+
+    def test_site_copies_vendor(self):
+        """vendor/ (boarddd, three.js, occt-import-js) is copied into the site, through the symlink."""
+        build_site.build(self.out, offline=False)
+        for rel in ("vendor/boarddd/src/scene/viewer.js", "vendor/three/three.module.js",
+                    "vendor/occt-import-js/dist/occt-import-js.wasm", "js/view3d.bundle.js"):
+            self.assertTrue((self.out / rel).is_file(), rel)
+        self.assertFalse(list((self.out / "vendor").rglob("*.d.ts")))
 
 
 if __name__ == "__main__":

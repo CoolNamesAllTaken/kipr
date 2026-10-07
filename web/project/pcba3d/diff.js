@@ -6,7 +6,7 @@
 // backend, a hand-written fixture -- it is derived here from the two sides, so the viewer never
 // has to trust a field that is not there.
 
-import { naturalCompare } from './match.js';
+import { naturalCompare } from '../vendor/boarddd/src/models/index.js';
 
 // 'minor': the backend's minor: true (only a 3D model format swap such as .wrl -> .step, or a
 // footprint library rename): listed, but not counted, tinted or marked as a change by default.

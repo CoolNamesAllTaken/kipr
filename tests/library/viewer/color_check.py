@@ -1,4 +1,4 @@
-"""Colour check of the library 3D view (needs playwright + network for three.js/occt-import-js).
+"""Colour check of the library 3D view (needs playwright; three.js, boarddd and occt-import-js are vendored).
 
     python3 color_check.py [--js <dir with view3d.js>]  -> prints JSON {view: [r, g, b]}, exit 1 on failure
 

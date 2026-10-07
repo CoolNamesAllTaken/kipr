@@ -16,6 +16,7 @@ on:
       - "kipr/common/**"
       - "kipr/project/**"
       - "web/project/**"
+      - "web/vendor/**"
       - "tests/project/**"
       - "tests/web-project/**"
       - "tests/web-3d/**"

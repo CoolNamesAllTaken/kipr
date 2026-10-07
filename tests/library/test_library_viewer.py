@@ -2,8 +2,8 @@
 on a mock site and on a site rendered by `kipr library` from the fixture repo.
 
 The browser tests need the `playwright` Python package and its Chromium; they are skipped
-otherwise. The 3D view loads three.js/occt-import-js from cdn.jsdelivr.net: without network
-access the screenshot tests skip the 3D tab. Screenshots go to $KIPR_SHOTS_DIR if set.
+otherwise. The 3D view needs no network (boarddd, three.js and occt-import-js are vendored in
+web/vendor). Screenshots go to $KIPR_SHOTS_DIR if set.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -39,16 +38,7 @@ def _have_playwright() -> bool:
         return False
 
 
-def _have_cdn() -> bool:
-    try:
-        urllib.request.urlopen("https://cdn.jsdelivr.net/npm/three@0.185.1/package.json", timeout=5).close()
-        return True
-    except OSError:
-        return False
-
-
 HAVE_PW = _have_playwright()
-HAVE_CDN = HAVE_PW and _have_cdn()
 _tmp = None
 _sites: dict[str, Path] = {}
 
@@ -113,8 +103,6 @@ class NodeUnitTests(unittest.TestCase):
 @unittest.skipUnless(HAVE_PW, "needs playwright + chromium (python -m playwright install chromium)")
 class ScreenshotTests(unittest.TestCase):
     def check(self, site: Path, name: str, *extra):
-        if not HAVE_CDN:
-            extra += ("--no-3d",)
         r = run_tool("screenshot.py", "--site", str(site), "--shots", str(shots_dir(name)), *extra)
         self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
         self.assertNotIn("PROBLEM", r.stdout)
@@ -141,7 +129,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-4000:])
 
 
-@unittest.skipUnless(HAVE_CDN, "needs playwright + chromium and cdn.jsdelivr.net (three.js, occt-import-js)")
+@unittest.skipUnless(HAVE_PW, "needs playwright + chromium (python -m playwright install chromium)")
 class ColorTests(unittest.TestCase):
     def test_step_colors_read_like_kicad(self):
         """The RP2040-Zero board colour (STEP 0.090/0.224/0.420) is a clear mid blue from the top and the bottom."""
