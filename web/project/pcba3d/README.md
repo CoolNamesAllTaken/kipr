@@ -23,8 +23,8 @@ h.dispose();              // (alias: destroy) frees the WebGL context and emptie
   with fallbacks, and follows `data-theme` on `<html>`. It loads `pcba3d.css` itself. It needs
   no importmap and no CDN: [boarddd](https://github.com/CoolNamesAllTaken/boarddd) and three.js
   are vendored once for both viewers in `web/vendor/` (here `../vendor/boarddd` and
-  `../vendor/three`, symlinks), with relative imports. The gerber renderer is the project
-  viewer's shared copy in `../vendor/wasm-gerber-renderer/` (see below).
+  `../vendor/three`, symlinks), with relative imports. The gerber renderer is boarddd's own
+  `boarddd/gerber` from the same vendored copy (see below).
 - It is CSP-clean for the project viewer (`style-src 'self'`): no inline style attributes or
   `<style>` tags, only classes and `element.style`.
 
@@ -87,16 +87,18 @@ failure, which is reported in the status line.
   added strokes.
 
 Empty KiCad layers (a header-only `B_SilkS.gbr`, or an `NPTH.drl` with no holes) are skipped by
-the renderer (fork PR #2); an empty mask is drawn as mask over the whole board.
+the renderer, and drill tools with no diameter (KiCad 10's `T1C0.000` for drill-less vias) are dropped
+by boarddd/gerber's `dropEmptyTools` instead of failing the whole file; an empty mask is drawn as mask
+over the whole board.
 
 ### The shared gerber renderer
 
-Both the layout viewer and this module import one vendored copy of our fork,
-`web/project/vendor/wasm-gerber-renderer/`. It is owned by the project viewer (branch
-claud/web-project), synced by `web/project/scripts/sync_vendored_renderer.bash`, and pinned to fork
-main 9b7ade3 with the npm 0.6.0 WASM. This module uses `index` (`createGerberRenderer`, with
-`wasmModule` and `wasmInitInput` passed explicitly so a bundle needs no dynamic import), `board`,
-`diff`, `drills`, `layers`, `outline` and `raster`.
+Both the layout viewer and this module use `boarddd/gerber` from the one vendored boarddd,
+`web/vendor/boarddd/src/gerber/` (boarddd's board, diff, drills, layers, outline and raster modules),
+with the renderer core and its committed wasm in `web/vendor/boarddd/third_party/wasm-gerber-renderer/core/`
+(boarddd builds the wasm in its CI). `web/vendor/sync_vendor.bash` pins the boarddd tag. This module
+imports `boarddd/gerber` once, creates the renderer with `wasmModule` and `wasmInitInput` passed
+explicitly (so a bundle needs no dynamic import), and hands the same module to boarddd/board.
 
 ## Opening a report from disk (`file://`)
 

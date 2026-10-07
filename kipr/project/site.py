@@ -205,7 +205,7 @@ def build_offline(out: Path) -> dict:
 # The 3D module's file:// support (see web/project/pcba3d/build_offline.mjs, which writes the same
 # packs): pcba3d.bundle.js is prebuilt and committed, the packs are written here, so no node is needed.
 PCBA3D_BUNDLE = "pcba3d.bundle.js"
-PCBA3D_WASM = "vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm"  # gerberboard.js OFFLINE_WASM_KEY
+PCBA3D_WASM = "vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm"  # gerberboard.js OFFLINE_WASM_KEY
 
 
 def write_pcba3d_pack(path: Path, entries: list[tuple[str, dict]]) -> int:

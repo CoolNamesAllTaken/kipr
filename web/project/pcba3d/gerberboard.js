@@ -6,37 +6,33 @@
 // outline and holes in it, so rerouting and outline changes can be seen in 3D.
 //
 // The board itself is boarddd/board (web/vendor/boarddd: readFabFiles, buildGerberBoard,
-// paintCopperDiff, outlineGhost), with our wasm-gerber-renderer fork injected: the project
-// viewer's shared vendored copy in web/project/vendor/. What stays here is kipr's: which of the
-// contract's layers make the board, the stackup's colours and thickness, and the file:// WASM pack.
+// paintCopperDiff, outlineGhost), drawn by boarddd/gerber from the same vendored copy. What stays
+// here is kipr's: which of the contract's layers make the board, the stackup's colours and
+// thickness, and the file:// WASM pack.
 
-import { createGerberRenderer } from '../vendor/wasm-gerber-renderer/index.js';
-import * as wasmGlue from '../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor.js';
-import * as gerberBoard from '../vendor/wasm-gerber-renderer/board.js';
-import * as gerberDiff from '../vendor/wasm-gerber-renderer/diff.js';
-import * as gerberDrills from '../vendor/wasm-gerber-renderer/drills.js';
-import * as gerberLayers from '../vendor/wasm-gerber-renderer/layers.js';
-import * as gerberOutline from '../vendor/wasm-gerber-renderer/outline.js';
-import * as gerberRaster from '../vendor/wasm-gerber-renderer/raster.js';
+import * as gerber from '../vendor/boarddd/src/gerber/index.js';
+import * as wasmGlue from '../vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor.js';
 import {
   readFabFiles, faceBounds, buildGerberBoard, paintCopperDiff, canvasTexture, outlineGhost, outlinesDiffer, MAX_FACE_PX,
 } from '../vendor/boarddd/src/board/index.js';
 
-const WASM_URL = new URL('../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm', import.meta.url);
-export const OFFLINE_WASM_KEY = 'vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm';
+// The vendored wasm, relative to web/project/; also its key in the file:// pack offline/pcba3d-vendor.js
+// (kipr/project/site.py PCBA3D_WASM).
+export const OFFLINE_WASM_KEY = 'vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm';
+const WASM_URL = new URL(`../${OFFLINE_WASM_KEY}`, import.meta.url);
 export const FAB_KINDS = new Set(['copper', 'mask', 'silk', 'outline', 'drill']);   // the layers a board is built from
-// The fork's functions boarddd uses, as one object (boarddd never imports the renderer itself).
-const GERBER = { ...gerberBoard, ...gerberDiff, ...gerberDrills, ...gerberLayers, ...gerberOutline, ...gerberRaster };
+// boarddd/board takes the gerber implementation explicitly: the same module, so the bundle has one copy.
+const GERBER = gerber;
 
 function basename(path) {
   return String(path).split('/').pop();
 }
 
-/** The fork's renderer on its own canvas, with the WASM from the vendored copy (or the pack). */
+/** boarddd/gerber's renderer on its own canvas, with the WASM from the vendored copy (or the pack). */
 async function makeRenderer(assets) {
   let module_or_path = WASM_URL;
   if (assets.offline) module_or_path = new Uint8Array(await assets.bytes(OFFLINE_WASM_KEY));
-  return createGerberRenderer(document.createElement('canvas'), {
+  return gerber.createGerberRenderer(document.createElement('canvas'), {
     wasmModule: wasmGlue,
     wasmInitInput: { module_or_path },
     contextAttributes: { preserveDrawingBuffer: true },

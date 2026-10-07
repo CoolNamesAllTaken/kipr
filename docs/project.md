@@ -382,8 +382,8 @@ Chromium over http and from disk, every tab including 3D.
 ### The 3D viewer from disk (file://)
 
 Browsers refuse ES modules and `fetch()` on `file://`. The 2D viewer is bundled into a classic
-script by `site.py` itself (a small Python transform). The 3D module (three.js + the gerber
-renderer) is bundled with esbuild, and that bundle, `web/project/pcba3d/pcba3d.bundle.js`, is
+script by `site.py` itself (a small Python transform). The 3D module (three.js + boarddd, whose
+`boarddd/gerber` is the gerber renderer) is bundled with esbuild, and that bundle, `web/project/pcba3d/pcba3d.bundle.js`, is
 **committed** instead of built at review time: building a site then needs no node, npx or
 network (the KiCad CI image has none of them and a reviewer's machine may not either), and the
 wheel ships the exact file that was tested. The bundle also carries the gerber renderer, which the
@@ -391,7 +391,8 @@ layout tab uses from disk, so gerbers render from `file://` as well. `site.py` w
 packs in Python: `offline/<slug>.js` (the SVG, gerber and drill texts), `offline/pcba3d-<slug>.js`
 (GLBs as base64) and `offline/pcba3d-vendor.js` (the renderer's WASM); a test checks they hold the
 same bytes as `build_offline.mjs` writes. After changing anything under
-`web/project/pcba3d/` or `web/project/vendor/`, run `node web/project/pcba3d/build_offline.mjs
+`web/project/pcba3d/` or `web/vendor/` (re-vendored with `bash web/vendor/sync_vendor.bash`, a wrapper
+around boarddd's `scripts/vendor.mjs` pinned to a boarddd tag), run `node web/project/pcba3d/build_offline.mjs
 --no-packs` and commit the bundle; CI fails with `--check` when it is stale (esbuild is pinned
 and runs from `web/project/`, so the build is reproducible). `tests/project/test_workflows.py` checks the workflows' security properties
 and runs actionlint when it is installed.
