@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  usableHoles, boardGeometry, outlinesDiffer, rectOutline, clearance, segmentsFor, HOLE_BUDGET,
+  usableHoles, boardGeometry, outlinesDiffer, rectOutline, clearance, segmentsFor, HOLE_BUDGET, slotPoints, pointToSegment,
 } from '../../web/project/pcba3d/boardgeom.js';
 
 const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
@@ -68,4 +68,37 @@ test('outlinesDiffer and rectOutline', () => {
   assert.deepEqual(r.board, [[10, -60], [40, -60], [40, -20], [10, -20]]);
   assert.equal(r.approximate, true);
   assert.ok(segmentsFor(0.15) >= 10 && segmentsFor(1.6) <= 48);
+});
+
+test('slotPoints: a 1.0 x 2.0 mm slot is a stadium (flanks 1.0 mm, ends r 0.5 mm) at any angle', () => {
+  for (const deg of [0, 45, 90, 135]) {
+    const a = (deg * Math.PI) / 180;
+    const [x1, y1, x2, y2] = [5 - 0.5 * Math.cos(a), 5 - 0.5 * Math.sin(a), 5 + 0.5 * Math.cos(a), 5 + 0.5 * Math.sin(a)];
+    const loop = slotPoints(x1, y1, x2, y2, 0.5).map((v) => [v.x, v.y]);
+    for (const [x, y] of loop) assert.ok(Math.abs(pointToSegment(x, y, x1, y1, x2, y2) - 0.5) < 1e-9);
+    const edges = loop.map((p, i) => [p, loop[(i + 1) % loop.length]]).map(([[ax, ay], [bx, by]]) => [Math.hypot(bx - ax, by - ay), Math.atan2(by - ay, bx - ax)]);
+    const flanks = edges.filter(([len]) => len > 0.5);
+    assert.equal(flanks.length, 2);
+    for (const [len, dir] of flanks) {
+      assert.ok(Math.abs(len - 1) < 1e-9);
+      assert.ok(Math.abs(Math.sin(dir - a)) < 1e-9, `flank along the slot at ${deg} deg`);
+    }
+  }
+});
+
+test('boardGeometry: a plated slot gets a stadium hole and a stadium barrel, not an ellipse', () => {
+  const { body, barrels } = boardGeometry({ board: rect(0, -10, 10, 0), cutouts: [] },
+    [{ x: 4.5, y: -5, x2: 5.5, y2: -5, diameter: 1, plated: true }], 1.6);
+  // every wall vertex of the barrel's bore sits 0.5 - plating from the slot's centre segment
+  const pos = barrels.attributes.position;
+  const distances = [];
+  for (let i = 0; i < pos.count; i += 1) distances.push(pointToSegment(pos.getX(i), pos.getY(i), 4.5, -5, 5.5, -5));
+  const bore = Math.min(...distances), outer = Math.max(...distances);
+  assert.ok(Math.abs(bore - (0.5 - 0.025)) < 1e-6 && Math.abs(outer - 0.505) < 1e-6, `${bore} ${outer}`);
+  for (const d of distances) assert.ok(Math.abs(d - bore) < 1e-6 || Math.abs(d - outer) < 1e-6);
+  // the board's hole: the corners of the stadium (x 4.5 / 5.5, y -5 +- 0.5) are open
+  const b = body.attributes.position;
+  let corner = false;
+  for (let i = 0; i < b.count; i += 1) if (Math.abs(b.getX(i) - 5.5) < 1e-6 && Math.abs(b.getY(i) + 4.5) < 1e-6) corner = true;
+  assert.ok(corner);
 });

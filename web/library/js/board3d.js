@@ -5,7 +5,7 @@
 //   - copper pads (+ plated barrels) as real geometry from geom.json.
 // Every object is tagged with userData.group in {board, pads, silk, fab}.
 import {
-  BOARD_THICKNESS, COPPER_THICKNESS, toBoard, padOutline, padToPcb, padDrill, padHoleCenter, padCopperSides,
+  BOARD_THICKNESS, COPPER_THICKNESS, toBoard, padOutline, padToPcb, padDrill, padDrillRing, padCopperSides,
 } from './kicad3d.js';
 import { imageSrc } from './util.js';
 
@@ -47,6 +47,16 @@ function drawTinted(ctx, img, color, W, H, alpha = 1) {
   ctx.globalAlpha = 1;
 }
 
+/**
+ * A shape's outer ring counter-clockwise: three's extruder only normalises the holes' winding when the outer
+ * ring is CCW, and a hole wound like its outer ring gets its walls facing away from the viewer (culled).
+ */
+function ccw(ring) {
+  let a = 0;
+  ring.forEach(([x, y], i) => { const [u, v] = ring[(i + 1) % ring.length]; a += x * v - u * y; });
+  return a < 0 ? ring.slice().reverse() : ring;
+}
+
 function ringToShapePath(THREE, ring, PathClass) {
   const p = new PathClass();
   ring.forEach(([x, y], i) => (i ? p.lineTo(x, y) : p.moveTo(x, y)));
@@ -54,22 +64,27 @@ function ringToShapePath(THREE, ring, PathClass) {
   return p;
 }
 
-/** Hole outline (board frame) for a drilled pad. */
-function drillRing(pad, segs = 24) {
-  const d = padDrill(pad);
-  if (!d) return null;
-  const local = [];
-  const r = Math.min(d.w, d.h) / 2;
-  const hx = Math.max(0, d.w / 2 - r);
-  const hy = Math.max(0, d.h / 2 - r);
-  for (let i = 0; i < segs; i++) {
-    const a = (i / segs) * Math.PI * 2;
-    // stadium: two half circles joined by straight sides along the long axis
-    const cx = Math.cos(a) >= 0 ? hx : -hx;
-    const cy = Math.sin(a) >= 0 ? hy : -hy;
-    local.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+/**
+ * The wall of a hole: the side of `ring` (board frame) extruded from z0 to z1 with no caps, sharing the
+ * vertices around the loop so it shades smooth. A stadium ring gives a slot's barrel: flat flanks, round ends.
+ */
+function wallGeometry(THREE, ring, z0, z1) {
+  const n = ring.length;
+  const pos = new Float32Array(n * 2 * 3);
+  ring.forEach(([x, y], i) => {
+    pos.set([x, y, z1], 3 * i);
+    pos.set([x, y, z0], 3 * (n + i));
+  });
+  const index = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    index.push(i, n + i, j, j, n + i, n + j);
   }
-  return local.map((q) => toBoard(...padToPcb(pad, q)));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Closed outline from Edge.Cuts polylines if there is exactly one usable loop, else the bbox rectangle. */
@@ -126,11 +141,11 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
 
   // --- slab with holes
   const shape = new THREE.Shape();
-  outlineRing(geom).forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+  ccw(outlineRing(geom)).forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
   shape.closePath();
   const pads = geom.pads || [];
   for (const pad of pads) {
-    const ring = drillRing(pad);
+    const ring = padDrillRing(pad);
     if (ring) shape.holes.push(ringToShapePath(THREE, ring, THREE.Path));
   }
   const slabGeo = new THREE.ExtrudeGeometry(shape, { depth: BOARD_THICKNESS, bevelEnabled: false, curveSegments: 8 });
@@ -193,10 +208,10 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
     if (pad.type === 'np_thru_hole' && dr && Math.min(...(pad.size || [0])) <= Math.min(dr.w, dr.h) + 1e-6) continue;
     const { outer, extra } = padOutline(pad);
     const rings = [outer, ...extra].map((ring) => ring.map((q) => toBoard(...padToPcb(pad, q))));
-    const hole = drillRing(pad);
+    const hole = padDrillRing(pad);
     for (const ring of rings) {
       const s = new THREE.Shape();
-      ring.forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y)));
+      ccw(ring).forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y)));
       s.closePath();
       if (hole && ring === rings[0]) s.holes.push(ringToShapePath(THREE, hole, THREE.Path));
       const g = new THREE.ExtrudeGeometry(s, { depth: COPPER_THICKNESS, bevelEnabled: false, curveSegments: 8 });
@@ -212,17 +227,8 @@ export async function buildBoard(THREE, { geom, layers, maxAnisotropy = 1 }) {
       }
     }
     if (hole && pad.type === 'thru_hole') {
-      const d = padDrill(pad);
-      const [cx, cy] = toBoard(...padHoleCenter(pad));
-      const r = Math.min(d.w, d.h) / 2;
-      const len = Math.max(d.w, d.h) - 2 * r;
-      // round barrel (or stretched for slots) along board z
-      const g = new THREE.CylinderGeometry(r, r, BOARD_THICKNESS, 24, 1, true);
-      g.rotateX(Math.PI / 2);
-      if (len > 1e-3) g.scale(Math.max(d.w, d.h) / (2 * r), 1, 1);
-      g.rotateZ((((pad.at?.[2] || 0) + (d.w >= d.h ? 0 : 90)) * Math.PI) / 180);
-      g.translate(cx, cy, -BOARD_THICKNESS / 2);
-      const m = new THREE.Mesh(g, barrelMat);
+      // plated barrel: the drill outline (a stadium for slots) as a wall through the board
+      const m = new THREE.Mesh(wallGeometry(THREE, hole, -BOARD_THICKNESS, 0), barrelMat);
       m.userData.group = 'pads';
       root.add(m);
     }
