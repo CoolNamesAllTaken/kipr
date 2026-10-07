@@ -44,6 +44,7 @@ export function kicadFrame(origin = [0, 0]) {
 }
 
 export const FLASH_MS = 1000; // with the boxes hidden, a selected change is outlined this long
+let stageIds = 0;
 
 /** "Δx … Δy … d … mm" in KiCad mm, '' or a prompt while measuring. */
 export function measureText(points, measuring) {
@@ -64,6 +65,8 @@ export function createKiprStage(v2, wrap, { box, origin = [0, 0], flip = false, 
   let hl = null;
   let hlSides = null; // {base, head}: per-pane highlight for things that moved
   let boxesOn = boxes;
+  let quiet = null; // {boxes, holes}: areas washed out (the schematic's moved items in its smart diff)
+  const sid = ++stageIds;
   let flashTimer = null;
   const measureListeners = new Set();
   const transformListeners = new Set();
@@ -72,11 +75,21 @@ export function createKiprStage(v2, wrap, { box, origin = [0, 0], flip = false, 
   busy.hidden = true;
   wrap.append(busy);
 
-  const rect = (g, ctx, b, cls) => {
+  const rect = (g, ctx, b, cls, attrs = {}) => {
     const w = f.bounds(b);
-    ctx.svg('rect', { x: w.minX, y: w.minY, width: Math.max(w.maxX - w.minX, 0.01), height: Math.max(w.maxY - w.minY, 0.01), class: cls }, g);
+    ctx.svg('rect', { x: w.minX, y: w.minY, width: Math.max(w.maxX - w.minX, 0.01), height: Math.max(w.maxY - w.minY, 0.01), class: cls, ...attrs }, g);
   };
   const overlay = stage.addOverlay({ space: 'world', className: 'marks', draw: (g, ctx) => {
+    if (quiet?.boxes.length) {
+      // paper over the quiet boxes, minus the holes (changes that overlap them)
+      const id = `kipr-quiet-${sid}-${ctx.pane}`;
+      const mask = ctx.svg('mask', { id, maskUnits: 'userSpaceOnUse', x: -1e5, y: -1e5, width: 2e5, height: 2e5 }, g);
+      for (const b of quiet.boxes) rect(mask, ctx, b, null, { fill: '#fff' });
+      for (const b of quiet.holes) rect(mask, ctx, b, null, { fill: '#000' });
+      const x0 = Math.min(...quiet.boxes.map((b) => b.x)); const y0 = Math.min(...quiet.boxes.map((b) => b.y));
+      const x1 = Math.max(...quiet.boxes.map((b) => b.x + b.w)); const y1 = Math.max(...quiet.boxes.map((b) => b.y + b.h));
+      rect(g, ctx, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, 'quiet-wash', { mask: `url(#${id})` });
+    }
     for (const m of boxesOn ? marks : []) rect(g, ctx, m.box, `mark ${m.cls || ''}`);
     const hb = (ctx.side && hlSides?.[ctx.side]) || hl;
     if (hb) {
@@ -120,6 +133,8 @@ export function createKiprStage(v2, wrap, { box, origin = [0, 0], flip = false, 
     region() { return f.toKicad(stage.getRegion()); },
     showRegion(r) { stage.setRegion(f.toWorld(r)); },
     setMarks(list) { marks = list || []; overlay.invalidate(); },
+    /** Wash out `boxes` except `holes` (KiCad boxes), e.g. moved items under an ink diff; null: none. */
+    setQuiet(q) { quiet = q?.boxes?.length ? { boxes: q.boxes, holes: q.holes || [] } : null; overlay.invalidate(); },
     /** Highlight box b; `sides` {base, head} overrides it on the base / head pane of a side-by-side view. */
     highlight(b, sides = null) {
       hl = b || null; hlSides = sides;

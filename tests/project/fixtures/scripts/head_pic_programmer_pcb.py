@@ -31,6 +31,7 @@ def load_fp(lib, name):
 
 # 1. changed resistor value
 fp('R7').SetValue('4.7K')
+fp('P2').SetValue('ZIF28')  # pic_sockets edit 7: the value change next to the moved socket block
 
 # 2. changed footprint: C9 C_Disc_D5.1mm_W3.2mm -> C_Disc_D5.0mm_W2.5mm (same pad positions)
 old = fp('C9')

@@ -1,10 +1,14 @@
 // Schematic diff: per-sheet list, side-by-side / ink diff / onion skin / swipe, change list that zooms.
 // The stage, the sheet rasters and the ink diff are boarddd/view2d (stage2d.js); this is the app around it.
+// Smart diff (smart.js, default): changes that only move things with the same connections (move_only)
+// get a faint outline, are washed out of the ink diff and are listed in one collapsed group; raw: they
+// are changes like any other.
 import { el, clear, badge, arr, obj, bbox, fetchText, parseViewBox, assetUrl, debounce, parseAtParam, fillViewport, OFFLINE } from './util.js';
 import { loadView2d, view2dNow, createKiprStage } from './stage2d.js';
 import { createChangeList, describeChange } from './changes.js';
-import { createModeBar, legend, boxesToggle } from './widgets.js';
+import { createModeBar, legend, boxesToggle, smartToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
+import { smartOn, toggleSmart, onSmart, sheetCounts, onlyMoved } from './smart.js';
 import { showCompare, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
 import { sameSize, stepItem, sheetNote } from './viewstate.js';
 
@@ -42,17 +46,23 @@ export function createSchematicView(project, container, ctx) {
 
   function renderNav() {
     clear(sheetNav);
+    const smart = smartOn();
     for (const s of sheets) {
-      const n = arr(s.changes).length;
+      const k = sheetCounts(s, smart);
+      const n = k.changed + k.minor;
+      const quiet = smart && s.status === 'modified' && !k.changed && k.moved > 0;
       sheetNav.append(el('button', {
-        class: `side-item${s === sheet ? ' active' : ''}${s.status === 'unchanged' ? ' dim' : ''}`,
+        class: `side-item${s === sheet ? ' active' : ''}${s.status === 'unchanged' || quiet ? ' dim' : ''}`,
         'aria-current': s === sheet ? 'true' : null,
         onclick: () => switchSheet(s),
       },
       el('span', { class: 'side-name', title: s.id }, s.title || s.id),
-      el('span', { class: 'side-meta' }, s.page ? el('span', { class: 'muted' }, `p.${s.page}`) : null, badge('status', s.status), n ? el('span', { class: 'count' }, String(n)) : null)));
+      el('span', { class: 'side-meta' }, s.page ? el('span', { class: 'muted' }, `p.${s.page}`) : null,
+        quiet ? el('span', { class: 'badge quiet-moved', title: `${k.moved} item${k.moved === 1 ? '' : 's'} moved, same connections` }, 'moved') : badge('status', s.status),
+        n ? el('span', { class: 'count', title: k.moved ? `${n} change${n === 1 ? '' : 's'}, ${k.moved} moved` : null }, String(n)) : null)));
     }
   }
+  const stopSmart = onSmart(() => renderNav());
 
   function openSheet(s, params) {
     sheet = s;
@@ -78,7 +88,7 @@ export function createSchematicView(project, container, ctx) {
   sheetView = createSheetView(project, sheet, mainBox, changeBox, ctx, ctx.route.params, bothSides);
 
   return {
-    destroy() { sheetView?.destroy(); },
+    destroy() { stopSmart(); sheetView?.destroy(); },
     // back / forward, or a link to this view: another sheet opens with the URL's state
     onParams(params, item) {
       const slid = setCompareSliders({ swipe: view2dNow()?.parseSlider(params.sw), opacity: view2dNow()?.parseSlider(params.op) });
@@ -116,7 +126,8 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   const title = el('div', { class: 'view-title' },
     el('strong', {}, sheet.title || sheet.id), el('span', { class: 'muted' }, sheet.file || ''), badge('status', sheet.status));
   const boxes = boxesToggle((on) => stage?.setBoxes(on));
-  const toolbar = el('div', { class: 'toolbar' }, modeBar.el, extra, el('span', { class: 'spacer' }), readout, zoomLbl, boxes.el,
+  const smartBtn = smartToggle(() => applyChanges());
+  const toolbar = el('div', { class: 'toolbar' }, modeBar.el, extra, el('span', { class: 'spacer' }), readout, zoomLbl, smartBtn.el, boxes.el,
     el('button', { class: 'btn', title: 'Fit (f, or double-click)', onclick: () => stage?.fit() }, 'Fit'));
   const stageWrap = el('div', { class: 'stage-wrap paper' }, el('div', { class: 'loading' }, 'Loading sheet…'));
   const legendBox = el('div', { class: 'legend' });
@@ -147,22 +158,57 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   // --- change list: contract changes; if there are none, the pixel diff's regions
   const toItem = (c) => ({ ...describeChange(c), kind: c.kind, status: null, box: bbox(c.bbox_mm), sides: bbox(c.base_bbox_mm) || bbox(c.head_bbox_mm) ? { base: bbox(c.base_bbox_mm), head: bbox(c.head_bbox_mm) } : null });
   // minor changes (fields that don't name the part, sim flags, hidden-field edits; kipr.project.classify)
-  // are folded into one collapsed bucket and get no box on the sheet
+  // are folded into one collapsed bucket and get no box on the sheet; so are moved items in smart mode
+  // (a faint outline instead)
   const allSheetChanges = arr(sheet.changes).filter(obj);
-  const contractChanges = allSheetChanges.filter((c) => !c.minor).map(toItem);
-  const minorItems = allSheetChanges.filter((c) => c.minor).map((c) => ({ ...toItem(c), title: typeof c.ref === 'string' ? c.ref : c.kind }));
+  let contractChanges = [];
+  let movedItems = [];
+  let regions = null; // the diff's changed areas from its first render (they don't follow the zoom)
+  let selected = null; // the moved item picked in the list
   const changes = createChangeList(changeBox, {
     title: 'Changes',
     empty: sheet.status === 'unchanged' ? 'Sheet unchanged.' : 'No itemised changes for this sheet.',
     onSelect: (i, it) => {
       writeRoute({ c: i >= 0 ? i : null });
+      selected = movedItems.includes(it) ? it : null; // a moved item picked from its group: shown unwashed
+      if (stage) stage.setQuiet(mode === 'diff' ? quietArea() : null);
       if (it.box && stage) { stage.zoomTo(it.box); stage.highlight(it.box, it.sides); }
     },
   });
-  changes.set(contractChanges);
-  if (minorItems.length) {
-    changes.setMinor([{ label: `${minorItems.length} minor change${minorItems.length === 1 ? '' : 's'} (fields that don't name the part, hidden fields, …)`, badge: 'minor', items: minorItems }]);
+  const short = (c) => ({ ...toItem(c), title: [typeof c.ref === 'string' ? c.ref : c.kind, c.kind === 'symbol' ? '' : c.what].filter(Boolean).join(' ') });
+  const parts = (c) => {
+    const p = arr(c.parts_mm).map(bbox).filter(Boolean);
+    if (p.length) return p;
+    const sides = [bbox(c.base_bbox_mm), bbox(c.head_bbox_mm)].filter(Boolean);
+    return sides.length ? sides : [bbox(c.bbox_mm)].filter(Boolean);
+  };
+
+  /** The change list, marks and wash for the current smart / raw choice. */
+  function applyChanges() {
+    const smart = smartOn();
+    const quiet = (c) => smart && c.move_only;
+    contractChanges = allSheetChanges.filter((c) => !quiet(c) && !c.minor).map(toItem);
+    const minorItems = allSheetChanges.filter((c) => c.minor).map(short);
+    movedItems = allSheetChanges.filter(quiet).map((c) => ({ ...short(c), parts: parts(c) }));
+    selected = null;
+    const groups = [];
+    if (movedItems.length) groups.push({ label: `${movedItems.length} moved, same connections`, badge: 'moved', items: movedItems });
+    if (minorItems.length) groups.push({ label: `${minorItems.length} minor change${minorItems.length === 1 ? '' : 's'} (fields that don't name the part, hidden fields, …)`, badge: 'minor', items: minorItems });
+    changes.set(contractChanges);
+    changes.setMinor(groups);
+    if (!stage) return;
+    stage.highlight(null);
+    if (!allSheetChanges.length && regions?.length) showRegionItems();
+    else stage.setMarks([...movedItems.filter((c) => c.box).map((c) => ({ box: c.box, cls: 'moved' })), ...contractChanges.filter((c) => c.box).map((c) => ({ box: c.box }))]);
+    stage.setQuiet(mode === 'diff' ? quietArea() : null);
+    showDiffRegions();
   }
+  /** Moved items' boxes (each rerouted wire, a symbol's old and new place), minus the changes over them: the ink diff's wash. */
+  function quietArea() {
+    const holes = contractChanges.map((c) => c.box).filter(Boolean).map((b) => grow(b, 1));
+    return { boxes: movedItems.flatMap((c) => c.parts), holes: selected ? holes.concat(selected.parts) : holes };
+  }
+  applyChanges();
 
   function worldBox() {
     const vb = [vbs.base, vbs.head].filter(Boolean);
@@ -194,23 +240,30 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
     clear(extra); clear(legendBox);
     stageWrap.className = `stage-wrap paper${m === 'side' ? ' split' : ''}`;
     if (m === 'diff') { legendBox.append(...legend()); showDiffRegions(); }
+    stage.setQuiet(m === 'diff' ? quietArea() : null);
     cmp = showCompare(stage, m, m === 'diff' ? { diff: content.diff } : { base: content.base, head: content.head }, extra,
       { single: hasHead ? 'head' : 'base', onSlide: () => writeView() });
   }
 
-  let regions = null; // the diff's changed areas from its first render (they don't follow the zoom)
   function onRender(e) {
     if (destroyed || e.content !== content?.diff || !e.info?.regions || regions) return;
     regions = e.info.regions.map((q) => stage.frame.box(q));
-    if (!contractChanges.length && regions.length) {
-      changes.set(regions.map((q, i) => ({ title: `ink change ${i + 1}`, detail: `${q.w.toFixed(1)} × ${q.h.toFixed(1)} mm`, kind: 'visual', box: q })));
-      stage.setMarks(regions.map((q) => ({ box: q })));
-    }
+    if (!allSheetChanges.length && regions.length) showRegionItems();
     showDiffRegions();
+  }
+  // no itemised changes at all: the ink diff's regions are the list
+  function showRegionItems() {
+    changes.set(regions.map((q, i) => ({ title: `ink change ${i + 1}`, detail: `${q.w.toFixed(1)} × ${q.h.toFixed(1)} mm`, kind: 'visual', box: q })));
+    stage.setMarks(regions.map((q) => ({ box: q })));
   }
   function showDiffRegions() {
     legendBox.querySelector('.diff-count')?.remove();
-    if (regions && mode === 'diff') legendBox.append(el('span', { class: 'muted diff-count' }, `${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
+    if (!regions || mode !== 'diff') return;
+    // smart: areas inside moved items (and over no change) are not counted
+    const q = smartOn() ? quietArea() : { boxes: [], holes: [] };
+    const n = regions.filter((r) => !onlyMoved(r, q)).length;
+    const hidden = regions.length - n;
+    legendBox.append(el('span', { class: 'muted diff-count', title: hidden ? `${hidden} more where items only moved (smart diff)` : null }, `${n} changed area${n === 1 ? '' : 's'}${hidden ? ` (+${hidden} moved)` : ''}`));
   }
 
   // view2d and the sheets' viewBoxes first (they define the world), then build the stage
@@ -227,8 +280,8 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
       stage = createKiprStage(v2, stageWrap, { box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown(), minRender: SHEET_R });
       stage.onTransform(() => writeView());
       stage.stage.on('render', onRender);
-      stage.setMarks(contractChanges.filter((c) => c.box).map((c) => ({ box: c.box })));
       content = makeContent();
+      applyChanges();
       setMode(mode); // lays out the panes and fits
       // zoom: the URL's region, else (another sheet picked) the previous sheet's region when the paper is
       // the same size; sheets of other sizes are fitted
@@ -249,7 +302,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
     get mode() { return mode; },
     get box() { return stage ? worldBox() : null; },
     region() { return stage?.region() || null; },
-    destroy() { destroyed = true; writeView.cancel(); stopFill(); boxes.stop(); cmp?.destroy(); stage?.destroy(); },
+    destroy() { destroyed = true; writeView.cancel(); stopFill(); boxes.stop(); smartBtn.stop(); cmp?.destroy(); stage?.destroy(); },
     onParams(p, slid = false) {
       writeView.cancel();
       if (p.mode && p.mode !== mode && modes.some(([m]) => m === p.mode)) setMode(p.mode);
@@ -267,14 +320,22 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
       if (e.key === 'p') { changes.prev(); return true; }
       if (e.key === 'f') { stage?.fit(); return true; }
       if (e.key === 'b') { toggleBoxes(); return true; }
+      if (e.key === 's') { toggleSmart(); return true; }
       if (e.key === 'm') {
         const i = modes.findIndex(([m]) => m === mode);
         setMode(modes[(i + 1) % modes.length][0]);
         writeRoute();
         return true;
       }
-      if (e.key === 'Escape') { stage?.highlight(null); return true; }
+      if (e.key === 'Escape') {
+        stage?.highlight(null);
+        if (selected) { selected = null; stage?.setQuiet(mode === 'diff' ? quietArea() : null); }
+        return true;
+      }
       return false;
     },
   };
 }
+
+
+const grow = (b, d) => ({ x: b.x - d, y: b.y - d, w: b.w + 2 * d, h: b.h + 2 * d });

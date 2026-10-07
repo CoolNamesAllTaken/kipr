@@ -14,6 +14,12 @@ A difference is one of three things:
   that name the part to buy (MPN, manufacturer, LCSC / Digi-Key / Mouser / ... part numbers).
   Part-number fields compare case-insensitively.
 
+Schematics add a fourth class, **moved** (`move_only`): a symbol, label, sheet box or text that was
+only moved, rotated or mirrored (plus minor differences), or wiring that was only rerouted, with
+every connection the same (same pins on the same nets, net names unchanged; see
+kipr.project.diff_sch). The viewer's smart mode and the report keep these quiet; raw mode shows
+them as changes.
+
 Which fields are significant is configurable: `kipr project --significant-fields PATTERNS`
 (comma-separated, case-insensitive globs matched against the field name with spaces, `-`, `_` and
 `.` removed; a leading `+` adds to the defaults instead of replacing them).
@@ -34,6 +40,8 @@ DEFAULT_SIGNIFICANT_FIELDS = (
 NOISE_FIELD_PATTERNS = ("sim.*", "ki_*")
 # what names of the diffs that never count as a real change
 MINOR_WHATS = {"model_format", "footprint_library", "fields_minor", "exclude_from_sim", "library", "lib_id"}
+# what names of placement-only diffs (schematic: may be "moved" when connectivity is unchanged)
+MOVE_WHATS = {"moved", "rotated", "mirrored", "rerouted"}
 
 
 def norm_key(name: str) -> str:
@@ -128,3 +136,11 @@ def is_minor(whats) -> bool:
     """True when every difference named in `whats` is minor (and there is at least one)."""
     whats = list(whats)
     return bool(whats) and all(w in MINOR_WHATS for w in whats)
+
+
+def is_move_only(whats, same_connections: bool) -> bool:
+    """True when `whats` has a placement diff, nothing else but minor diffs, and the connections are
+    unchanged (the schematic's "moved" class)."""
+    whats = list(whats)
+    return bool(same_connections) and any(w in MOVE_WHATS for w in whats) and \
+        all(w in MOVE_WHATS or w in MINOR_WHATS for w in whats)

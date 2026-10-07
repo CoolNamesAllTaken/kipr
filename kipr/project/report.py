@@ -30,7 +30,7 @@ from pathlib import Path
 from kipr.project.site import confined_file, load_json, SLUG_RE
 
 try:
-    from PIL import Image, ImageChops, ImageFilter
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
 except ImportError:  # pragma: no cover - exercised only without Pillow
     Image = None
 try:
@@ -197,6 +197,29 @@ class Images:
         self._cache[key] = img
         return img
 
+    def px_per_unit(self, rel, slug, width: int):
+        """(x0, y0, px per viewBox unit) of an SVG rasterised `width` px across, or None."""
+        p = self.svg_path(rel, slug) if rel else None
+        vb = view_box(p.read_bytes()[:4096]) if p else None
+        return (vb[0], vb[1], width / vb[2]) if vb else None
+
+    @staticmethod
+    def wash(img, quiet, holes, frame, keep: float = 0.18):
+        """Fade `img` (a diff) inside the `quiet` boxes [x, y, w, h] but outside `holes` (viewBox units,
+        `frame` from px_per_unit) to `keep` of its opacity: the schematic's moved items."""
+        if img is None or not quiet or frame is None:
+            return img
+        x0, y0, k = frame
+        mask = Image.new("L", img.size, 0)
+        g = ImageDraw.Draw(mask)
+        for boxes, fill in ((quiet, 255), (holes, 0)):
+            for b in boxes:
+                g.rectangle([(b[0] - x0) * k, (b[1] - y0) * k, (b[0] + b[2] - x0) * k, (b[1] + b[3] - y0) * k], fill=fill)
+        a = img.getchannel("A")
+        img = img.copy()
+        img.putalpha(Image.composite(a.point(lambda v: int(v * keep)), a, mask))
+        return img
+
     def diff(self, base, head, mode: str):
         """Coloured ink diff of two same-size RGBA images (either may be None)."""
         ref = base or head
@@ -307,7 +330,8 @@ def change_rows(changes) -> list:
 CHANGE_HEAD = ["Kind", "Ref", "What", "Layer", "Base → head", "Detail", "At (mm)"]
 
 
-def triple(imgs: Images, slug, base_rel, head_rel, width, crop, mode, bg, alt) -> str:
+def triple(imgs: Images, slug, base_rel, head_rel, width, crop, mode, bg, alt, quiet=None) -> str:
+    """Base, head and diff images. `quiet`: (boxes, holes) in viewBox units washed out of the diff."""
     if width <= 0:
         return ""
     if imgs.can_raster:
@@ -318,6 +342,8 @@ def triple(imgs: Images, slug, base_rel, head_rel, width, crop, mode, bg, alt) -
         if b is not None and h is not None and b.size != h.size:
             h = h.resize(b.size)
         diff = imgs.diff(b, h, mode)
+        if quiet and quiet[0] and crop is None:
+            diff = imgs.wash(diff, quiet[0], quiet[1], imgs.px_per_unit(base_rel or head_rel, slug, width))
         figs = [("base", png_uri(b, bg) if b else None), ("head", png_uri(h, bg) if h else None), ("diff", png_uri(diff, bg))]
     else:
         figs = [("base", svg_uri(imgs.svg_path(base_rel, slug)) if base_rel else None),
@@ -332,16 +358,37 @@ def schematic_section(imgs, slug, sch, width) -> str:
         return ""
     out = ['<h3>Schematic</h3>']
     unchanged = [s for s in sheets if s.get("status") == "unchanged"]
+    moved_only = [s for s in sheets if s.get("moved_only") and s.get("status") != "unchanged"]
     for s in sheets:
-        if s.get("status") == "unchanged":
+        if s.get("status") == "unchanged" or s in moved_only:
             continue
         out.append(f'<h4>{esc(s.get("title") or s.get("id"))} <span class="muted">{esc(s.get("file") or "")}</span> {status_badge(s.get("status"))}</h4>')
-        out.append(table(CHANGE_HEAD, change_rows([c for c in lst(s.get("changes")) if not d(c).get("minor")])))
-        smin = [d(c) for c in lst(s.get("changes")) if d(c).get("minor")]
+        allc = [d(c) for c in lst(s.get("changes"))]
+        real = [c for c in allc if not c.get("minor") and not c.get("move_only")]
+        out.append(table(CHANGE_HEAD, change_rows(real)))
+        moved = [c for c in allc if c.get("move_only")]
+        if moved:  # smart diff: only moved, same connections (kipr.project.classify): collapsed, faded in the diff
+            out.append(f'<details class="minor"><summary><span class="b s-minor">moved</span> {len(moved)} moved, same connections</summary>'
+                       + table(CHANGE_HEAD, change_rows(moved)) + "</details>")
+        smin = [c for c in allc if c.get("minor")]
         if smin:  # fields that don't name the part, sim flags, hidden-field edits: one collapsed block
             out.append(f'<details class="minor"><summary><span class="b s-minor">minor</span> {len(smin)} minor change(s)</summary>'
                        + table(CHANGE_HEAD, change_rows(smin)) + "</details>")
-        out.append(triple(imgs, slug, s.get("base"), s.get("head"), width, None, "ink", (245, 244, 239, 255), f"sheet {s.get('id')}"))
+        box = lambda c, k="bbox_mm": c.get(k) if isinstance(c.get(k), list) and len(c[k]) == 4 else None  # noqa: E731
+
+        def parts(c):  # what to fade: each rerouted item, a moved item's old and new place
+            ps = [b for b in lst(c.get("parts_mm")) if isinstance(b, list) and len(b) == 4] or \
+                [b for b in (box(c, "base_bbox_mm"), box(c, "head_bbox_mm")) if b]
+            return ps or [b for b in [box(c)] if b]
+
+        holes = [[b[0] - 1, b[1] - 1, b[2] + 2, b[3] + 2] for b in (box(c) for c in real) if b]
+        out.append(triple(imgs, slug, s.get("base"), s.get("head"), width, None, "ink", (245, 244, 239, 255), f"sheet {s.get('id')}",
+                          quiet=([b for c in moved for b in parts(c)], holes)))
+    for s in moved_only:  # smart diff: nothing but moved items (same connections): one collapsed line each
+        moved = [d(c) for c in lst(s.get("changes")) if d(c).get("move_only")]
+        out.append(f'<details class="minor"><summary><span class="b s-minor">moved</span> {esc(s.get("title") or s.get("id"))}: '
+                   f'{len(moved)} moved, same connections</summary>' + table(CHANGE_HEAD, change_rows([d(c) for c in lst(s.get("changes"))]))
+                   + "</details>")
     if unchanged:
         out.append(f'<p class="muted">Unchanged sheets: {esc(", ".join(str(s.get("title") or s.get("id")) for s in unchanged))}</p>')
     return "\n".join(out)
@@ -614,7 +661,8 @@ def summary_row(p) -> list:
     c = d(s.get("components"))
     n = lambda v: esc(fmt(num(v))) if num(v) is not None else ""  # noqa: E731
     return [f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
-            n(s.get("sheets_changed")), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
+            n(s.get("sheets_changed")) + (f' <span class="muted" title="sheets with moved items only (same connections)">+{esc(fmt(num(s.get("sheets_moved"))))} moved</span>'
+                                          if num(s.get("sheets_moved")) else ""), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
             n(c.get("changed")) + (f' <span class="muted">+{esc(fmt(num(c.get("minor"))))} minor</span>' if num(c.get("minor")) else ""),
             n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new")), n(d(s.get("grid")).get("count")),
             (f'{n(d(s.get("impedance")).get("violations"))} / {n(d(s.get("impedance")).get("rows"))}' if d(s.get("impedance")) else "")]

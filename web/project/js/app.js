@@ -7,6 +7,7 @@ import { createSchematicView } from './schematic.js';
 import { createLayoutView } from './layout.js';
 import { createPcba3dView } from './pcba3d.js';
 import { boxesFromParams, boxesParam, onBoxes } from './boxes.js';
+import { smartFromParams, smartParam, onSmart, sheetsChanged, smartOn } from './smart.js';
 import { mergeParams, rememberRoute, routeFor } from './viewstate.js';
 import { createBomView, createNetlistView, createChecksView } from './tables.js';
 
@@ -36,6 +37,7 @@ export function projectsOf(review) {
 async function boot() {
   initTheme();
   onBoxes(() => { if (state.route.slug) setRoute({ params: { ...state.route.params } }); }); // keep boxes=0 in the URL
+  onSmart(() => { if (state.route.slug) setRoute({ params: { ...state.route.params } }); refreshCounts(); });
   try {
     state.review = await fetchJson('project-review.json');
   } catch (e) {
@@ -100,7 +102,7 @@ export function summaryChips(summary) {
   const c = obj(s.components) || {};
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const chips = [
-    ['sch', n(s.sheets_changed), 'schematic sheets changed'],
+    ['sch', sheetsChanged(s), smartOn() && n(s.sheets_moved) ? `schematic sheets changed (+${n(s.sheets_moved)} with moved items only)` : 'schematic sheets changed'],
     ['pcb', n(s.layers_changed), 'PCB layers changed'],
     ['+', n(c.added), 'components added'],
     ['−', n(c.removed), 'components removed'],
@@ -148,8 +150,8 @@ function setRoute(partial, replace = true) {
   const next = {
     slug: cur.slug, tab: cur.tab,
     item: 'item' in partial ? partial.item : cur.item,
-    // hidden change boxes ride along in every view's URL (boxes.js)
-    params: mergeParams(partial.params ? mergeParams(cur.params, partial.params) : cur.params, { boxes: boxesParam() }),
+    // hidden change boxes and the raw schematic diff ride along in every view's URL (boxes.js, smart.js)
+    params: mergeParams(partial.params ? mergeParams(cur.params, partial.params) : cur.params, { boxes: boxesParam(), smart: smartParam() }),
   };
   state.route = next;
   rememberRoute(state.tabRoutes, next);
@@ -177,6 +179,9 @@ function route() {
   state.route = r;
   if (p) rememberRoute(state.tabRoutes, r);
   boxesFromParams(r.params);
+  const smartWas = smartOn();
+  smartFromParams(r.params);
+  if (smartOn() !== smartWas) refreshCounts();
   if (same) {
     state.view.onParams?.(r.params, r.item);
     return;
@@ -190,7 +195,7 @@ function route() {
   if (p) renderProject(p, r);
   else renderOverview(r.slug);
   // hidden boxes (remembered from an earlier visit) go into the URL too, so a copied link keeps them
-  if (p && (r.params.boxes || null) !== boxesParam()) setRoute({ params: { ...state.route.params } });
+  if (p && ((r.params.boxes || null) !== boxesParam() || (r.params.smart || null) !== smartParam())) setRoute({ params: { ...state.route.params } });
 }
 
 // --- overview -----------------------------------------------------------------------------------------
@@ -217,7 +222,7 @@ function renderOverview(unknownSlug) {
     return el('tr', {},
       el('td', {}, el('a', { href: formatHash({ slug: p.slug }) }, String(p.name || p.slug)), el('div', { class: 'small muted path' }, String(p.path || ''))),
       el('td', {}, badge('status', p.status)),
-      [s.sheets_changed, s.layers_changed, c.added, c.removed, c.moved, c.changed, s.nets_changed, obj(s.erc)?.new, obj(s.drc)?.new, obj(s.grid)?.count].map((v) => el('td', { class: 'num' }, n(v))),
+      [sheetsChanged(s), s.layers_changed, c.added, c.removed, c.moved, c.changed, s.nets_changed, obj(s.erc)?.new, obj(s.drc)?.new, obj(s.grid)?.count].map((v) => el('td', { class: 'num' }, n(v))),
       el('td', { class: 'num', title: `controlled-impedance class × layer out of tolerance / checked (${obj(s.impedance)?.solver === 'field' ? 'field solver' : 'closed-form estimate'})` }, obj(s.impedance) ? `${n(s.impedance.violations)} / ${n(s.impedance.rows)}` : ''),
       el('td', { class: 'num' }, errs ? el('span', { class: 'warn-text', title: 'non-fatal export problems' }, String(errs)) : ''));
   });
@@ -261,7 +266,7 @@ function renderProject(p, r) {
   TABS.forEach(([t, label], i) => {
     const count = tabCount(p, t);
     tabBar.append(el('a', {
-      class: 'tab', role: 'tab', href: t === r.tab ? formatHash(r) : tabHash(p.slug, t), 'aria-selected': String(t === r.tab), title: `${label} (${i + 1})`,
+      class: 'tab', role: 'tab', dataset: { tab: t }, href: t === r.tab ? formatHash(r) : tabHash(p.slug, t), 'aria-selected': String(t === r.tab), title: `${label} (${i + 1})`,
     }, label, count ? el('span', { class: 'tab-count' }, String(count)) : null));
   });
   const box = el('div', { class: `view-box tab-${r.tab}` });
@@ -275,13 +280,28 @@ export function tabCount(p, t) {
   const s = obj(p.summary) || {};
   const c = obj(s.components) || {};
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  if (t === 'schematic') return n(s.sheets_changed);
+  if (t === 'schematic') return sheetsChanged(s);
   if (t === 'layout') return n(s.layers_changed);
   if (t === 'pcba3d') return n(c.added) + n(c.removed) + n(c.moved) + n(c.changed);
   if (t === 'bom') return arr(obj(p.bom)?.rows).filter((x) => obj(x) && x.status !== 'unchanged').length;
   if (t === 'netlist') return n(s.nets_changed);
   if (t === 'checks') return n(obj(s.erc)?.new) + n(obj(s.drc)?.new) + n(obj(s.grid)?.count) + n(obj(s.impedance)?.violations);
   return 0;
+}
+
+/** The smart / raw schematic choice changed: the counts that depend on it (chips, tab badge, overview). */
+function refreshCounts() {
+  if (!state.review) return;
+  renderList();
+  const p = state.project;
+  if (!p) { if (!state.route.slug) renderOverview(); return; }
+  document.querySelector('.item-title .chips')?.replaceChildren(...chipEls(p.summary));
+  const tab = document.querySelector('.tabs .tab[data-tab="schematic"]');
+  if (tab) {
+    tab.querySelector('.tab-count')?.remove();
+    const count = tabCount(p, 'schematic');
+    if (count) tab.append(el('span', { class: 'tab-count' }, String(count)));
+  }
 }
 
 function copyLink(btn) {
@@ -303,6 +323,7 @@ const SHORTCUTS = [
   ['f', 'fit to view (double-click also works)'],
   ['r', 'measure tool (layout)'],
   ['b', 'show / hide the boxes around changes (schematic, layout; Markers in 3D)'],
+  ['s', 'schematic: smart diff (items that only moved, same connections, stay quiet) / raw diff'],
   ['t', 'toggle dark / light theme'],
   ['/', 'focus the filter'],
   ['Esc', 'clear highlight / close this help'],

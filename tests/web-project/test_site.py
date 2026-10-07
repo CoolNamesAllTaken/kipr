@@ -197,7 +197,8 @@ class ReportTest(unittest.TestCase):
         self.assertIn("default-src 'none'", self.html)
 
     def test_content(self):
-        for text in ("demo_board", "sensor_breakout", "old_adapter", "R2", "4.7k", "/SDA", "clearance", "Unchanged sheets: Connectors"):
+        for text in ("demo_board", "sensor_breakout", "old_adapter", "R2", "4.7k", "/SDA", "clearance", "3 moved, same connections",
+                     "</span> Mounting: 2 moved, same connections", "Unchanged sheets: Connectors"):
             self.assertIn(text, self.html)
         # schematic grid findings: one table per sheet, file:line, detail
         self.assertIn("Schematic grid <span class=\"muted\">50 mil, added or moved items: 2 off grid", self.html)
@@ -209,7 +210,7 @@ class ReportTest(unittest.TestCase):
         self.assertIn("is not available in CI; KiCad substituted it", self.html)
         self.assertIn(">font-dependent</span>", self.html)
         if report.Image is not None and report.cairosvg is not None:
-            # base / head / diff for 4 changed sheets of demo_board, 1 + 1 sheets of the others, 6 changed layers
+            # base / head / diff for 4 changed sheets of demo_board (not the moved-only one), 1 + 1 sheets of the others, 6 changed layers
             self.assertGreaterEqual(self.html.count("data:image/png"), 3 * 4)
 
     def test_doc_layer_images_not_cropped_to_board(self):
@@ -295,6 +296,12 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(d.getpixel((16, 0)), report.DIFF["added"])
         self.assertEqual(d.getpixel((2, 0))[:3], report.DIFF["common"][:3])  # within 1 px of head ink
         self.assertEqual(d.getpixel((5, 0))[3], 0)
+        # smart diff: moved items' area faded, a real change inside it (a hole) kept; frame (x0, y0, px/unit)
+        w = report.Images.wash(d, [[8, -1, 10, 3]], [[15.5, -1, 1, 3]], (0, 0, 1.0))
+        self.assertEqual(w.getpixel((10, 0))[3], int(255 * 0.18))
+        self.assertEqual(w.getpixel((16, 0)), report.DIFF["added"])
+        self.assertEqual(w.getpixel((3, 0)), d.getpixel((3, 0)))
+        self.assertIs(report.Images.wash(d, [], [], (0, 0, 1.0)), d)
 
     def test_with_view_box(self):
         svg = b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210"><rect/></svg>'

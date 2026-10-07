@@ -85,6 +85,8 @@ class Symbol:
     power: bool
     datasheet: str = ""
     description: str = ""
+    pins: list[tuple[str, float, float]] = field(default_factory=list)  # (number, x, y) connection points
+    text_box: list[float] | None = None  # around the visible field texts (reference, value, ...), roughly
 
 
 @dataclass
@@ -96,6 +98,7 @@ class Element:
     box: list[float] | None
     text: str = ""
     pos: tuple[float, float] | None = None
+    pts: list[tuple[float, float]] = field(default_factory=list)  # wire / bus vertices
 
 
 @dataclass
@@ -106,6 +109,8 @@ class SheetRef:
     file: str
     box: list[float] | None
     key: str  # size/pos/pins/fields
+    pins: list[tuple[str, float, float]] = field(default_factory=list)  # (name, x, y)
+    shape_key: str = ""  # key without the position: size, pins relative to the box, fields
 
 
 @dataclass
@@ -233,6 +238,8 @@ def _symbol(s: Node, libs: dict[str, Node], inst_path: str) -> Symbol:
                     unit = int(p.num("unit", unit) or unit)
     tf = symbol_transform(xyz[0], xyz[1], xyz[2], mirror)
     pts = [tf(p) for p in _lib_points(lib, unit, style, libs)] if lib is not None else []
+    pins = [(num or name, *(rnd(v) for v in tf((x, y)))) for num, name, x, y, _hidden in lib_pins(lib, unit, style, libs)] \
+        if lib is not None else []
     box = geom.box_of(pts) or [xyz[0] - 1.27, xyz[1] - 1.27, xyz[0] + 1.27, xyz[1] + 1.27]
     fields = {k: v for k, v in props.items() if k not in ("Reference", "Value", "Footprint", "Datasheet",
                                                               "Description") and not k.startswith("ki_")}
@@ -244,7 +251,22 @@ def _symbol(s: Node, libs: dict[str, Node], inst_path: str) -> Symbol:
                   on_board=s.flag("on_board") if s.child("on_board") is not None else True,
                   dnp=s.flag("dnp"), exclude_from_sim=s.flag("exclude_from_sim"), box=box,
                   lib_key=dumps(lib, drop=("uuid",)) if lib is not None else "", power=power,
-                  datasheet=props.get("Datasheet", ""), description=props.get("Description", ""))
+                  datasheet=props.get("Datasheet", ""), description=props.get("Description", ""), pins=pins,
+                  text_box=_fields_box(s))
+
+
+def _fields_box(s: Node) -> list[float] | None:
+    """Rough box around a placed symbol's visible field texts (centred or justified: both sides)."""
+    boxes = []
+    for p in s.children("property"):
+        eff = p.child("effects")
+        if not str(p.arg(1, "")) or p.flag("hide") or (eff is not None and eff.flag("hide")) or p.child("at") is None:
+            continue
+        x, y = pt(p.child("at"))
+        size = ((eff.child("font").nums("size") if eff is not None and eff.child("font") is not None else None) or [1.27])[0]
+        w = len(str(p.arg(1, ""))) * size * 0.8
+        boxes.append([x - w, y - size, x + w, y + size])
+    return geom.union(*boxes)
 
 
 def _element(n: Node) -> Element | None:
@@ -252,7 +274,7 @@ def _element(n: Node) -> Element | None:
     if nm in ("wire", "bus"):
         pts = shape_points(n)
         ends = sorted((rnd(x), rnd(y)) for x, y in pts)
-        return Element("wire", nm, f"{nm} {ends}", geom.box_of(pts))
+        return Element("wire", nm, f"{nm} {ends}", geom.box_of(pts), pts=[(rnd(x), rnd(y)) for x, y in pts])
     if nm == "bus_entry":
         x, y = pt(n.child("at"))
         w, h = ((n.nums("size") or []) + [2.54, 2.54])[:2]
@@ -268,7 +290,10 @@ def _element(n: Node) -> Element | None:
         extra = " ".join(f"{k}={v}" for k, v in sorted(props.items()) if k != "Intersheetrefs")
         key = f"{nm} {text!r} {rnd(x)} {rnd(y)} {shape} {extra}"
         w = max(len(text), 1) * 1.1
-        return Element("label", nm, key, [x - 1, y - 1.5, x + w, y + 1.5], text=text, pos=(x, y))
+        a = round(((n.child("at").nums() + [0, 0, 0])[2]) % 360) if n.child("at") is not None else 0
+        box = {180: [x - w, y - 1.5, x + 1, y + 1.5], 90: [x - 1.5, y - w, x + 1.5, y + 1],
+               270: [x - 1.5, y - 1, x + 1.5, y + w]}.get(a, [x - 1, y - 1.5, x + w, y + 1.5])  # text runs away from the anchor
+        return Element("label", nm, key, box, text=text, pos=(x, y))
     if nm in TEXTS:
         text = str(n.arg(0, "")) if nm != "table" else ""
         if nm == "text_box" and n.child("start") is not None:
@@ -315,11 +340,13 @@ def _subsheet(n: Node) -> SheetRef:
     file = props.get("Sheetfile", props.get("Sheet file", ""))
     x, y = pt(n.child("at"))
     w, h = (n.nums("size") or [0, 0])[:2]
-    pins = sorted(f"{p.arg(0, '')}:{p.arg(1, '')}@{rnd(pt(p.child('at'))[0])},{rnd(pt(p.child('at'))[1])}"
-                  for p in n.children("pin"))
-    key = f"{rnd(x)} {rnd(y)} {rnd(w)} {rnd(h)} {pins} " + " ".join(
-        f"{k}={v}" for k, v in sorted(props.items()))
-    return SheetRef(uuid=str(n.value("uuid", "") or ""), name=name, file=file, box=[x, y, x + w, y + h], key=key)
+    pps = [(str(p.arg(0, "")), str(p.arg(1, "")), *pt(p.child("at"))) for p in n.children("pin")]
+    pins = sorted(f"{a}:{b}@{rnd(px)},{rnd(py)}" for a, b, px, py in pps)
+    fields = " ".join(f"{k}={v}" for k, v in sorted(props.items()))
+    key = f"{rnd(x)} {rnd(y)} {rnd(w)} {rnd(h)} {pins} " + fields
+    rel = sorted(f"{a}:{b}@{rnd(px - x)},{rnd(py - y)}" for a, b, px, py in pps)
+    return SheetRef(uuid=str(n.value("uuid", "") or ""), name=name, file=file, box=[x, y, x + w, y + h], key=key,
+                    pins=[(a, rnd(px), rnd(py)) for a, _b, px, py in pps], shape_key=f"{rnd(w)} {rnd(h)} {rel} {fields}")
 
 
 def _pages(root: Node) -> dict[str, str]:
@@ -330,6 +357,150 @@ def _pages(root: Node) -> dict[str, str]:
         for p in si.children("path"):
             out[str(p.arg(0, ""))] = str(p.value("page", ""))
     return out
+
+
+# --- local connectivity -------------------------------------------------------------------
+
+NAMED_ANCHORS = ("power:", "global:", "hier:", "label:", "sheetpin:")  # in naming preference order
+
+
+def is_pin_anchor(a: str) -> bool:
+    return not a.startswith(NAMED_ANCHORS)
+
+
+def _k(x, y):
+    return (round(x * 100), round(y * 100))  # 0.01 mm grid
+
+
+class Connectivity:
+    """Which wires, pins, labels and sheet pins of one sheet instance touch (its local nets).
+
+    Wires connect at their ends and where an end, pin, label or junction lies on them (crossing wires
+    don't). Labels, hierarchical labels and power symbols of the same name join their groups. Every
+    group has anchors: real pins ("R1.2"), power symbols ("power:GND"), labels ("label:X", "global:X",
+    "hier:X") and sheet pins ("sheetpin:<sheet>/<pin>"). Buses are not followed.
+    """
+
+    def __init__(self, sheet: Sheet):
+        parent: dict = {}
+
+        def find(a):
+            parent.setdefault(a, a)
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        at_anchor: dict = {}  # point key -> anchors placed there
+        named: dict = {}  # anchor name -> a node (same-name labels / power symbols join)
+        el_pts: dict = {}  # element index -> point keys it touches
+        sym_pin: dict = {}  # (symbol index, pin number) -> point key
+        sheet_pin: dict = {}  # (subsheet index, pin name) -> point key
+
+        def anchor(key, name, join=False):
+            at_anchor.setdefault(key, set()).add(name)
+            node = ("p", key)
+            find(node)
+            if join:
+                if name in named:
+                    union(node, named[name])
+                else:
+                    named[name] = node
+
+        segs = []
+        for i, e in enumerate(sheet.elements):
+            if e.sub == "wire" and len(e.pts) >= 2:
+                keys = [_k(*p) for p in e.pts]
+                el_pts[i] = set(keys)
+                for a, b in zip(keys, keys[1:]):
+                    segs.append((a, b, i))
+                for k in keys:
+                    union(("e", i), ("p", k))
+            elif e.sub in ("junction", "no_connect") or e.kind == "label":
+                k = _k(*e.pos)
+                el_pts[i] = {k}
+                union(("e", i), ("p", k))
+                if e.kind == "label":
+                    scope = {"label": "label", "global_label": "global", "hierarchical_label": "hier"}.get(e.sub)
+                    if scope:
+                        anchor(k, f"{scope}:{e.text}", join=True)
+        for si, sym in enumerate(sheet.symbols):
+            for num, x, y in sym.pins:
+                k = _k(x, y)
+                sym_pin[(si, num)] = k
+                if sym.power:
+                    anchor(k, f"power:{sym.value}", join=True)
+                elif sym.ref and not sym.ref.startswith("#") and not sym.ref.endswith("?"):
+                    anchor(k, f"{sym.ref}.{num}")
+                else:
+                    find(("p", k))
+        for j, sub in enumerate(sheet.subsheets):
+            for name, x, y in sub.pins:
+                k = _k(x, y)
+                sheet_pin[(j, name)] = k
+                anchor(k, f"sheetpin:{sub.name}/{name}")
+        # points on the inside of a wire segment
+        horiz, vert, diag = {}, {}, []
+        for a, b, i in segs:
+            if a[1] == b[1]:
+                horiz.setdefault(a[1], []).append((min(a[0], b[0]), max(a[0], b[0]), i))
+            elif a[0] == b[0]:
+                vert.setdefault(a[0], []).append((min(a[1], b[1]), max(a[1], b[1]), i))
+            else:
+                diag.append((a, b, i))
+        for node in [n for n in parent if n[0] == "p"]:
+            k = node[1]
+            for lo, hi, i in horiz.get(k[1], ()):
+                if lo < k[0] < hi:
+                    union(node, ("e", i))
+                    el_pts[i].add(k)
+            for lo, hi, i in vert.get(k[0], ()):
+                if lo < k[1] < hi:
+                    union(node, ("e", i))
+                    el_pts[i].add(k)
+            for a, b, i in diag:
+                cross = (b[0] - a[0]) * (k[1] - a[1]) - (b[1] - a[1]) * (k[0] - a[0])
+                if abs(cross) <= math.hypot(b[0] - a[0], b[1] - a[1]) and \
+                        min(a[0], b[0]) <= k[0] <= max(a[0], b[0]) and min(a[1], b[1]) <= k[1] <= max(a[1], b[1]):
+                    union(node, ("e", i))
+                    el_pts[i].add(k)
+        self.anchors: dict = {}  # group -> {anchor}; groups without anchors are not listed
+        self.anchor_group: dict = {}  # anchor -> group
+        for k, names in at_anchor.items():
+            g = find(("p", k))
+            self.anchors.setdefault(g, set()).update(names)
+            for n in names:
+                self.anchor_group[n] = g
+        self._el = {i: find(("e", i)) for i in el_pts}
+        self._direct = {i: set().union(*(at_anchor.get(k, ()) for k in ks)) for i, ks in el_pts.items()}
+        self._sym = {key: find(("p", k)) for key, k in sym_pin.items()}
+        self._sheet = {key: find(("p", k)) for key, k in sheet_pin.items()}
+        self._sheet_ix = {id(s): j for j, s in enumerate(sheet.subsheets)}
+        self._sym_ix = {id(s): j for j, s in enumerate(sheet.symbols)}
+        self._el_ix = {id(e): i for i, e in enumerate(sheet.elements)}
+
+    def group_of(self, el: Element):
+        """The group of a wire, junction, no-connect flag or label (None for other elements)."""
+        return self._el.get(self._el_ix.get(id(el)))
+
+    def direct(self, el: Element) -> set:
+        """Anchors that sit on the element itself (a wire's ends and the points on it)."""
+        return self._direct.get(self._el_ix.get(id(el)), set())
+
+    def pin_groups(self, sym: Symbol) -> dict:
+        """{pin number: group} of a placed symbol."""
+        j = self._sym_ix.get(id(sym))
+        return {num: self._sym[(j, num)] for num, _x, _y in sym.pins if (j, num) in self._sym}
+
+    def sheet_pin_groups(self, sub: SheetRef) -> dict:
+        j = self._sheet_ix.get(id(sub))
+        return {name: self._sheet[(j, name)] for name, _x, _y in sub.pins if (j, name) in self._sheet}
+
 
 
 class SchematicSet:

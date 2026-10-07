@@ -91,6 +91,17 @@ viewer, report and PR comment ("105 parts: 3D model format .wrl -> .step") and a
 3D Changes view. Fields that appear or disappear empty (KiCad upgrades add `Sim.Library ""` and
 the like) are not reported at all.
 
+### Smart schematic diff
+
+Moving a block of a sheet without touching its connections would light up the whole area. kipr
+compares each sheet's connectivity (named by the netlist) instead: symbols, labels, texts, sheet
+boxes and wiring that only moved, with every pin on a net of the same name, are `move_only`. The
+schematic view's smart diff (default; the move-arrows button or `s` switches to the raw diff,
+remembered per browser, `smart=0` in the URL) outlines them faintly, washes them out of the ink
+diff and lists them in one collapsed "moved" group; the sheet list and counts leave out sheets with
+nothing else. A moved symbol whose value or connections changed stays a change. The report and PR
+comment use the smart diff (moved items collapsed and counted).
+
 ### Schematic grid check
 
 Symbol pins should sit on a 100 mil grid in the libraries, and everything that connects in a
