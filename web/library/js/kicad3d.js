@@ -122,6 +122,57 @@ export function padDrill(pad) {
   return { w, h: h || w, oval: d.shape === 'oval' || (h && h !== w) };
 }
 
+/**
+ * A slot as one closed loop: a semicircle of `radius` around each end centre (x1, y1) and (x2, y2), joined by
+ * straight flanks (a stadium, as KiCad draws oval drills and routed slots). Coincident ends give a circle.
+ * `segments` is per full turn; each end cap gets half of them, both of its end points included, so the
+ * flanks run exactly from cap to cap. Same construction as the project viewer's boardgeom.js slotPoints.
+ */
+export function slotPoints(x1, y1, x2, y2, radius, segments = 24) {
+  const half = Math.max(2, Math.round(segments / 2));
+  const points = [];
+  if (Math.hypot(x2 - x1, y2 - y1) < 1e-9) {
+    for (let i = 0; i < 2 * half; i++) {
+      const a = (Math.PI * i) / half;
+      points.push([x1 + radius * Math.cos(a), y1 + radius * Math.sin(a)]);
+    }
+    return points;
+  }
+  const along = Math.atan2(y2 - y1, x2 - x1);
+  const cap = (cx, cy, from) => {
+    for (let i = 0; i <= half; i++) {
+      const a = from + (Math.PI * i) / half;
+      points.push([cx + radius * Math.cos(a), cy + radius * Math.sin(a)]);
+    }
+  };
+  cap(x2, y2, along - Math.PI / 2);
+  cap(x1, y1, along + Math.PI / 2);
+  return points;
+}
+
+/**
+ * A pad's drill as its two end centres and radius, PCB frame: an oval drill (drill oval w h) is a slot whose
+ * long axis follows the larger of w/h in the pad's frame, turned with the pad; a round drill has one centre
+ * twice. `grow` widens the radius (plating, annular ring). Null without a drill.
+ */
+export function padDrillSlot(pad, grow = 0) {
+  const d = padDrill(pad);
+  if (!d) return null;
+  const r = Math.min(d.w, d.h) / 2;
+  const half = Math.max(d.w, d.h) / 2 - r;
+  const local = d.w >= d.h ? [[-half, 0], [half, 0]] : [[0, -half], [0, half]];
+  const [a, b] = local.map((q) => padToPcb(pad, q));
+  return { ends: [a, b], radius: r + grow };
+}
+
+/** The drill outline of a pad as a board-frame (y up) ring, or null. See padDrillSlot / slotPoints. */
+export function padDrillRing(pad, { grow = 0, segments = 24 } = {}) {
+  const s = padDrillSlot(pad, grow);
+  if (!s) return null;
+  const [[x1, y1], [x2, y2]] = s.ends.map((q) => toBoard(...q));
+  return slotPoints(x1, y1, x2, y2, s.radius, segments);
+}
+
 /** PCB-frame centre of a pad's hole: KiCad keeps the hole on the pad position (`at`); only the copper moves. */
 export function padHoleCenter(pad) {
   return [pad.at?.[0] || 0, pad.at?.[1] || 0];
