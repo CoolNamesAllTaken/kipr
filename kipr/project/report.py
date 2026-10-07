@@ -500,7 +500,69 @@ def checks_section(checks) -> str:
         out.append(f"<h3>{label} <span class=\"muted\">{esc(fmt(c.get('base_count')))} → {esc(fmt(c.get('head_count')))}</span></h3>"
                    + table(["", "Severity", "Type", "Description", "Items", "Where"], rows))
     out.append(grid_section(d(checks).get("grid")))
+    out.append(impedance_section(d(checks).get("impedance")))
     return "\n".join(out)
+
+
+IMP_FLAGS = {"new_violation": ("new", "out of tolerance, new"), "violation": ("modified", "out of tolerance"),
+             "fixed": ("fixed", "back in tolerance"), "stackup_shift": ("modified", "stackup change"),
+             "width_change": ("modified", "width/gap change"), "target_change": ("modified", "target changed")}
+
+
+def impedance_section(z) -> str:
+    """checks.impedance: one row per class x layer, base -> head (closed-form estimates)."""
+    z = d(z)
+    if not z:
+        return ""
+    c = d(z.get("count"))
+    head = (f'<h3>Impedance <span class="muted">closed-form estimate (boarddd {esc(fmt(z.get("boarddd")))}, quasi-static, '
+            f'about ±2 % at best; fab tolerance is ±10 %): {esc(fmt(num(c.get("violations")) or 0))} of '
+            f'{esc(fmt(num(c.get("rows")) or 0))} out of tolerance</span></h3>')
+    rows = [d(r) for r in lst(z.get("rows"))]
+    if not rows:
+        return head + '<p class="muted">No net class has an impedance target.</p>'
+
+    def f(v, nd=1):
+        v = num(v)
+        return "–" if v is None else f"{v:.{nd}f}"
+
+    def geo(sd):
+        if not sd:
+            return "–"
+        g = f'{f(sd.get("width"), 3)}'
+        if num(sd.get("gap")) is not None:
+            g += f' / {f(sd.get("gap"), 3)}'
+        if num(sd.get("coplanar_gap")) is not None:
+            g += f' ⟂{f(sd.get("coplanar_gap"), 3)}'
+        return g
+
+    trs = []
+    for r in rows:
+        t, b, h = d(r.get("target")), d(r.get("base")), d(r.get("head"))
+        side = h or b
+        flags = "".join(f' <span class="b s-{IMP_FLAGS[x][0]}">{esc(IMP_FLAGS[x][1])}</span>'
+                        for x in lst(r.get("flags")) if x in IMP_FLAGS)
+        if num(r.get("shift_pct")) is not None:
+            flags += f' <span class="muted">stackup alone {num(r.get("shift_pct")):+.1f} %</span>'
+        notes = [str(x) for x in lst(side.get("validity")) + lst(side.get("notes"))]
+        if side.get("error"):
+            notes.insert(0, f"no Z: {side.get('error')}")
+        sev = {"bad": "new", "warn": "modified"}.get(str(r.get("severity")), "unchanged")
+        zt = f'{esc(f(t.get("target"), 0))} ±{esc(f(t.get("tolerance_pct"), 0))} %' + (
+            ' <span class="muted">(default)</span>' if t.get("tolerance_default") else "")
+        trs.append([f'<span class="b s-{sev}">{esc(r.get("severity"))}</span>',
+                    f'<code>{esc(r.get("class"))}</code> <span class="muted">{esc(t.get("kind"))}</span>',
+                    esc(r.get("layer")), f'{esc(side.get("structure"))} <span class="muted">{esc(side.get("model"))}</span>',
+                    f"{geo(b)} → {geo(h)}", f'{f(b.get("Z"))} → {f(h.get("Z"))}', zt,
+                    (f'{num(h.get("deviation_pct")):+.1f} %' if num(h.get("deviation_pct")) is not None else "–"),
+                    flags.strip() + (f'<br><span class="muted small">{esc("; ".join(notes))}</span>' if notes else "")])
+    sc = [d(x) for x in lst(z.get("stackup_changes"))]
+    stack = ""
+    if sc:
+        stack = ('<p class="muted">Stackup changes: ' + esc("; ".join(
+            f'{x.get("layer")} {x.get("field")} {fmt(x.get("base"))} → {fmt(x.get("head"))}' for x in sc)) + "</p>")
+    return (head + table(["", "Class", "Layer", "Structure", "Width / gap mm (base → head)", "Z Ω (base → head)", "Target",
+                          "Deviation", "Flags, notes"], trs) + stack)
 
 
 def grid_section(g) -> str:
@@ -536,7 +598,8 @@ def summary_row(p) -> list:
     return [f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
             n(s.get("sheets_changed")), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
             n(c.get("changed")) + (f' <span class="muted">+{esc(fmt(num(c.get("minor"))))} minor</span>' if num(c.get("minor")) else ""),
-            n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new")), n(d(s.get("grid")).get("count"))]
+            n(s.get("nets_changed")), n(d(s.get("erc")).get("new")), n(d(s.get("drc")).get("new")), n(d(s.get("grid")).get("count")),
+            (f'{n(d(s.get("impedance")).get("violations"))} / {n(d(s.get("impedance")).get("rows"))}' if d(s.get("impedance")) else "")]
 
 
 CSS = """
@@ -547,7 +610,7 @@ CSS = """
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1500px;margin:0 auto;padding:16px}a{color:var(--accent)}code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
 h1{font-size:20px;margin:0 0 4px}h2{font-size:18px;margin:0 0 8px}h3{font-size:15px;margin:18px 0 6px}h4{font-size:14px;margin:14px 0 6px}
-.muted{color:var(--muted)}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:14px 0}
+.muted{color:var(--muted)}.small{font-size:12px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:14px 0}
 .note{background:var(--chg-bg);padding:6px 10px;border-radius:6px}.tw{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--border);vertical-align:top}
 th{color:var(--muted);font-size:12px}.b{display:inline-block;padding:0 7px;border-radius:10px;font-size:11px;font-weight:600;line-height:18px}
@@ -607,7 +670,7 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
                  '<span><i class="k" style="background:rgb(30,175,70)"></i>added (head only)</span>'
                  '<span><i class="k" style="background:rgba(110,110,110,.6)"></i>unchanged</span></p>')
     parts.append('<section class="card"><h2>Projects</h2>' + table(
-        ["Project", "Status", "Sheets", "Layers", "Comp. +", "Comp. −", "Moved", "Changed", "Nets", "ERC new", "DRC new", "Off grid"],
+        ["Project", "Status", "Sheets", "Layers", "Comp. +", "Comp. −", "Moved", "Changed", "Nets", "ERC new", "DRC new", "Off grid", "Z out / checked"],
         [summary_row(p) for p in projects]) + "</section>")
     for p in projects:
         slug = p["slug"]

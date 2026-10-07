@@ -328,13 +328,13 @@ def grid_doc(findings):
 
 def test_comment_lists_off_grid_items(tmp_path):
     body = make_comment.build_comment(load_review(write(tmp_path, grid_doc([grid_finding()]))))
-    assert "| Off grid | Notes |" in body and "| 🔴 1 / 0 | 🟠 1 |" in body
+    assert "| Off grid | Z out / checked | Notes |" in body and "| 🔴 1 / 0 | 🟠 1 | n/a |" in body
     assert ("🟠 off the 50 mil grid: symbol <code>R2</code> on root/power: 2 of 2 pins off the 50 mil grid, "
             "e.g. pin 1 at (110, 46.99) (x -0.49 mm)") in body
     many = make_comment.build_comment(load_review(write(tmp_path, grid_doc([grid_finding(f"R{i}") for i in range(20)]))))
     assert many.count("off the 50 mil grid: symbol") == 15 and "and 5 more off-grid item(s)" in many
     # the check didn't run (older data or --grid-check off)
-    assert "| 🔴 1 / 0 | n/a |" in make_comment.build_comment(load_review(write(tmp_path, review_doc())))
+    assert "| 🔴 1 / 0 | n/a | n/a |" in make_comment.build_comment(load_review(write(tmp_path, review_doc())))
 
 
 def test_comment_escapes_grid_text(tmp_path):

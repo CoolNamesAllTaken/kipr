@@ -89,13 +89,15 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
               "nets_changed": 4,
               "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0},       // null when the check could not run
               "grid": {"count": 1, "points": 23},    // checks.grid count/points; null when off or no schematic
+              "impedance": {"rows": 3, "violations": 1, "new_violations": 1,   // checks.impedance.count; null without a board
+                            "stackup_shifts": 0, "width_changes": 1},
               "fonts_missing": 1},                   // len(fonts.missing)
   "schematic": Schematic | null,
   "pcb": Pcb | null,
   "pcba3d": Pcba3d | null,
   "bom": Bom | null,
   "netlist": Netlist | null,
-  "checks": {"erc": CheckDelta | null, "drc": CheckDelta | null, "grid": Grid | null},
+  "checks": {"erc": CheckDelta | null, "drc": CheckDelta | null, "grid": Grid | null, "impedance": Impedance | null},
   "fonts": {"faces": ["Poppins"], "missing": ["Poppins"],   // faces this project uses / kicad-cli didn't have
             "warning": "Font 'Poppins' is not available in CI; …"} | null,   // null: no outline fonts (or no exports)
   "info": {"base": {"title": "…", "rev": "E", "date": "…", "company": "…", "comment1": "…"}, "head": {…}},  // title blocks
@@ -425,3 +427,77 @@ off-grid pins (and the wiring connected to those through other off-grid points) 
 Two symbols or sheet boxes are never merged; power symbols are not anchors (they join the part
 they sit on). Off-grid wiring that touches no symbol is grouped by its shared points and named by
 its most telling item (label, bus entry, bus, wire, junction, no-connect).
+
+### Impedance
+
+`checks.impedance`: a **closed-form estimate** of the impedance of every net class that has an impedance target,
+on every copper layer its tracks use, on base and head. It is a review aid: it never fails the run, and the
+numbers are boarddd's quasi-static closed-form models (`boarddd.impedance` tier 1: within about 2 % of a field
+solver inside their validity ranges; fab tolerances are ±10 % and the stackup data usually matters more).
+`null` when neither side has a board (or boarddd could not be imported; see `errors`).
+
+Inputs, per side, from the committed files:
+
+- **Targets**: `boarddd.io.kicad.read_kicad_pcb` reads the `.kicad_pro` net classes. The target is the class's
+  KiCad 10 tuning profile, else the class name convention (`SE_50_CP`, `DP_90_MS`, `BAL_D90_C30_CPWG`, `90ohm`…:
+  kind single/differential, target Ω, `MS`/`SL`/`CP`/`CPWG` structure). Tolerance: the profile's, else ±10 %.
+  Nets belong to their effective class (explicit assignment or pattern).
+- **Stackup**: the board's `(setup (stackup))` (thickness, εr; mask thickness and εr). Missing values take
+  KiCad's defaults (εr 4.5, copper 35 µm, mask 10 µm / εr 3.3), noted in `notes`.
+- **Geometry**: the class's tracks (segments and arcs) per layer. `width` is the width with the longest total
+  length there (`widths` lists all). For a differential class, `gap` is the edge-to-edge distance between the
+  pair's parallel overlapping segments (longest coupled length wins; `gaps` lists all), else the class's
+  `diff_pair_gap`. For a coplanar class, `coplanar_gap` is max(class clearance, clearance of the other-net copper
+  zones beside the track on that layer).
+- **Structure**: outer layers are microstrip (coplanar: grounded CPW when a copper zone of another net is
+  beside the track, else microstrip), inner layers stripline; when that differs from the class's structure the
+  row says so in `notes`. Differential coplanar has no closed-form model: it is evaluated as edge-coupled
+  microstrip (an upper bound). Mask is modelled for single-ended microstrip only.
+
+```jsonc
+{"method": "closed-form estimate (boarddd.impedance tier 1, quasi-static)",
+ "boarddd": "0.3.0",                 // boarddd version used
+ "tolerance_default_pct": 10.0,
+ "classes": ["DP_90_MS", "SE_50_CP"],   // classes with a target on either side
+ "stackup_changes": [{"layer": "dielectric 1", "field": "thickness", "base": 1.51, "head": 1.2}],  // field: thickness | epsilon_r | layer (added/removed: base/head true/false)
+ "count": {"rows": 3,                // head rows
+           "violations": 1,          // head rows out of tolerance
+           "new_violations": 1,      // ... that were not out of tolerance on base (or are new)
+           "stackup_shifts": 0, "width_changes": 1},
+ "rows": [ImpedanceRow, …]}          // sorted by class, layer
+```
+
+**ImpedanceRow**:
+
+```jsonc
+{"class": "SE_50_CP", "layer": "F.Cu",
+ "status": "changed",                // added | removed | same | changed (Z moved by >= 0.05 %)
+ "target": {"kind": "single", "target": 50.0, "tolerance_pct": 10.0, "tolerance_default": true,
+            "common_mode": null, "structure": "coplanar", "source": "name"},   // head's, else base's
+ "base": ImpedanceSide | null, "head": ImpedanceSide | null,
+ "delta_pct": -1.2,                  // Z head vs base, %
+ "shift_pct": -7.7,                  // what the stackup change alone did: Z on head's stackup at base's geometry vs base Z (null below 0.5 %)
+ "flags": ["new_violation"],         // new_violation | violation (also on base) | fixed | stackup_shift | width_change (width or gap) | target_change
+ "severity": "bad"}                  // bad: new violation; warn: violation, stackup shift, width/target change, validity flags or an error; ok
+```
+
+**ImpedanceSide**:
+
+```jsonc
+{"class": "SE_50_CP", "layer": "F.Cu", "nets": ["/RF/ANT"],
+ "width": 0.26, "widths": [{"width": 0.26, "length_mm": 34.9}],
+ "length_mm": 34.9,
+ "gap": null, "gaps": [{"gap": 0.15, "length_mm": 99.8}],   // differential only
+ "coplanar_gap": 0.15,               // coplanar only
+ "structure": "coplanar_grounded",   // microstrip | stripline | coplanar_grounded (what was evaluated)
+ "model": "cpwg",                    // boarddd.impedance model id
+ "params": {"w": 0.26, "t": 0.035, "h": 0.2104, "er": 4.4, "gap": 0.15},   // the model's inputs, mm
+ "Z": 53.42,                         // Ω: Z0, or Zdiff for differential targets
+ "Zcommon": null,                    // differential: Zeven / 2
+ "deviation_pct": 6.84,              // (Z - target) / target
+ "within": true,                     // |deviation| <= tolerance
+ "validity": ["w/h = 0.099 is outside 0.25..4 (boarddd mask model)"],   // inputs outside the model's validity range
+ "notes": ["coplanar with a plane below: evaluated as grounded CPW"],  // structure choices, defaulted stackup values
+ "error": null}                      // why there is no Z (no gap, no reference plane…)
+```
+

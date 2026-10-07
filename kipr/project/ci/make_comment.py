@@ -15,7 +15,7 @@ from pathlib import Path
 from kipr.library.ci.ping import link, sha_marker
 
 from .common import (CHECK_KINDS, MARKER, SHA_RE, change_lines, code, check_counts, d, font_warning, grid_findings, grid_line,
-                     grid_mil, load_review, lst, md_inline, new_violations, num, safe_http_url, summary_table, text, truncate,
+                     grid_mil, impedance_lines, impedance_summary, impedance_total, load_review, lst, md_inline, new_violations, num, safe_http_url, summary_table, text, truncate,
                      violation_line)
 
 MAX_COMMENT = 60000  # GitHub's hard limit is 65536 characters
@@ -55,6 +55,9 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
         lines.append(f"{len(projects)} KiCad project(s) changed{rng}"
                      + (f" (KiCad {kicad})" if kicad else "") + ".")
         lines += ["", summary_table(doc)]
+        zs = impedance_summary(projects)
+        if zs:
+            lines += ["", zs]
     if note:
         lines += ["", f"> [!NOTE]\n> {md_inline(note, 300)}"]
     fw = font_warning(doc)
@@ -81,6 +84,7 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
                 body += [grid_line(f, grid_mil(p)) for f in gf[:15]]
                 if len(gf) > 15:
                     body.append(f"- … and {len(gf) - 15} more off-grid item(s)")
+            body += impedance_lines(p)
             fixed = [f"{kind.upper()} {c[1]}" for kind in CHECK_KINDS if (c := check_counts(p, kind)) and c[1]]
             if fixed:
                 body.append(f"- ✅ fixed: {', '.join(fixed)}")
@@ -91,7 +95,7 @@ def build_comment(doc: dict, run_url=None, site_url=None, report_url=None, data_
             if perr:
                 body += [f"- ⚠️ {e}" for e in perr[:10]]
             if body:
-                lines += ["", f"<details><summary><b>{name}</b>: changes, new ERC/DRC violations, off-grid items</summary>", ""]
+                lines += ["", f"<details><summary><b>{name}</b>: changes, new ERC/DRC violations, off-grid items, impedance</summary>", ""]
                 lines += body + ["", "</details>"]
     if sha:
         lines += ["", f"<sub>kipr project review for {md_inline(sha[:12], 12)}.</sub>"]
@@ -124,6 +128,10 @@ def ping_line(doc: dict, head_sha: str, results_url=None, run_url=None, failed: 
         grids = [d(d(p.get("summary")).get("grid")) for p in projects]
         if any(grids):
             parts.append(f"{sum(num(g.get('count')) for g in grids)} off-grid")
+        zt = impedance_total(projects)
+        if zt and zt["rows"]:
+            parts.append(f"Z {zt['violations']}/{zt['rows']} out of tolerance"
+                         + (f" ({zt['new_violations']} new)" if zt["new_violations"] else ""))
         what = ", ".join(parts)
     if failed or lst(doc.get("errors")):
         what += " (⚠️ see the run)"
