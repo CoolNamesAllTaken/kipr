@@ -674,7 +674,7 @@ pre{background:var(--card);border:1px solid var(--line);border-radius:6px;paddin
 pre .add{color:var(--addfg);background:var(--add);display:inline-block;min-width:100%}
 pre .del{color:var(--delfg);background:var(--del);display:inline-block;min-width:100%}
 pre .hunk{color:var(--link)}pre .meta{color:var(--muted)}
-tr.bad td{background:var(--del)}tr.ck-fail td,tr.ck-error td{color:var(--fail)}
+tr.bad td{background:var(--del)}tr.ck-fail td,tr.ck-error td{color:var(--fail)}tr.ck-skipped td{color:var(--muted)}
 details.reenc summary h3{display:inline}.pill.st-re-encoded{color:var(--muted)}
 .pill.klc-err{border-color:var(--fail);color:var(--fail);font-weight:600}
 footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:24px;padding-top:8px}

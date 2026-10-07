@@ -42,6 +42,9 @@ _IGNORE = (
     # duplicated by our own deterministic ${REFERENCE}-on-F.Fab check (which cites a line)
     re.compile(r"Second Reference Designator missing|Add RefDes to F.Fab"),
 )
+# F5.3's missing-courtyard error. kicad-library-utils ignores `(attr ... allow_missing_courtyard)`
+# ("Exclude from courtyard requirements"), so kipr drops it for such footprints (see waive_missing_courtyard).
+_COURTYARD_MISSING = re.compile(r"^KLC F5\.3: No courtyard found")
 # Rules that are routinely (and legitimately) broken by vendor STEP models / connectors: info only.
 _SOFT = re.compile(r"3D model (offset|rotation|name) is|More than one 3D model|anchor does not match", re.I)
 
@@ -62,6 +65,7 @@ class KlcResult:
     # the checks stage then retries on a KiCad-upgraded copy (see main.Item.add_klc_upgraded)
     version_mismatch: tuple[str, str] | None = None
     parse_failed: bool = False  # the checker could not load the file at all ("Could not parse")
+    waived: list[str] = field(default_factory=list)  # rules dropped by kipr (e.g. "F5.3")
 
     @property
     def ok(self) -> bool:
@@ -190,3 +194,12 @@ def parse_junit(root) -> list[dict]:
             msg += f" ([{rule}]({url}))"
         out.append({"severity": sev, "category": "klc", "message": msg, "line": None})
     return out
+
+
+def waive_missing_courtyard(res: KlcResult) -> KlcResult:
+    """Drop F5.3 "No courtyard found!" for a footprint excluded from courtyard requirements."""
+    kept = [f for f in res.findings if not _COURTYARD_MISSING.search(f.get("message") or "")]
+    if len(kept) != len(res.findings):
+        res.findings = kept
+        res.waived.append("F5.3")
+    return res

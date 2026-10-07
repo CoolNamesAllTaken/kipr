@@ -101,6 +101,17 @@ changed.
   the privileged publish job, which never runs KiCad on PR data, re-checks the same copy as
   data. A copy whose sha256 doesn't match the source is ignored.
 
+### Footprints excluded from courtyard requirements
+
+A footprint with "Exclude from courtyard requirements" (`(attr … allow_missing_courtyard)`,
+KiCad 7 and later; e.g. net ties, logos, test points) gets no courtyard findings. As in KiCad
+DRC, a missing courtyard is fine; kipr also skips the pads/body coverage and clearance checks.
+Those checks have result `skipped` with the note "excluded from courtyard requirements". The
+pinned KLC checker ignores this attribute and still reports F5.3 "No courtyard found!"; kipr
+drops that finding, adds a skipped "KLC F5.3 courtyard present" check and records
+`klc.waived: ["F5.3"]` in `review.json`. Other F5.3 findings on a drawn courtyard (line width,
+grid, closed outline) are kept.
+
 ### Re-encoded by KiCad vs. edited
 
 A symbol library is one file, so a designer who edits one symbol in a newer KiCad re-saves all
