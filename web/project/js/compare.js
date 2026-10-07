@@ -3,14 +3,33 @@
 import { el } from './util.js';
 import { sliderLabel } from './widgets.js';
 
+// one onion opacity and swipe position for every view: kept across layers, sheets, tabs and projects
 const shared = { opacity: 0.5, swipe: 0.5 };
+
+// the compare mode last on show in the schematic or layout tab (not head / base only): new views open in it
+let preferred = 'side';
+export function preferredMode() { return preferred; }
+export function setPreferredMode(m) { preferred = m; }
+
+/** The current slider values {opacity, swipe} (0..1). */
+export function compareSliders() { return { ...shared }; }
+
+/** Set slider values (from a URL; null / undefined: keep); returns true when one changed. */
+export function setCompareSliders({ opacity, swipe } = {}) {
+  opacity ??= shared.opacity;
+  swipe ??= shared.swipe;
+  const changed = opacity !== shared.opacity || swipe !== shared.swipe;
+  shared.opacity = opacity;
+  shared.swipe = swipe;
+  return changed;
+}
 
 /**
  * mode: 'side' | 'onion' | 'swipe' | 'single'
  * make(side) -> Node placed in the world (or null when that side does not exist)
- * Returns {panes, cleanup()}; appends sliders to `extra`.
+ * Returns {panes, cleanup()}; appends sliders to `extra`; onSlide() after the user moves one.
  */
-export function comparePanes(stage, mode, make, extra, { single = 'head', labels = { base: 'base', head: 'head' } } = {}) {
+export function comparePanes(stage, mode, make, extra, { single = 'head', labels = { base: 'base', head: 'head' }, onSlide = null } = {}) {
   const cleanups = [];
   const missing = (text) => el('div', { class: 'missing-msg' }, text);
   let panes;
@@ -20,7 +39,7 @@ export function comparePanes(stage, mode, make, extra, { single = 'head', labels
     const head = make('head');
     if (head) head.style.opacity = String(shared.opacity);
     panes = [stage.pane(`${labels.base} + ${labels.head}`, make('base'), head)];
-    extra.append(sliderLabel(labels.base, labels.head, shared.opacity, (v) => { shared.opacity = v; if (head) head.style.opacity = String(v); }, 'Head opacity'));
+    extra.append(sliderLabel(labels.base, labels.head, shared.opacity, (v) => { shared.opacity = v; if (head) head.style.opacity = String(v); onSlide?.(); }, 'Head opacity'));
   } else if (mode === 'swipe') {
     const head = make('head');
     const handle = el('div', { class: 'swipe-handle' });
@@ -40,7 +59,7 @@ export function comparePanes(stage, mode, make, extra, { single = 'head', labels
       handle.style.left = `${cut}px`;
     };
     cleanups.push(stage.onTransform(apply));
-    extra.append(sliderLabel(labels.base, labels.head, shared.swipe, (v) => { shared.swipe = v; apply(); }, 'Swipe position', 0.001));
+    extra.append(sliderLabel(labels.base, labels.head, shared.swipe, (v) => { shared.swipe = v; apply(); onSlide?.(); }, 'Swipe position', 0.001));
     requestAnimationFrame(apply);
   } else {
     panes = [stage.pane(labels[single], make(single) || missing(`not in ${labels[single]}`))];

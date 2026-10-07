@@ -7,13 +7,21 @@ import { createSchematicView } from './schematic.js';
 import { createLayoutView } from './layout.js';
 import { createPcba3dView } from './pcba3d.js';
 import { boxesFromParams, boxesParam, onBoxes } from './boxes.js';
+import { mergeParams, rememberRoute, routeFor } from './viewstate.js';
 import { createBomView, createNetlistView, createChecksView } from './tables.js';
 
 const $ = (sel) => document.querySelector(sel);
 const STATUS_ORDER = { modified: 0, added: 1, removed: 2 };
 const VIEWS = { schematic: createSchematicView, layout: createLayoutView, pcba3d: createPcba3dView, bom: createBomView, netlist: createNetlistView, checks: createChecksView };
 
-const state = { review: null, projects: [], filter: '', route: parseHash(''), project: null, view: null, viewKey: null };
+// tabRoutes: the last route of each project tab ("slug|tab" -> {item, params}), so tab, project and
+// sidebar links come back to the layer / sheet, compare mode and zoom that were on show (viewstate.js)
+const state = { review: null, projects: [], filter: '', route: parseHash(''), project: null, view: null, viewKey: null, tabRoutes: new Map() };
+
+/** Link to a project tab: back to how it was left, else its default. */
+function tabHash(slug, tab) {
+  return formatHash(tab ? routeFor(state.tabRoutes, slug, tab) : { slug });
+}
 
 /** Projects from the review: valid slug, unique, sorted by status then name. */
 export function projectsOf(review) {
@@ -119,7 +127,7 @@ function renderList() {
   for (const p of shown) {
     const active = state.project?.slug === p.slug;
     ul.append(el('li', {}, el('a', {
-      href: formatHash({ slug: p.slug, tab: state.route.tab }), class: `item-link${active ? ' active' : ''}`, 'aria-current': active ? 'page' : null,
+      href: tabHash(p.slug, state.route.tab), class: `item-link${active ? ' active' : ''}`, 'aria-current': active ? 'page' : null,
     },
     el('span', { class: 'item-name', title: String(p.path || p.name || p.slug) }, String(p.name || p.slug)),
     el('span', { class: 'item-meta' }, badge('status', p.status), chipEls(p.summary)))));
@@ -129,18 +137,23 @@ function renderList() {
 
 // --- routing ------------------------------------------------------------------------------------------
 
-/** Update the hash for the current project/tab without re-rendering (views call this). */
+/**
+ * Update the hash for the current project/tab without re-rendering (views call this). partial.params are
+ * merged into the current ones (null removes a key), so a view only names what it changed. replace=false
+ * adds a history entry (a new layer or sheet), so back / forward step through them.
+ */
 function setRoute(partial, replace = true) {
   const cur = state.route;
   const next = {
     slug: cur.slug, tab: cur.tab,
     item: 'item' in partial ? partial.item : cur.item,
-    params: partial.params ? Object.fromEntries(Object.entries(partial.params).filter(([, v]) => v !== null && v !== undefined && v !== '')) : cur.params,
+    // hidden change boxes ride along in every view's URL (boxes.js)
+    params: mergeParams(partial.params ? mergeParams(cur.params, partial.params) : cur.params, { boxes: boxesParam() }),
   };
-  // hidden change boxes ride along in every view's URL (boxes.js)
-  next.params = { ...next.params, boxes: boxesParam() || undefined };
-  if (!next.params.boxes) delete next.params.boxes;
   state.route = next;
+  rememberRoute(state.tabRoutes, next);
+  const tab = document.querySelector('.tabs .tab[aria-selected="true"]');
+  if (tab) tab.href = formatHash(next);
   const h = formatHash(next);
   if (h === location.hash) return;
   if (replace) history.replaceState(null, '', h); else history.pushState(null, '', h);
@@ -156,14 +169,17 @@ function route() {
   const r = parseHash(location.hash);
   const p = r.slug ? state.projects.find((x) => x.slug === r.slug) : null;
   if (p && !r.tab) r.tab = defaultTab(p);
-  const key = p ? `${p.slug}|${r.tab}|${r.item ?? ''}` : null;
+  // The item (layer, sheet) is not part of the key: back / forward or a link to another layer or sheet of
+  // the view on show goes to its onParams(params, item), which keeps the compare mode, zoom etc.
+  const key = p ? `${p.slug}|${r.tab}` : null;
+  const same = p && key === state.viewKey && state.view;
   state.route = r;
+  if (p) rememberRoute(state.tabRoutes, r);
   boxesFromParams(r.params);
-  if (p && key === state.viewKey && state.view) {
-    state.view.onParams?.(r.params);
+  if (same) {
+    state.view.onParams?.(r.params, r.item);
     return;
   }
-  // a different item within the same tab re-creates the view, but keep the item list scroll etc. simple
   state.view?.destroy?.();
   state.view = null;
   state.viewKey = key;
@@ -243,7 +259,7 @@ function renderProject(p, r) {
   TABS.forEach(([t, label], i) => {
     const count = tabCount(p, t);
     tabBar.append(el('a', {
-      class: 'tab', role: 'tab', href: formatHash({ slug: p.slug, tab: t }), 'aria-selected': String(t === r.tab), title: `${label} (${i + 1})`,
+      class: 'tab', role: 'tab', href: t === r.tab ? formatHash(r) : tabHash(p.slug, t), 'aria-selected': String(t === r.tab), title: `${label} (${i + 1})`,
     }, label, count ? el('span', { class: 'tab-count' }, String(count)) : null));
   });
   const box = el('div', { class: `view-box tab-${r.tab}` });
@@ -278,7 +294,7 @@ function copyLink(btn) {
 const SHORTCUTS = [
   ['1 – 6', 'switch tab (Schematic, Layout, 3D, BOM, Netlist, ERC/DRC)'],
   ['j / k', 'next / previous project'],
-  ['[ / ]', 'previous / next sheet (schematic) or diff layer (layout)'],
+  ['[ / ]', 'previous / next layer (layout: that one layer, base vs head, in any compare mode) or sheet (schematic); the mode, slider and zoom stay'],
   ['n / p', 'next / previous change (zooms to it)'],
   ['m', 'cycle compare mode (side by side, diff, onion, swipe)'],
   ['v', 'cycle board view (top, bottom, layers)'],
@@ -311,14 +327,14 @@ function onKey(e) {
   if (state.view?.onKey?.(e)) { e.preventDefault(); return; }
   if (e.key === 't') { toggleTheme(); return; }
   if (/^[1-6]$/.test(e.key) && state.project) {
-    location.hash = formatHash({ slug: state.project.slug, tab: TABS[+e.key - 1][0] });
+    location.hash = tabHash(state.project.slug, TABS[+e.key - 1][0]);
     return;
   }
   if (e.key === 'j' || e.key === 'k') {
     const vis = state.projects.filter((p) => matches(p, state.filter));
     const idx = vis.findIndex((p) => p.slug === state.project?.slug);
     const next = vis[Math.min(Math.max(idx + (e.key === 'j' ? 1 : -1), 0), vis.length - 1)];
-    if (next) location.hash = formatHash({ slug: next.slug, tab: state.route.tab });
+    if (next) location.hash = tabHash(next.slug, state.route.tab);
   } else if (e.key === '/') {
     e.preventDefault();
     $('#sidebar input')?.focus();
