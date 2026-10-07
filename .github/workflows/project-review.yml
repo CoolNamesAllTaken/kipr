@@ -10,7 +10,7 @@
 #   project-review-data    project-review.json
 #   pr-meta                pr.json, read by project-review-publish.yml
 # New ERC/DRC errors and warnings and off-grid schematic items also show up as annotations on the
-# changed files.
+# changed files. Net classes with an impedance target get a closed-form Z estimate per layer (checks.impedance).
 #
 # Caller (see docs/project.md):
 #   on: pull_request: paths: ["**/*.kicad_pcb", "**/*.kicad_sch", "**/*.kicad_pro"]
@@ -32,6 +32,10 @@ on:
         description: where kipr is installed from (owner/repo on github.com)
         type: string
         default: CoolNamesAllTaken/kipr
+      boarddd-ref:
+        description: boarddd git ref (tag/sha) for the impedance check and KiCad readers; empty = the commit kipr pins in its pyproject.toml
+        type: string
+        default: ""
       projects:
         description: only review projects whose directory (or its name) matches one of these globs (space/comma/newline separated; empty = all)
         type: string
@@ -203,10 +207,16 @@ jobs:
         env:
           KICAD_IMAGE: ${{ inputs.kicad-image }}
           LIBS_PATH_VAR: ${{ inputs.libraries-path-var }}
+          BOARDDD_REF: ${{ inputs.boarddd-ref }}
         run: |
           python3 -m venv --system-site-packages "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"
+          "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"   # pulls boarddd at kipr's pinned commit
+          if [ -n "$BOARDDD_REF" ]; then
+            "$RUNNER_TEMP/venv/bin/pip" install -q --force-reinstall --no-deps \
+              "boarddd @ git+https://github.com/CoolNamesAllTaken/boarddd@${BOARDDD_REF}#subdirectory=python"
+          fi
+          "$RUNNER_TEMP/venv/bin/python" -c 'import boarddd, boarddd.impedance; print("boarddd", boarddd.__version__)'
           "$RUNNER_TEMP/venv/bin/kipr" project --help > /dev/null
           # export cache key: kicad-cli version + image + extra libraries (they change ERC/DRC and the
           # 3D models, which kipr's per-export keys don't see); exports are keyed by file blobs inside

@@ -8,7 +8,8 @@
 # KIPR_FIXTURES=DEST. The expected base -> head changes are listed in CHANGES.md next to this file.
 # It reproduces the local kipr-fixtures repo (same history and commit messages): the demos
 # pic_programmer and complex_hierarchy, upgraded to the KiCad 10 format, a base commit with one
-# seeded ERC issue and a silkscreen text, then scripts/head_*.py.
+# seeded ERC issue, a silkscreen text and a controlled-impedance net class, then scripts/head_*.py and
+# scripts/impedance_classes.py.
 #
 # Runs as is inside kicad/kicad:10.0.6-amd64-full (kicad-cli, python3 with pcbnew, demos in
 # /usr/share/kicad/demos). Elsewhere set:
@@ -75,7 +76,8 @@ t, n = re.subn(r'\t\(no_connect\n\t\t\(at 171\.45 143\.51\)\n\t\t\(uuid "[^"]+"\
 assert n == 1, "U4 pin 4 no-connect flag not found"
 open(sch, "w").write(t)
 EOF
-commit "Base: seed an ERC issue (U4 pin 4 missing no-connect flag) and a 'REV A' silkscreen text in pic_programmer"
+python3 "$here/scripts/impedance_classes.py" base
+commit "Base: seed an ERC issue (U4 pin 4 missing no-connect flag) and a 'REV A' silkscreen text in pic_programmer; net class SE_50_MS (50 ohm microstrip target) on Net-(D8-A)"
 git tag base
 
 # 5. head: the scripted edits (they run from the repo root and import scripts/sexpr.py)
@@ -90,5 +92,8 @@ commit "Head (complex_hierarchy): add status_led sheet (R401 + D401 LED, new net
 cp "$here"/scripts/head_complex_hierarchy_pcb.py scripts/
 "$KICAD_PYTHON" scripts/head_complex_hierarchy_pcb.py
 commit "Head (complex_hierarchy): extend board outline +10.16 mm, place R401/D401, route VCC/GND/LED_A (LED_A 0.15 mm: one new track_width DRC violation)"
+cp "$here"/scripts/impedance_classes.py scripts/
+python3 scripts/impedance_classes.py head
+commit "Head (impedance): pic_programmer D8-A tracks 0.5 -> 0.4 mm and core 1.51 -> 1.2 mm; complex_hierarchy net class SE_50_MS on /status_led/LED_A"
 git tag head
 echo "build.sh: fixtures in $dest (base $(git rev-parse --short base), head $(git rev-parse --short head))"

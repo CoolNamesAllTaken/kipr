@@ -180,6 +180,8 @@ export function createChecksView(project, container, ctx) {
   }
   const grid = obj(checks.grid);
   if (grid) container.append(gridCard(project, grid));
+  const imp = obj(checks.impedance);
+  if (imp) container.append(impedanceCard(imp));
   if (!any && !obj(checks.drc) && !obj(checks.erc)) container.prepend(el('p', { class: 'muted' }, 'ERC/DRC were not run for this project.'));
   return { destroy() {} };
 }
@@ -241,3 +243,74 @@ function gridCard(project, g) {
   }
   return sec;
 }
+
+// checks.impedance: closed-form Z per net class x layer, base -> head. Compact: symbols in the table, the
+// inputs (widths, stackup, model parameters, notes) in tooltips.
+const IMP_FLAG = {
+  new_violation: ['▲', 'newly out of tolerance', 'bad'],
+  violation: ['⚠', 'out of tolerance (also on base)', 'warn'],
+  fixed: ['✓', 'back in tolerance', 'ok'],
+  stackup_shift: ['≋', 'Z moved by a stackup change', 'warn'],
+  width_change: ['↔', 'track width or pair gap changed', 'warn'],
+  target_change: ['◎', 'the class target changed', 'warn'],
+};
+const fx = (v, d = 1) => (num(v) ? v.toFixed(d) : '–');
+const mmTxt = (v) => (num(v) ? String(+v.toFixed(4)) : '–');
+
+/** Tooltip text for one side of an impedance row. */
+export function impedanceSideTitle(label, sd) {
+  if (!obj(sd)) return `${label}: —`;
+  const lines = [`${label}: ${sd.structure ?? '?'} (${sd.model ?? 'no model'}), ${arr(sd.nets).length} net(s), ${fx(sd.length_mm)} mm routed`];
+  const ws = arr(sd.widths).filter(obj);
+  if (ws.length) lines.push(`widths: ${ws.map((w) => `${mmTxt(w.width)} mm × ${fx(w.length_mm)} mm`).join(', ')}`);
+  const gs = arr(sd.gaps).filter(obj);
+  if (gs.length) lines.push(`gaps: ${gs.map((g) => `${mmTxt(g.gap)} mm × ${fx(g.length_mm)} mm`).join(', ')}`);
+  if (num(sd.coplanar_gap)) lines.push(`coplanar gap: ${mmTxt(sd.coplanar_gap)} mm`);
+  const p = obj(sd.params);
+  if (p) lines.push(`inputs: ${Object.entries(p).map(([k, v]) => `${k} ${mmTxt(v)}`).join(', ')}`);
+  if (num(sd.Zcommon)) lines.push(`Zcommon ${fx(sd.Zcommon)} Ω`);
+  for (const v of arr(sd.validity)) lines.push(`⚠ ${v}`);
+  for (const v of arr(sd.notes)) lines.push(`· ${v}`);
+  if (typeof sd.error === 'string' && sd.error) lines.push(`no Z: ${sd.error}`);
+  return lines.join('\n');
+}
+
+function impedanceCard(z) {
+  const rows = arr(z.rows).filter(obj);
+  const c = obj(z.count) || {};
+  const sec = el('section', { class: 'card impedance-check' });
+  const method = `${z.method || 'closed-form estimate'}${z.boarddd ? `, boarddd ${z.boarddd}` : ''}. About ±2 % of a field solver inside the models' validity ranges; fab tolerance is ±10 %. A review aid, not a sign-off.`;
+  sec.append(el('h3', {}, 'Impedance', ' ', el('span', { class: 'muted imp-method', title: method }, 'closed-form estimate'), ' ',
+    num(c.new_violations) && c.new_violations ? badge('sev', 'error', 'newly out of tolerance') : num(c.violations) && c.violations ? badge('sev', 'warning') : null, ' ',
+    rows.length ? badge('delta', `${num(c.violations) ? c.violations : 0} / ${num(c.rows) ? c.rows : 0} out of tol.`) : null));
+  if (!rows.length) { sec.append(el('p', { class: 'muted' }, 'No net class has an impedance target.')); return sec; }
+  const sc = arr(z.stackup_changes).filter(obj);
+  if (sc.length) sec.append(el('p', { class: 'small muted' }, `Stackup: ${sc.map((x) => `${x.layer} ${x.field} ${cellText(x.base)} → ${cellText(x.head)}`).join('; ')}`));
+  const body = rows.map((r) => {
+    const t = obj(r.target) || {};
+    const b = obj(r.base); const h = obj(r.head); const sd = h || b || {};
+    const geo = (x) => (x ? `${mmTxt(x.width)}${num(x.gap) ? `/${mmTxt(x.gap)}` : ''}` : '–');
+    const zTxt = b && h && num(b.Z) && num(h.Z) && Math.abs(h.Z - b.Z) >= 0.05 ? `${fx(b.Z)} → ${fx(h.Z)}` : fx((h || b || {}).Z);
+    const dev = h && num(h.deviation_pct) ? `${h.deviation_pct > 0 ? '+' : ''}${h.deviation_pct.toFixed(1)} %` : '–';
+    const flags = arr(r.flags).filter((f) => IMP_FLAG[f]);
+    const shift = num(r.shift_pct) ? ` (stackup alone ${r.shift_pct > 0 ? '+' : ''}${r.shift_pct.toFixed(1)} %)` : '';
+    const warn = arr(sd.validity).length || (typeof sd.error === 'string' && sd.error);
+    const title = [impedanceSideTitle('base', b), impedanceSideTitle('head', h), ...flags.map((f) => IMP_FLAG[f][1] + (f === 'stackup_shift' ? shift : ''))].join('\n\n');
+    return el('tr', { class: r.severity === 'bad' ? 'row-removed' : null, title },
+      el('td', { class: 'imp-sev' }, el('span', { class: `imp imp-${r.severity === 'bad' ? 'bad' : r.severity === 'warn' ? 'warn' : 'ok'}` }, r.severity === 'bad' ? '▲' : r.severity === 'warn' ? '⚠' : '✓')),
+      el('td', {}, el('code', {}, String(r.class ?? '')), t.kind === 'differential' ? el('span', { class: 'muted small' }, ' diff') : null),
+      el('td', {}, String(r.layer ?? '')),
+      el('td', { class: 'small' }, String(sd.structure ?? '–').replace('coplanar_grounded', 'CPWG').replace('microstrip', 'MS').replace('stripline', 'SL')),
+      el('td', { class: 'num' }, b && h && geo(b) !== geo(h) ? `${geo(b)} → ${geo(h)}` : geo(h || b)),
+      el('td', { class: 'num' }, zTxt, warn ? el('span', { class: 'imp-warn-dot', title: 'outside the model\'s validity range or no Z: see the tooltip' }, ' *') : null),
+      el('td', { class: 'num' }, `${fx(t.target, 0)} ±${fx(t.tolerance_pct, 0)}%`),
+      el('td', { class: `num${h && h.within === false ? ' warn-text' : ''}` }, dev),
+      el('td', { class: 'imp-flags' }, flags.map((f) => el('span', { class: `imp imp-${IMP_FLAG[f][2]}`, title: IMP_FLAG[f][1] + (f === 'stackup_shift' ? shift : '') }, IMP_FLAG[f][0]))));
+  });
+  sec.append(el('div', { class: 'scroll-x' }, el('table', { class: 'grid impedance' },
+    el('thead', {}, el('tr', {}, ['', 'Class', 'Layer', 'Str.', 'w/gap mm', 'Z Ω', 'Target', 'Dev.', ''].map((x) => el('th', { scope: 'col' }, x)))),
+    el('tbody', {}, body))),
+  el('p', { class: 'small muted' }, '▲ new violation · ⚠ out of tolerance / check · ≋ stackup change · ↔ width/gap change · * outside the model\'s range. Hover a row for the inputs.'));
+  return sec;
+}
+

@@ -94,6 +94,92 @@ def grid_line(f: dict, mil: str = "50") -> str:
             + (f" {code(who, 60)}" if who else "") + (f" on {sheet}" if sheet else "") + (f": {det}" if det else ""))
 
 
+def fnum(v):
+    """A finite float from untrusted data, else None."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        return None
+    return float(v)
+
+
+def impedance_counts(p: dict) -> dict | None:
+    """summary.impedance (rows, violations, new_violations, stackup_shifts, width_changes), None when not run."""
+    c = d(d(p.get("summary")).get("impedance"))
+    if not c:
+        return None
+    return {k: num(c.get(k)) for k in ("rows", "violations", "new_violations", "stackup_shifts", "width_changes")}
+
+
+def impedance_cell(p: dict) -> str:
+    """Summary-table cell: out of tolerance / checked, 🔴 when something is newly out of tolerance."""
+    c = impedance_counts(p)
+    if c is None:
+        return "n/a"
+    if not c["rows"]:
+        return "–"
+    icon = "🔴 " if c["new_violations"] else "🟠 " if c["violations"] or c["stackup_shifts"] or c["width_changes"] else ""
+    return f"{icon}{c['violations']} / {c['rows']}"
+
+
+def impedance_total(projects: list[dict]) -> dict | None:
+    """The impedance counts summed over the projects (None when no project ran the check)."""
+    cs = [c for p in projects if (c := impedance_counts(p))]
+    if not cs:
+        return None
+    return {k: sum(c[k] for c in cs) for k in cs[0]}
+
+
+def impedance_summary(projects: list[dict]) -> str:
+    """One markdown line for the comment ("" when no class has a target)."""
+    t = impedance_total(projects)
+    if not t or not t["rows"]:
+        return ""
+    parts = [f"{t['rows']} class × layer checked", f"{t['violations']} out of tolerance"
+             + (f" (🔴 {t['new_violations']} new)" if t["new_violations"] else "")]
+    if t["stackup_shifts"]:
+        parts.append(f"{t['stackup_shifts']} shifted by a stackup change")
+    if t["width_changes"]:
+        parts.append(f"{t['width_changes']} with a width/gap change")
+    return "**Impedance** (closed-form estimate, not a field solve): " + ", ".join(parts) + "."
+
+
+IMPEDANCE_FLAG_TEXT = {"new_violation": "newly out of tolerance", "violation": "out of tolerance",
+                       "fixed": "back in tolerance", "stackup_shift": "stackup change", "width_change": "width/gap change",
+                       "target_change": "target changed"}
+
+
+def impedance_lines(p: dict, limit: int = 15) -> list[str]:
+    """Rows worth a look (bad/warn), one escaped bullet each."""
+    rows = [r for r in lst(d(d(p.get("checks")).get("impedance")).get("rows"))
+            if isinstance(r, dict) and r.get("severity") in ("bad", "warn")]
+    rows.sort(key=lambda r: (r.get("severity") != "bad", text(r.get("class")), text(r.get("layer"))))
+    out = []
+    for r in rows[:limit]:
+        t, b, h = d(r.get("target")), d(r.get("base")), d(r.get("head"))
+        key = "Zdiff" if t.get("kind") == "differential" else "Z0"
+        tz, tol = fnum(t.get("target")), fnum(t.get("tolerance_pct"))
+        zb, zh = fnum(b.get("Z")), fnum(h.get("Z"))
+        z = (f"{zb:.1f} → {zh:.1f} Ω" if zb is not None and zh is not None and abs(zh - zb) >= 0.05
+             else f"{zh:.1f} Ω" if zh is not None else f"{zb:.1f} Ω (removed)" if zb is not None else "no Z")
+        dev = fnum(h.get("deviation_pct"))
+        w = fnum(h.get("width")) if h else fnum(b.get("width"))
+        geo = f"w {w:g} mm" if w is not None else ""
+        gp = fnum(h.get("gap"))
+        if gp is not None:
+            geo += f", gap {gp:g} mm"
+        flags = [IMPEDANCE_FLAG_TEXT[f] for f in lst(r.get("flags")) if isinstance(f, str) and f in IMPEDANCE_FLAG_TEXT]
+        sp = fnum(r.get("shift_pct"))
+        if sp is not None:
+            flags = [f"stackup change {sp:+.1f} %" if f == "stackup change" else f for f in flags]
+        icon = SEVERITY_ICON["error"] if r.get("severity") == "bad" else SEVERITY_ICON["warning"]
+        out.append(f"- {icon} {key} {code(text(r.get('class')), 40)} on {md_inline(text(r.get('layer')), 20)}"
+                   f" ({md_inline(text(h.get('structure') or b.get('structure')), 20)}{', ' + geo if geo else ''}): {z}"
+                   + (f" vs {tz:g} Ω ±{tol:g} % ({dev:+.1f} %)" if tz is not None and tol is not None and dev is not None else "")
+                   + (f": {md_inline(', '.join(flags), 120)}" if flags else ""))
+    if len(rows) > limit:
+        out.append(f"- … and {len(rows) - limit} more impedance row(s)")
+    return out
+
+
 def missing_fonts(doc: dict) -> list[str]:
     """fonts.missing: faces kicad-cli had to substitute (strings only, at most 20)."""
     return [f for f in lst(d(doc.get("fonts")).get("missing")) if isinstance(f, str) and f][:20]
@@ -115,8 +201,8 @@ def font_warning(doc: dict) -> str:
 
 def summary_table(doc: dict) -> str:
     """One markdown table row per project (all values escaped)."""
-    rows = ["| Project | Status | Sheets | Layers | Components | Nets | ERC new / fixed | DRC new / fixed | Off grid | Notes |",
-            "|---|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| Project | Status | Sheets | Layers | Components | Nets | ERC new / fixed | DRC new / fixed | Off grid | Z out / checked | Notes |",
+            "|---|---|---|---|---|---|---|---|---|---|---|"]
     for p in doc["projects"]:
         s = d(p.get("summary"))
         comp = d(s.get("components"))
@@ -137,7 +223,7 @@ def summary_table(doc: dict) -> str:
             f"{code(text(p.get('name')) or text(p.get('slug')), 60)}<br><sub>{md_inline(text(p.get('path')) or '.', 120)}</sub>",
             f"{STATUS_ICON[st]} {st}",
             str(num(s.get("sheets_changed"))), str(num(s.get("layers_changed"))), " ".join(parts),
-            str(num(s.get("nets_changed"))), checks[0], checks[1], grid_cell(p),
+            str(num(s.get("nets_changed"))), checks[0], checks[1], grid_cell(p), impedance_cell(p),
             f"⚠️ {errors} export/parse problem(s)" if errors else ""]) + " |")
     return "\n".join(rows)
 

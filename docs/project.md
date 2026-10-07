@@ -122,6 +122,26 @@ CI, as warning annotations on the item's line of the `.kicad_sch` file.
 KiCad 10's own ERC has a similar `endpoint_off_grid` warning (pins and wire ends only, one per
 symbol, on the project's connection grid); new ones also appear in the ERC delta.
 
+### Impedance check
+
+Net classes with an impedance target get a **closed-form estimate** of their impedance on every copper layer
+their tracks use, on base and head, so a review shows what a stackup, width or gap change does to controlled
+lines. Targets come from the `.kicad_pro`: a KiCad 10 tuning profile, else the class name (`SE_50_CP`,
+`DP_90_MS`, `BAL_D90_C30_CPWG`, `90ohm`…; MS/SL/CP/CPWG name the structure), read by
+[boarddd](https://github.com/CoolNamesAllTaken/boarddd)'s KiCad reader; the tolerance is the profile's, else ±10 %.
+Per class × layer kipr takes the track width with the longest routed length there, the pair gap measured between
+the pair's parallel segments (else the class's), the coplanar gap (zone clearance), and the board's stackup
+(thickness, εr, mask), and evaluates boarddd's closed-form models (Hammerstad-Jensen microstrip with mask,
+Cohn stripline, Ghione-Naldi CPWG, Kirschning-Jansen / Cohn coupled lines; see boarddd's `docs/impedance.md`).
+
+Rows are flagged when they are **newly out of tolerance** (🔴), when a **stackup change** moved Z by 0.5 % or
+more (computed on the base geometry, so it shows what the stackup alone did), and when the **width or gap**
+changed. It never fails the run: the models are quasi-static estimates (about ±2 % of a field solver inside their
+validity ranges, and inputs outside them are listed), fabs hold ±10 %, and Er at frequency, pressed thickness and
+mask thickness usually matter more. The results are in `checks.impedance` ([contract](CONTRACT-project.md#impedance)),
+the summary (`Z out / checked`), the ERC/DRC tab of the viewer (symbols, the inputs in tooltips), the report, the
+PR comment (one line plus the flagged rows) and the ping.
+
 ### Fonts
 
 KiCad text can use any installed outline font (`(font (face "Poppins"))`). kicad-cli looks the
@@ -217,6 +237,7 @@ Security notes (same as the library review):
 | `step` | `false` | also export STEP models |
 | `grid-check` | `changed` | `--grid-check` (schematic connection grid: `changed`, `all` or `off`) |
 | `sch-grid-mil` | `50` | `--sch-grid-mil` (the grid in mil) |
+| `boarddd-ref` | – | boarddd tag/sha for the impedance check (default: the commit kipr's `pyproject.toml` pins) |
 | `kicad-image` | `kicad/kicad:10.0.6-amd64-full` | job container; pins the KiCad version (the `-full` images have the stock 3D models) |
 | `jobs` | `4` | parallel kicad-cli processes |
 | `max-artifact-mb` | `250` | size budget of the viewer artifact and the report; optional exports are dropped to fit |
@@ -230,7 +251,7 @@ Security notes (same as the library review):
 The sticky comment is edited in place and stays near the top of the PR. With `ping: true`, an
 update for a new head commit also posts one line at the bottom, e.g.
 "🔁 KiCad review updated for `abc1234`: 2 new / 1 fixed DRC, 0 ERC, 5 components changed,
-1 off-grid · results · run", and minimizes the previous one as outdated (deletes it if
+1 off-grid, Z 1/3 out of tolerance (1 new) · results · run", and minimizes the previous one as outdated (deletes it if
 minimizing fails). No ping when the comment was just created or when the run is for the commit
 the comment already reports (a re-run). Only the bot's own pings (hidden
 `<!-- kipr-ping:project -->` marker) are touched. `ping: false` turns it off.
@@ -348,6 +369,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/pcb.py`, `sch.py` | s-expression models of boards and schematic hierarchies |
 | `kipr/project/diff_pcb.py`, `diff_sch.py`, `diff_net.py` | semantic diffs, BOM, netlist, ERC/DRC deltas |
 | `kipr/project/grid.py` | schematic connection grid check (`checks.grid`) |
+| `kipr/project/impedance.py` | controlled-impedance check (`checks.impedance`, boarddd's KiCad reader and closed-form models) |
 | `kipr/project/ci/` | GitHub glue (above) |
 | `kipr/project/cli.py` | `kipr project [review\|site\|report\|ci]` |
 | `kipr/project/site.py`, `report.py` | viewer copy + file:// support, no-JS HTML report |

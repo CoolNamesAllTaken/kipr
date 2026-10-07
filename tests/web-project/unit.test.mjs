@@ -11,7 +11,7 @@ import {
   mergeParams, formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, sameSize, stepItem, rememberRoute, routeFor, layerNote, sheetNote,
 } from '../../web/project/js/viewstate.js';
 import { safeUrl, assetUrl, commitUrl, blobUrl, bbox, parseViewBox, cellText, parseAtParam } from '../../web/project/js/util.js';
-import { matchesQuery, statusCounts, sheetSpotHash, gridGroups } from '../../web/project/js/tables.js';
+import { matchesQuery, statusCounts, sheetSpotHash, gridGroups, impedanceSideTitle } from '../../web/project/js/tables.js';
 import { faceOf, pickDiffLayer, parseAt } from '../../web/project/js/layout.js';
 import { pickSheet } from '../../web/project/js/schematic.js';
 import { describeChange } from '../../web/project/js/changes.js';
@@ -461,4 +461,14 @@ test('panzoom: region of a view round trips (also mirrored), independent of pane
   const bottom = viewForRegion({ cx: 110, cy: 60, w: 20 }, 800, 600, box, true);
   assert.ok(Math.abs(regionOf(bottom, 800, 600, box, true).cx - 110) < 1e-9);
   assert.notEqual(top.tx, bottom.tx);
+});
+
+test('impedance row tooltip: inputs, widths, notes; missing side', () => {
+  const t = impedanceSideTitle('head', { structure: 'coplanar_grounded', model: 'cpwg', nets: ['/RF'], length_mm: 41.25,
+    widths: [{ width: 0.26, length_mm: 40 }, { width: 0.2, length_mm: 1.25 }], coplanar_gap: 0.15,
+    params: { w: 0.26, h: 0.2104, er: 4.4 }, validity: ['w/h = 9 is outside'], notes: ['coplanar with a plane below'], error: null });
+  assert.match(t, /^head: coplanar_grounded \(cpwg\), 1 net\(s\), 41\.3 mm routed/);
+  assert.match(t, /widths: 0\.26 mm × 40\.0 mm, 0\.2 mm × 1\.3 mm/);
+  assert.match(t, /coplanar gap: 0\.15 mm\ninputs: w 0\.26, h 0\.2104, er 4\.4\n⚠ w\/h = 9 is outside\n· coplanar with a plane below$/);
+  assert.equal(impedanceSideTitle('base', null), 'base: —');
 });

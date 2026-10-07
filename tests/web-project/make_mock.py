@@ -415,7 +415,8 @@ def demo_board(out: Path) -> dict:
         "slug": slug, "name": "demo_board", "path": "boards/demo_board", "status": "modified",
         "summary": {"sheets_changed": 4, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1, "minor": 2},
                     "nets_changed": 3, "erc": {"new": 1, "fixed": 1}, "drc": {"new": 2, "fixed": 1},
-                    "grid": {"count": 2, "points": 5}},
+                    "grid": {"count": 2, "points": 5},
+                    "impedance": {"rows": 3, "violations": 1, "new_violations": 1, "stackup_shifts": 1, "width_changes": 1}},
         "schematic": sch, "pcb": pcb,
         "pcba3d": {"base": {"glb": f"p/{slug}/3d/base.glb"}, "head": {"glb": f"p/{slug}/3d/head.glb"}, "components": comps},
         "bom": {"rows": [
@@ -467,9 +468,51 @@ def demo_board(out: Path) -> dict:
                           "points": [{"name": "", "pos_mm": [200.0, 130.0], "off_mm": [-0.66, 0.54]}], "related": [],
                           "detail": "off the 50 mil grid at (200, 130) (x -0.66 y +0.54 mm)"},
                      ]},
+            "impedance": mock_impedance(),
         },
         "fonts": {"faces": ["Poppins"], "missing": ["Poppins"], "warning": "Font 'Poppins' is not available in CI; …"},
         "errors": ["kicad-cli: STEP export skipped (mock)"],
+    }
+
+
+def mock_impedance():
+    """checks.impedance: a passing CPWG class, a new diff-pair violation, an inner class moved by a stackup change."""
+    def sd(cls, layer, nets, w, model, structure, params, z, tgt, gap=None, cg=None, notes=(), validity=(), zc=None):
+        dev = round(100 * (z - tgt) / tgt, 2)
+        return {"class": cls, "layer": layer, "nets": nets, "width": w, "widths": [{"width": w, "length_mm": 41.2}],
+                "length_mm": 41.2, "gap": gap, "coplanar_gap": cg, "structure": structure, "model": model, "params": params,
+                "Z": z, "Zcommon": zc, "deviation_pct": dev, "within": abs(dev) <= 10, "validity": list(validity),
+                "notes": list(notes), "error": None, **({"gaps": [{"gap": gap, "length_mm": 38.0}]} if gap else {})}
+    t = lambda kind, target, structure: {"kind": kind, "target": target, "tolerance_pct": 10.0, "tolerance_default": True,  # noqa: E731
+                                         "common_mode": None, "structure": structure, "source": "name"}
+    cp = dict(w=0.26, t=0.035, h=0.2104, er=4.4, gap=0.15)
+    dp_b = dict(w=0.2, t=0.035, h=0.2104, er=4.4, s=0.15)
+    dp_h = dict(w=0.15, t=0.035, h=0.2104, er=4.4, s=0.2)
+    sl_b = dict(w=0.15, t=0.035, h1=0.2104, h2=0.4, er=4.53)
+    sl_h = dict(w=0.15, t=0.035, h1=0.18, h2=0.4, er=4.53)
+    return {
+        "method": "closed-form estimate (boarddd.impedance tier 1, quasi-static)", "boarddd": "0.3.0",
+        "tolerance_default_pct": 10.0, "classes": ["DP_90_MS", "SE_50_CP", "SE_50_SL"],
+        "stackup_changes": [{"layer": "dielectric 1", "field": "thickness", "base": 0.2104, "head": 0.18}],
+        "count": {"rows": 3, "violations": 1, "new_violations": 1, "stackup_shifts": 1, "width_changes": 1},
+        "rows": [
+            {"class": "DP_90_MS", "layer": "F.Cu", "status": "changed", "target": t("differential", 90.0, "microstrip"),
+             "base": sd("DP_90_MS", "F.Cu", ["/USB_D+", "/USB_D-"], 0.2, "coupled_microstrip", "microstrip", dp_b, 93.1, 90, gap=0.15, zc=31.0,
+                        notes=["microstrip differential: the solder mask is not modelled (tier 1)"]),
+             "head": sd("DP_90_MS", "F.Cu", ["/USB_D+", "/USB_D-"], 0.15, "coupled_microstrip", "microstrip", dp_h, 109.4, 90, gap=0.2, zc=35.2,
+                        notes=["microstrip differential: the solder mask is not modelled (tier 1)"]),
+             "delta_pct": 17.51, "shift_pct": None, "flags": ["width_change", "new_violation"], "severity": "bad"},
+            {"class": "SE_50_CP", "layer": "F.Cu", "status": "same", "target": t("single", 50.0, "coplanar"),
+             "base": sd("SE_50_CP", "F.Cu", ["/RF_IN"], 0.26, "cpwg", "coplanar_grounded", cp, 52.77, 50, cg=0.15,
+                        notes=["coplanar with a plane below: evaluated as grounded CPW"]),
+             "head": sd("SE_50_CP", "F.Cu", ["/RF_IN"], 0.26, "cpwg", "coplanar_grounded", cp, 52.77, 50, cg=0.15,
+                        notes=["coplanar with a plane below: evaluated as grounded CPW"]),
+             "delta_pct": 0.0, "shift_pct": None, "flags": [], "severity": "ok"},
+            {"class": "SE_50_SL", "layer": "In1.Cu", "status": "changed", "target": t("single", 50.0, "stripline"),
+             "base": sd("SE_50_SL", "In1.Cu", ["/CLK"], 0.15, "stripline", "stripline", sl_b, 49.6, 50),
+             "head": sd("SE_50_SL", "In1.Cu", ["/CLK"], 0.15, "stripline", "stripline", sl_h, 47.2, 50),
+             "delta_pct": -4.84, "shift_pct": -4.84, "flags": ["stackup_shift"], "severity": "warn"},
+        ],
     }
 
 
