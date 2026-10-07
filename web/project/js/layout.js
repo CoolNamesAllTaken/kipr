@@ -7,7 +7,7 @@ import { createChangeList, describeChange } from './changes.js';
 import { loadImage, rasterize, rasterScale, diffRasters, bitmapOf } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes, compareSliders, setCompareSliders } from './compare.js';
+import { comparePanes, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
 import { formatZoom, parseZoom, sameZoom, sliderParam, parseSlider, stepItem, layerNote } from './viewstate.js';
 import {
   layerList, sortLayers, defaultOn, docExtent, frameBox, faceLayers, gerberOf, svgOf, boardRect, gerberOrigin,
@@ -21,7 +21,7 @@ const VIEWS = [['top', 'Top'], ['bottom', 'Bottom'], ['layers', 'Layers']];
 const GPU_DIFF_COLORS = { removed: [0.88, 0.16, 0.16], added: [0.12, 0.69, 0.27], unchanged: [0.43, 0.43, 0.43] };
 const LAYER_ALPHA = { copper: 0.85, mask: 0.45, paste: 0.6, silk: 0.95, outline: 1, drill: 1, fab: 0.8, courtyard: 0.8, user: 0.7 };
 const layerVisible = new Map(); // persists across projects, like the library viewer's layer state
-let preferred = { mode: 'side', view: 'top' };
+let preferred = { view: 'top' }; // compare mode: preferredMode() (compare.js), shared with the schematic
 
 /** Which face a layer belongs to, for switching the realistic view when a change is selected. */
 export function faceOf(layerId) {
@@ -62,7 +62,7 @@ export function createLayoutView(project, container, ctx) {
   const sides = { base: project.status !== 'added', head: project.status !== 'removed' };
   const bothSides = sides.base && sides.head;
   const modes = bothSides ? MODES : [['single', sides.head ? 'Head (added)' : 'Base (removed)'], ['diff', 'Diff']];
-  let mode = pick(modes, params.mode, preferred.mode);
+  let mode = pick(modes, params.mode, preferredMode());
   let view = pick(VIEWS, params.view, preferred.view);
   for (const l of layers) if (!layerVisible.has(l.id)) layerVisible.set(l.id, defaultOn(l));
   let focus = layers.find((l) => l.id === ctx.route.item) || pickDiffLayer(layers, view);
@@ -79,7 +79,7 @@ export function createLayoutView(project, container, ctx) {
   const readout = el('span', { class: 'readout' });
   const zoomLbl = el('span', { class: 'readout zoom' });
   const measureOut = el('span', { class: 'readout measure' });
-  const modeBar = createModeBar(modes, mode, (m) => { preferred.mode = m; setMode(m); pushRoute(); });
+  const modeBar = createModeBar(modes, mode, (m) => { setMode(m); pushRoute(); });
   const viewBar = createModeBar(VIEWS, view, (v) => { setView(v); pushRoute(); }, 'Board view');
   const measureBtn = el('button', { class: 'btn', title: 'Measure distance (r): click two points', 'aria-pressed': 'false', onclick: () => toggleMeasure() }, 'Measure');
   const extra = el('div', { class: 'toolbar-extra' });
@@ -166,7 +166,7 @@ export function createLayoutView(project, container, ctx) {
   function viewParams() {
     const sl = compareSliders();
     const z = formatZoom(stage?.region());
-    const out = { z, sw: sliderParam(sl.swipe), op: sliderParam(sl.opacity) };
+    const out = { z, sw: sliderParam(sl.swipe, mode === 'swipe'), op: sliderParam(sl.opacity, mode === 'onion') };
     if (z) out.at = null; // zoomed somewhere else since: the region replaces a link's at=
     return out;
   }
@@ -355,6 +355,7 @@ export function createLayoutView(project, container, ctx) {
   function setMode(m) {
     const token = ++modeToken;
     mode = m;
+    if (m !== 'single') setPreferredMode(m); // the mode on show is the one the next view opens in
     modeBar.select(m);
     updateLayerNote();
     for (const c of modeCleanups.splice(0)) c();
@@ -490,8 +491,7 @@ export function createLayoutView(project, container, ctx) {
       if (e.key === 'v') { const i = VIEWS.findIndex(([v]) => v === view); setView(VIEWS[(i + 1) % VIEWS.length][0]); pushRoute(); return true; }
       if (e.key === 'm') {
         const i = modes.findIndex(([m]) => m === mode);
-        preferred.mode = modes[(i + 1) % modes.length][0];
-        setMode(preferred.mode); pushRoute(); return true;
+        setMode(modes[(i + 1) % modes.length][0]); pushRoute(); return true;
       }
       if (e.key === '[' || e.key === ']') {
         // in the order of the layer list (top of the stack first), wrapping around

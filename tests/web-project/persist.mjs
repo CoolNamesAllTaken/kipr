@@ -196,6 +196,14 @@ async function layout() {
 
 async function schematic() {
   // --- schematic --------------------------------------------------------------------------------------
+  // the compare mode and slider carry over from the layout tab to a first visit of the schematic tab
+  await page.goto('about:blank');
+  await page.goto(`${base}${P}/layout/F.Cu?view=top&mode=swipe&sw=0.3`);
+  await stable();
+  await page.keyboard.press('1');
+  await stable();
+  const sx = await snapshot();
+  check(sx.mode === 'swipe' && sx.slider === 0.3 && sx.sw === '0.3', `layout -> schematic tab: mode ${sx.mode}, slider ${sx.slider}, sw=${sx.sw}`);
   await page.goto('about:blank');
   await page.goto(`${base}${P}/schematic/root?mode=swipe`);
   await stable();

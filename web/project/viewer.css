@@ -164,7 +164,7 @@ h1 { font-size: 20px; margin: 4px 0 12px; }
 /* note on the kept compare mode vs the selected layer / sheet: floats over the stage, so showing or hiding
    it never resizes the stage (stepping through layers keeps the board exactly where it was) */
 .view-note { position: relative; height: 0; z-index: 5; }
-.view-note > .notice { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); width: max-content;
+.view-note > .notice { position: absolute; top: 38px; /* below the pane labels */ left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); width: max-content;
   margin: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); pointer-events: none; }
 @media (max-width: 760px) { .stage-wrap { height: 62vh; height: 62svh; } .stage-wrap.split { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
 .pane { position: relative; overflow: hidden; border-radius: 6px; cursor: grab; touch-action: none; user-select: none; border: 1px solid var(--border); }

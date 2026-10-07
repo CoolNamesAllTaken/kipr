@@ -4,8 +4,8 @@
 //
 // URL params (besides route.js's mode, c, view, q, ...):
 //   z=cx,cy,w    zoomed region: centre (KiCad mm) and visible width (mm) of the first pane; absent: fitted
-//   sw=0.3       swipe divider position (0..1); absent: 0.5
-//   op=0.7       onion skin head opacity (0..1); absent: 0.5
+//   sw=0.3       swipe divider position (0..1), in swipe mode; absent: as it is (the sliders are shared)
+//   op=0.7       onion skin head opacity (0..1), in onion mode; absent: as it is
 
 /** params with `patch` merged over them; null / undefined / '' values remove a key. */
 export function mergeParams(params, patch) {
@@ -37,16 +37,16 @@ export function sameZoom(a, b) {
   return Math.abs(a.cx - b.cx) <= tol && Math.abs(a.cy - b.cy) <= tol && Math.abs(a.w - b.w) <= tol;
 }
 
-/** A slider value (0..1) as a URL param: null at the 0.5 default. */
-export function sliderParam(v) {
-  if (!Number.isFinite(v) || Math.abs(v - 0.5) < 1e-9) return null;
+/** A slider value (0..1) as a URL param, or null when `on` is false (that slider is not on show). */
+export function sliderParam(v, on = true) {
+  if (!on || !Number.isFinite(v)) return null;
   return String(+Math.min(1, Math.max(0, v)).toFixed(3));
 }
 
-/** A slider param back to 0..1; absent / malformed: 0.5. */
+/** A slider param back to 0..1; absent / malformed: null (keep the current value). */
 export function parseSlider(v) {
   const n = typeof v === 'string' && v ? Number(v) : NaN;
-  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.5;
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
 }
 
 /** Two world boxes of the same size (sheets: keep the zoom when stepping between equal paper sizes). */

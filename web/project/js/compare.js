@@ -6,11 +6,18 @@ import { sliderLabel } from './widgets.js';
 // one onion opacity and swipe position for every view: kept across layers, sheets, tabs and projects
 const shared = { opacity: 0.5, swipe: 0.5 };
 
+// the compare mode last on show in the schematic or layout tab (not head / base only): new views open in it
+let preferred = 'side';
+export function preferredMode() { return preferred; }
+export function setPreferredMode(m) { preferred = m; }
+
 /** The current slider values {opacity, swipe} (0..1). */
 export function compareSliders() { return { ...shared }; }
 
-/** Set slider values (from a URL); returns true when one changed. */
-export function setCompareSliders({ opacity = shared.opacity, swipe = shared.swipe } = {}) {
+/** Set slider values (from a URL; null / undefined: keep); returns true when one changed. */
+export function setCompareSliders({ opacity, swipe } = {}) {
+  opacity ??= shared.opacity;
+  swipe ??= shared.swipe;
   const changed = opacity !== shared.opacity || swipe !== shared.swipe;
   shared.opacity = opacity;
   shared.swipe = swipe;

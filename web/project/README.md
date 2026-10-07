@@ -45,8 +45,8 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   layer that widens the frame keeps it too) stay. Sheets keep the zoom when the paper size matches, else
   they are fitted. When the kept mode does not suit the new layer or sheet (Diff on an unchanged layer, a
   sheet only in head), a short note floats over the stage instead of switching modes. The URL holds it
-  all (`z=cx,cy,w`: centre and visible width in mm, absent when fitted; `sw` / `op`: sliders, absent at
-  0.5), each new layer / sheet is a history entry (back / forward step through them), a reload or a copied
+  all (`z=cx,cy,w`: centre and visible width in mm, absent when fitted; `sw` / `op`: the slider on show;
+  the sliders and the compare mode are shared by the schematic and layout tabs), each new layer / sheet is a history entry (back / forward step through them), a reload or a copied
   link shows the same view, and tab, project and sidebar links return to each tab as it was left.
 - **Boxes** (`b`, `boxes=0` in the URL, remembered in localStorage): show / hide the boxes around
   changes in the schematic and layout views (every compare mode) and the 3D Markers. Hidden, a selected

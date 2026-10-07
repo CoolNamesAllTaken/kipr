@@ -5,14 +5,13 @@ import { createChangeList, describeChange } from './changes.js';
 import { rasterize, rasterScale, diffRasters, bitmapOf, displayScale } from './raster.js';
 import { createModeBar, legend, boxesToggle } from './widgets.js';
 import { boxesShown, toggleBoxes } from './boxes.js';
-import { comparePanes, compareSliders, setCompareSliders } from './compare.js';
+import { comparePanes, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
 import { formatZoom, parseZoom, sameZoom, sameSize, sliderParam, parseSlider, stepItem, sheetNote } from './viewstate.js';
 
 // Base raster resolution (px/mm): shared by the first display bitmaps and the ink diff, so a sheet is
 // drawn once on open. Real KiCad sheets are megabytes of SVG and drawing one is the expensive part.
 const SHEET_R = 6;
 const MODES = [['side', 'Side by side'], ['diff', 'Diff'], ['onion', 'Onion skin'], ['swipe', 'Swipe']];
-let preferredMode = 'side';
 
 export function sheetList(project) {
   return arr(obj(project.schematic)?.sheets).filter((s) => obj(s) && typeof s.id === 'string');
@@ -101,7 +100,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   if (!hasBase && !hasHead) {
     mainBox.append(el('div', { class: 'empty' }, 'No SVG export for this sheet.'));
   }
-  let mode = modes.some(([m]) => m === params.mode) ? params.mode : modes.some(([m]) => m === preferredMode) ? preferredMode : modes[0][0];
+  let mode = modes.some(([m]) => m === params.mode) ? params.mode : modes.some(([m]) => m === preferredMode()) ? preferredMode() : modes[0][0];
   let destroyed = false;
   let stage = null;
   let vbs = { base: null, head: null };
@@ -111,7 +110,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
 
   const readout = el('span', { class: 'readout' });
   const zoomLbl = el('span', { class: 'readout zoom' });
-  const modeBar = createModeBar(modes, mode, (m) => { preferredMode = m; setMode(m); writeRoute(); });
+  const modeBar = createModeBar(modes, mode, (m) => { setMode(m); writeRoute(); });
   const extra = el('div', { class: 'toolbar-extra' });
   const title = el('div', { class: 'view-title' },
     el('strong', {}, sheet.title || sheet.id), el('span', { class: 'muted' }, sheet.file || ''), badge('status', sheet.status));
@@ -130,7 +129,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   function viewParams() {
     const sl = compareSliders();
     const z = formatZoom(stage?.region());
-    const out = { mode, z, sw: sliderParam(sl.swipe), op: sliderParam(sl.opacity) };
+    const out = { mode, z, sw: sliderParam(sl.swipe, mode === 'swipe'), op: sliderParam(sl.opacity, mode === 'onion') };
     if (z) out.at = null;
     return out;
   }
@@ -205,6 +204,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
   function setMode(m) {
     const token = ++modeToken;
     mode = m;
+    if (m !== 'single') setPreferredMode(m); // the mode on show is the one the next view opens in
     modeBar.select(m);
     updateNote();
     for (const c of cleanups.splice(0)) c();
@@ -304,8 +304,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
       if (e.key === 'b') { toggleBoxes(); return true; }
       if (e.key === 'm') {
         const i = modes.findIndex(([m]) => m === mode);
-        preferredMode = modes[(i + 1) % modes.length][0];
-        setMode(preferredMode);
+        setMode(modes[(i + 1) % modes.length][0]);
         writeRoute();
         return true;
       }

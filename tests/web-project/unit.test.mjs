@@ -371,13 +371,15 @@ test('viewstate: zoom region in the URL round trips', () => {
   assert.ok(!sameZoom({ cx: 0, cy: 0, w: 10 }, { cx: 0.5, cy: 0, w: 10 }));
 });
 
-test('viewstate: sliders in the URL (default 0.5 omitted)', () => {
-  assert.equal(sliderParam(0.5), null);
+test('viewstate: sliders in the URL (only the one on show; absent keeps the current value)', () => {
+  assert.equal(sliderParam(0.5), '0.5');
+  assert.equal(sliderParam(0.3, false), null);
   assert.equal(sliderParam(0.3), '0.3');
   assert.equal(sliderParam(0.12345), '0.123');
   assert.equal(sliderParam(1.5), '1');
   assert.equal(parseSlider('0.3'), 0.3);
-  for (const bad of [undefined, '', 'x', '-0.1', '1.1']) assert.equal(parseSlider(bad), 0.5, String(bad));
+  assert.equal(parseSlider('0'), 0);
+  for (const bad of [undefined, '', 'x', '-0.1', '1.1']) assert.equal(parseSlider(bad), null, String(bad));
   assert.equal(parseSlider(sliderParam(0.7)), 0.7);
 });
 
