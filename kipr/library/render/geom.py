@@ -21,6 +21,14 @@ def rot(x: float, y: float, deg: float) -> tuple[float, float]:
     return x * c + y * s, -x * s + y * c
 
 
+def trapezoid_corners(w: float, h: float, dx: float, dy: float) -> list[tuple[float, float]]:
+    """A KiCad trapezoid pad's corners in pad-local coordinates (y down, unrotated), as pcbnew draws them
+    (PAD::GetEffectivePolygon): rect_delta dx > 0 makes the left side dx taller than the right one, dy > 0
+    makes the bottom side dy wider than the top one; negative values the other way round."""
+    return [(-w / 2 + dy / 2, -h / 2 - dx / 2), (w / 2 - dy / 2, -h / 2 + dx / 2),
+            (w / 2 + dy / 2, h / 2 - dx / 2), (-w / 2 - dy / 2, h / 2 + dx / 2)]
+
+
 def circle_from_3(p1, p2, p3):
     """Centre and radius of the circle through three points (None if collinear)."""
     (ax, ay), (bx, by), (cx, cy) = p1, p2, p3

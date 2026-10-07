@@ -38,6 +38,11 @@ def main():
                     "copper_bbox": [mm(bb.GetLeft()), mm(bb.GetTop()), mm(bb.GetRight()), mm(bb.GetBottom())],
                     "hole_center": [mm(p.GetPosition().x), mm(p.GetPosition().y)] if drill.x else None,
                 })
+                if p.GetShape(pcbnew.F_Cu) == pcbnew.PAD_SHAPE_TRAPEZOID:
+                    # bboxes can't tell rect_delta's sign apart: keep KiCad's own corners (GetEffectivePolygon)
+                    ring = p.GetEffectivePolygon(pcbnew.F_Cu).Outline(0)
+                    pads[-1]["copper_polygon"] = [[round(mm(ring.CPoint(i).x), 6), round(mm(ring.CPoint(i).y), 6)]
+                                                  for i in range(ring.PointCount())]
             models = [{"offset": [m.m_Offset.x, m.m_Offset.y, m.m_Offset.z],
                        "rotate": [m.m_Rotation.x, m.m_Rotation.y, m.m_Rotation.z],
                        "scale": [m.m_Scale.x, m.m_Scale.y, m.m_Scale.z]} for m in fp.Models()]

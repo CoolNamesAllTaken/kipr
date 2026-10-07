@@ -1,0 +1,73 @@
+(footprint "Trapezoid_Delta"
+	(version 20260206)
+	(generator "kipr-test")
+	(layer "F.Cu")
+	(descr "Trapezoid pads with rect_delta in x and y, both signs, rotated; golden from pcbnew GetEffectivePolygon")
+	(attr smd)
+	(pad "1" smd trapezoid
+		(at -6 -4 0)
+		(size 2.0 1.2)
+		(rect_delta 0.4 0)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "2" smd trapezoid
+		(at -2 -4 0)
+		(size 2.0 1.2)
+		(rect_delta -0.4 0)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "3" smd trapezoid
+		(at 2 -4 0)
+		(size 2.0 1.2)
+		(rect_delta 0 0.4)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "4" smd trapezoid
+		(at 6 -4 0)
+		(size 2.0 1.2)
+		(rect_delta 0 -0.4)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "5" smd trapezoid
+		(at -6 0 90)
+		(size 2.0 1.2)
+		(rect_delta 0.4 0)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "6" smd trapezoid
+		(at -2 0 30)
+		(size 2.0 1.2)
+		(rect_delta 0 0.3)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "7" smd trapezoid
+		(at 2 0 135)
+		(size 2.0 1.2)
+		(rect_delta -0.3 0)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "8" smd trapezoid
+		(at 6 0 270)
+		(size 1.6 2.0)
+		(rect_delta 0 -0.5)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+	)
+	(pad "9" thru_hole trapezoid
+		(at -2 4 60)
+		(size 2.2 1.6)
+		(rect_delta 0.5 0)
+		(drill 0.6
+			(offset 0.2 0.1)
+		)
+		(layers "*.Cu" "*.Mask")
+	)
+	(pad "10" thru_hole trapezoid
+		(at 2 4 -20)
+		(size 1.8 1.4)
+		(rect_delta 0 0.35)
+		(drill 0.5
+			(offset 0 0)
+		)
+		(layers "*.Cu" "*.Mask")
+	)
+)

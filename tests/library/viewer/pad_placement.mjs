@@ -20,6 +20,7 @@ for (const [name, { geom, models }] of Object.entries(JSON.parse(readFileSync(pr
         copper_center: padToPcb(pad, [(local[0] + local[2]) / 2, (local[1] + local[3]) / 2]),
         copper_bbox: bbox([outer, ...extra].flat().map((q) => padToPcb(pad, q))),
         hole_center: padDrill(pad) ? padHoleCenter(pad) : null,
+        copper_polygon: pad.shape === 'trapezoid' ? outer.map((q) => padToPcb(pad, q)) : undefined,
       };
     }),
     // board frame (y up): the model's own origin lands at the KiCad offset

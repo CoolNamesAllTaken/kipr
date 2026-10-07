@@ -86,7 +86,9 @@ function padOutlineAt0(pad, segments) {
   if (shape === 'oval') r = Math.min(w, h) / 2;
   else if (shape === 'roundrect') r = Math.min(w, h) * (pad.roundrect_rratio ?? 0.25);
   r = Math.min(r, w / 2, h / 2);
-  if (r <= 1e-6) {
+  if (shape === 'trapezoid') {
+    ring.push(...trapezoidCorners(w, h, ...(pad.rect_delta || [0, 0])));
+  } else if (r <= 1e-6) {
     ring.push([-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]);
   } else {
     const corners = [[w / 2 - r, -h / 2 + r, -90], [w / 2 - r, h / 2 - r, 0], [-w / 2 + r, h / 2 - r, 90], [-w / 2 + r, -h / 2 + r, 180]];
@@ -103,6 +105,15 @@ function padOutlineAt0(pad, segments) {
     if (Array.isArray(pts) && pts.length >= 3) extra.push(pts.map((q) => (Array.isArray(q) ? q : [q.x, q.y])));
   }
   return { outer: ring, extra };
+}
+
+/**
+ * A KiCad trapezoid pad's corners, pad-local (y down, unrotated), as pcbnew draws them: rect_delta dx > 0 makes
+ * the left side dx taller than the right one, dy > 0 makes the bottom side dy wider than the top one.
+ */
+export function trapezoidCorners(w, h, dx = 0, dy = 0) {
+  return [[-w / 2 + dy / 2, -h / 2 - dx / 2], [w / 2 - dy / 2, -h / 2 + dx / 2],
+    [w / 2 + dy / 2, h / 2 - dx / 2], [-w / 2 - dy / 2, h / 2 + dx / 2]];
 }
 
 /** Pad-local PCB point -> PCB point, honouring the pad's (at x y rot). KiCad rotates CCW on screen. */
