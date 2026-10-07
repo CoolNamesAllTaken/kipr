@@ -49,6 +49,18 @@ def load_review(path: Path, max_bytes: int = 50_000_000) -> dict:
     return doc
 
 
+def kind_note(p: dict) -> str:
+    """"▦ panel: 4× pic_programmer" / "board without a schematic" / "" (escaped)."""
+    if p.get("kind") == "board":
+        return "board without a schematic"
+    if p.get("kind") != "panel":
+        return ""
+    srcs = [s for s in lst(d(p.get("panel")).get("sources")) if isinstance(s, dict) and text(s.get("path"))]
+    what = ", ".join(f"{num(s.get('copies'))}× {md_inline(text(s.get('path')).rsplit('/', 1)[-1].removesuffix('.kicad_pcb'), 60)}"
+                     for s in srcs[:4])
+    return "▦ panel" + (f": {what}" if what else "")
+
+
 def status_of(p: dict) -> str:
     s = p.get("status")
     return s if s in STATUS_ICON else "modified"
@@ -245,7 +257,7 @@ def summary_table(doc: dict) -> str:
             f"{STATUS_ICON[st]} {st}",
             str(num(s.get("sheets_changed"))), str(num(s.get("layers_changed"))), " ".join(parts),
             str(num(s.get("nets_changed"))), checks[0], checks[1], grid_cell(p), impedance_cell(p),
-            f"⚠️ {errors} export/parse problem(s)" if errors else ""]) + " |")
+            "<br>".join(x for x in (kind_note(p), f"⚠️ {errors} export/parse problem(s)" if errors else "") if x)]) + " |")
     return "\n".join(rows)
 
 
@@ -284,7 +296,7 @@ def change_lines(p: dict, limit: int = 40) -> list[str]:
 
 def _change(c: dict) -> str:
     who = text(c.get("ref")) or text(c.get("net"))
-    head = " ".join(x for x in (md_inline(c.get("kind"), 20), md_inline(c.get("what"), 30)) if x)
+    head = " ".join(x for x in (md_inline(c.get("kind"), 20), md_inline(c.get("feature"), 20), md_inline(c.get("what"), 30)) if x)
     if who:
         head += " " + code(who, 60)
     det = md_inline(text(c.get("detail")), 160)

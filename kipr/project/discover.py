@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 
 from kipr.common.git import Git
 
-# Same noise filter as the old kiri workflow (.github/workflows/kicad-diff.yml in internal).
-NOISE = re.compile(r"(^|/)\.history/|-backups/|(^|/)panelized/")
+# Editor history, backups and autosaves. (The old kiri workflow also skipped `panelized/`; panels are
+# reviewed now, see `find_projects`.)
+NOISE = re.compile(r"(^|/)\.history/|-backups/|(^|/)_autosave-|(^|/)~[^/]*\.lck$")
 KICAD_EXT = (".kicad_sch", ".kicad_pcb", ".kicad_pro", ".kicad_sym", ".kicad_mod", ".kicad_dru",
              ".kicad_wks")
 TABLES = ("sym-lib-table", "fp-lib-table", "design-block-lib-table")
@@ -21,13 +22,20 @@ URI_RE = re.compile(r'\(uri\s+"([^"]+)"')
 
 @dataclass
 class Project:
-    path: str  # repo-relative dir of the .kicad_pro ("" for the repo root)
-    name: str  # .kicad_pro stem
+    """A review unit: a KiCad project (`<name>.kicad_pro`), or a board without one (`<name>.kicad_pcb`
+    with no project of the same stem, e.g. a panel next to the board it panelizes)."""
+    path: str  # repo-relative dir ("" for the repo root)
+    name: str  # file stem
     status: str  # added | removed | modified
-    base_pro: str | None
+    base_pro: str | None  # the unit's anchor file per side: the .kicad_pro, else the .kicad_pcb
     head_pro: str | None
     reasons: list[str] = field(default_factory=list)
     deps: dict[str, set[str]] = field(default_factory=dict)  # side -> repo paths outside the dir
+
+    @property
+    def board_only(self) -> bool:
+        """No .kicad_pro on either side: the unit is a lone board."""
+        return not any(a and a.endswith(".kicad_pro") for a in (self.base_pro, self.head_pro))
 
 
 def is_noise(path: str) -> bool:
@@ -74,6 +82,27 @@ def _dir(p: str) -> str:
     return posixpath.dirname(p)
 
 
+def _stem(p: str) -> str:
+    return posixpath.splitext(posixpath.basename(p))[0]
+
+
+# files of a unit `<stem>` in its own directory (the rest of the directory belongs to every unit there)
+UNIT_EXT = (".kicad_pro", ".kicad_pcb", ".kicad_sch", ".kicad_dru", ".kicad_prl")
+
+
+def units(tree) -> dict[tuple[str, str], str]:
+    """{(dir, stem): anchor} for one revision: every .kicad_pro, and every .kicad_pcb that has no
+    .kicad_pro of the same stem next to it."""
+    out = {}
+    for p in tree:
+        if p.endswith(".kicad_pro") and not is_noise(p):
+            out[(_dir(p), _stem(p))] = p
+    for p in tree:
+        if p.endswith(".kicad_pcb") and not is_noise(p) and (_dir(p), _stem(p)) not in out:
+            out[(_dir(p), _stem(p))] = p
+    return out
+
+
 def find_projects(git: Git, base: str, head: str, patterns: list[str] | None = None) -> list[Project]:
     changes = git.changed_files(base, head)
     changed = set()
@@ -83,26 +112,34 @@ def find_projects(git: Git, base: str, head: str, patterns: list[str] | None = N
             changed.add(old)
     changed = {p for p in changed if not is_noise(p)}
     tree_b, tree_h = git.ls_tree(base), git.ls_tree(head)
-    pros = {}
+    found: dict = {}
     for side, tree in (("base", tree_b), ("head", tree_h)):
-        for p in tree:
-            if p.endswith(".kicad_pro") and not is_noise(p):
-                pros.setdefault(_dir(p), {})[side] = p
+        for key, anchor in units(tree).items():
+            found.setdefault(key, {})[side] = anchor
+    stems_in = {}
+    for d, s in found:
+        stems_in.setdefault(d, set()).add(s)
     out = []
-    for pdir, sides in sorted(pros.items()):
+    for (pdir, name), sides in sorted(found.items()):
         if patterns and not any(fnmatch.fnmatch(pdir, pat) or fnmatch.fnmatch(posixpath.basename(pdir), pat)
+                                or fnmatch.fnmatch(posixpath.join(pdir, name), pat) or fnmatch.fnmatch(name, pat)
                                 for pat in patterns):
             continue
-        name = posixpath.basename((sides.get("head") or sides.get("base")))[: -len(".kicad_pro")]
+        board_only = not any(a.endswith(".kicad_pro") for a in sides.values())
+        others = stems_in[pdir] - {name}
         prefix = pdir + "/" if pdir else ""
         reasons = []
         for c in sorted(changed):
             rel = c[len(prefix):] if c.startswith(prefix) else None
             if rel is None:
                 continue
-            if "/" not in rel and (rel.endswith(KICAD_EXT) or rel in TABLES):
-                reasons.append(c)
-            elif rel.endswith((".kicad_sym", ".kicad_mod", ".kicad_sch") + MODEL_EXT):
+            if "/" not in rel:
+                own = rel.endswith(UNIT_EXT) and _stem(rel) == name
+                if rel.endswith(UNIT_EXT) and _stem(rel) in others:
+                    continue  # another unit's board or project in the same directory
+                if own or (not board_only and (rel.endswith(KICAD_EXT) or rel in TABLES)):
+                    reasons.append(c)
+            elif not board_only and rel.endswith((".kicad_sym", ".kicad_mod", ".kicad_sch") + MODEL_EXT):
                 reasons.append(c)  # project-local libraries / sub-sheets in subdirectories
         proj = Project(path=pdir, name=name,
                        status="added" if "base" not in sides else "removed" if "head" not in sides else "modified",
@@ -113,7 +150,11 @@ def find_projects(git: Git, base: str, head: str, patterns: list[str] | None = N
         for side, sha, tree in (("base", base, tree_b), ("head", head, tree_h)):
             if side not in sides:
                 continue
-            files = [p for p in tree if p.startswith(prefix) and "/" not in p[len(prefix):]]
+            if board_only:
+                files = [sides[side]]
+            else:
+                files = [p for p in tree if p.startswith(prefix) and "/" not in p[len(prefix):]
+                         and not (p.endswith(UNIT_EXT) and _stem(p) in others)]
             proj.deps[side] = project_deps(git, sha, pdir, files) if outside else set()
             for d in proj.deps[side]:
                 for c in outside:
@@ -127,19 +168,27 @@ def find_projects(git: Git, base: str, head: str, patterns: list[str] | None = N
 
 def checkout_paths(git: Git, sha: str, proj: Project, side: str) -> list[str]:
     """Repo paths to extract for one side: the project dir (non-recursive files + any subdirs
-    with KiCad content) and its outside dependencies that exist at `sha`."""
+    with KiCad content, without other units' boards and projects; a lone board: its own files) and
+    its outside dependencies that exist at `sha`."""
     prefix = proj.path + "/" if proj.path else ""
     tree = git.ls_tree(sha, [proj.path] if proj.path else None)
-    want = []
+    others = {s for d, s in units(tree) if d == proj.path} - {proj.name}
+    anchor = proj.base_pro if side == "base" else proj.head_pro
+    lone = bool(anchor) and anchor.endswith(".kicad_pcb")
+    want, top = [], []
     for p in tree:
         rel = p[len(prefix):]
-        if is_noise(p):
+        if is_noise(p) or ("/" not in rel and rel.endswith(UNIT_EXT) and _stem(rel) in others):
             continue
-        if "/" not in rel or rel.endswith(KICAD_EXT + MODEL_EXT) or ".pretty/" in rel or \
+        if "/" not in rel:
+            top.append(p)
+        if lone:
+            if "/" not in rel and (_stem(rel) == proj.name or rel in TABLES):
+                want.append(p)
+        elif "/" not in rel or rel.endswith(KICAD_EXT + MODEL_EXT) or ".pretty/" in rel or \
                 posixpath.basename(rel) in TABLES:
             want.append(p)
-    deps = proj.deps.get(side) or project_deps(git, sha, proj.path,
-                                               [p for p in tree if "/" not in p[len(prefix):]])
+    deps = proj.deps.get(side) or project_deps(git, sha, proj.path, [anchor] if lone else top)
     if deps:
         existing = git.ls_tree(sha, sorted(deps))
         want.extend(existing)
