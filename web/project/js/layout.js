@@ -236,11 +236,11 @@ export function createLayoutView(project, container, ctx) {
       sw.style.background = cssColor(layerColor(l));
       ul.append(el('li', { class: 'layer-row', dataset: { layer: l.id } },
         cb, sw,
-        el('button', { class: 'layer-name', title: 'Show this layer, base vs head, in the current compare mode ([ / ] step); Top / Bottom / Layers go back to the board', onclick: () => selectLayer(l) }, l.id),
+        el('button', { class: 'layer-name', title: 'Show this layer, base vs head, in the current compare mode (↑ / ↓ or [ / ] step); Top / Bottom / Layers go back to the board', onclick: () => selectLayer(l) }, l.id),
         badge('status', l.status)));
     }
     markFocus();
-    layerPanel.append(ul, el('p', { class: 'hint' }, 'Checkboxes: layers of the Layers view. Click a name (or [ / ]) to compare that one layer in any mode; Top / Bottom / Layers go back to the board.'));
+    layerPanel.append(ul, el('p', { class: 'hint' }, 'Checkboxes: layers of the Layers view. Click a name (or ↑ / ↓, [ / ]) to compare that one layer in any mode; Top / Bottom / Layers go back to the board.'));
   }
 
   // --- world box
@@ -488,6 +488,14 @@ export function createLayoutView(project, container, ctx) {
       if (e.key === '[' || e.key === ']') {
         // in the order of the layer list (top of the stack first), wrapping around
         selectLayer(stepItem([...layers].reverse(), focus, e.key === ']' ? 1 : -1, true));
+        return true;
+      }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) {
+        // up / down the layer list, stopping at the ends; with no row highlighted, from the top / bottom
+        const cur = solo || mode === 'diff' ? focus : null;
+        const l = stepItem([...layers].reverse(), cur, e.key === 'ArrowDown' ? 1 : -1);
+        if (l !== focus || !solo) selectLayer(l);
+        layerPanel.querySelector('.layer-row.focus')?.scrollIntoView({ block: 'nearest' });
         return true;
       }
       if (e.key === 'Escape') { stage?.highlight(null); if (stage?.measuring) toggleMeasure(); return true; }

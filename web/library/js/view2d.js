@@ -28,6 +28,8 @@ export function sortLayers(names) {
 
 // Layer visibility persists across items (a reviewer who hides F.Fab usually wants it hidden everywhere).
 const layerState = new Map();
+// ↑ / ↓ solo cursor: that one layer alone, the ticks kept for when it is cleared (Esc, a tick, a preset)
+let soloLayer = null;
 let preferredMode = null;
 
 export function createView2D(item, container) {
@@ -39,6 +41,8 @@ export function createView2D(item, container) {
     ...Object.keys(item.renders?.base?.layers || {}),
   ]));
   for (const n of layerNames) if (!layerState.has(n)) layerState.set(n, !DEFAULT_OFF.test(n));
+  const solo = () => (isFp && mode !== 'diff' && layerNames.includes(soloLayer) ? soloLayer : null);
+  const shown = (n) => (solo() ? n === solo() : layerState.get(n));
 
   const modes = [];
   if (hasHead && hasBase) modes.push(['side', 'Side by side'], ['overlay', 'Overlay'], ['blink', 'Blink'], ['swipe', 'Swipe']);
@@ -85,17 +89,18 @@ export function createView2D(item, container) {
     clear(layerBar);
     if (!isFp || !layerNames.length || mode === 'diff') { layerBar.hidden = true; return; }
     layerBar.hidden = false;
+    layerBar.classList.toggle('soloing', !!solo());
     const quick = (label, pred) => el('button', {
-      class: 'btn small', onclick: () => { for (const n of layerNames) layerState.set(n, pred(n)); renderLayerBar(); refreshLayers(); },
+      class: 'btn small', onclick: () => { soloLayer = null; for (const n of layerNames) layerState.set(n, pred(n)); renderLayerBar(); refreshLayers(); },
     }, label);
-    layerBar.append(el('span', { class: 'layers-title' }, 'Layers'),
+    layerBar.append(el('span', { class: 'layers-title', title: '↑ / ↓: one layer alone, up / down the stack; Esc: back to the ticked layers' }, 'Layers'),
       quick('All', () => true), quick('Front', (n) => !n.startsWith('B.')), quick('Back', (n) => !n.startsWith('F.')),
       quick('Copper', (n) => /\.Cu$|^Drill$|^Edge\.Cuts$/.test(n)));
     for (const n of layerNames) {
       const id = `ly-${n.replace(/[^A-Za-z0-9]/g, '_')}`;
       const cb = el('input', { type: 'checkbox', id, checked: layerState.get(n) || null });
-      cb.addEventListener('change', () => { layerState.set(n, cb.checked); refreshLayers(); });
-      layerBar.append(el('label', { class: 'layer-toggle', for: id, dataset: { layer: n } }, cb, el('span', { class: 'swatch', dataset: { layer: n } }), n));
+      cb.addEventListener('change', () => { layerState.set(n, cb.checked); if (solo()) { soloLayer = null; renderLayerBar(); } refreshLayers(); });
+      layerBar.append(el('label', { class: `layer-toggle${n === solo() ? ' solo' : ''}`, for: id, dataset: { layer: n } }, cb, el('span', { class: 'swatch', dataset: { layer: n } }), n));
     }
   }
 
@@ -109,7 +114,7 @@ export function createView2D(item, container) {
     if (isFp && layers) {
       for (const n of sortLayers(Object.keys(layers))) {
         const img = el('img', { src: layers[n], alt: `${side} ${n}`, draggable: 'false', dataset: { layer: n } });
-        img.hidden = !layerState.get(n);
+        img.hidden = !shown(n);
         stack.append(img);
       }
     } else {
@@ -120,7 +125,17 @@ export function createView2D(item, container) {
   }
 
   function refreshLayers() {
-    for (const img of stageWrap.querySelectorAll('img[data-layer]')) img.hidden = !layerState.get(img.dataset.layer);
+    for (const img of stageWrap.querySelectorAll('img[data-layer]')) img.hidden = !shown(img.dataset.layer);
+  }
+
+  /** ↑ / ↓: move the solo cursor up (toward the front) / down the stack, stopping at the ends. */
+  function stepSolo(up) {
+    const list = [...layerNames].reverse(); // front first, like the project viewer's layer list
+    const cur = solo();
+    const i = list.indexOf(cur);
+    soloLayer = cur ? list[Math.min(Math.max(i + (up ? -1 : 1), 0), list.length - 1)] : list[up ? list.length - 1 : 0];
+    renderLayerBar();
+    refreshLayers();
   }
 
   function pane(label, ...stacks) {
@@ -314,7 +329,15 @@ export function createView2D(item, container) {
   }
 
   const onKey = (e) => {
-    if (e.target.closest('input, textarea, select')) return;
+    const field = e.target.closest('input, textarea, select');
+    if (field && !(field.type === 'checkbox' && /^(ArrowUp|ArrowDown|Escape)$/.test(e.key))) return;
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !layerBar.hidden && !(e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) {
+      e.preventDefault();
+      stepSolo(e.key === 'ArrowUp');
+      return;
+    }
+    if (e.key === 'Escape' && solo()) { soloLayer = null; renderLayerBar(); refreshLayers(); return; }
+    if (field) return;
     if (e.key === 'f') fit();
     if (e.key === ' ' && mode === 'blink') { e.preventDefault(); blinkShowHead = !blinkShowHead; setMode('blink'); }
     const idx = modes.findIndex(([mm]) => mm === mode);
