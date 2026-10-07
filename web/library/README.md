@@ -59,6 +59,9 @@ item has a STEP model, occt-import-js's WASM once (`offline/occt-import-js.js`, 
   - Pan (drag) and zoom (wheel, pinch) are synced across panes. `f` or double-click fits the view; `m` cycles modes.
   - Footprints get per-layer toggles built by stacking the per-layer SVGs (All / Front / Back / Copper presets).
     Mask/paste layers start hidden.
+    `↑` / `↓` show one layer alone (solo), moving up (toward the front) / down the stack and stopping at
+    the ends; the ticks stay as they were and come back with `Esc`, a tick or a preset. The solo layer is
+    kept across footprints, like the ticks.
   - The cursor readout is in mm (footprint coordinates, y down). It uses `view.viewbox` if present, otherwise the SVG `viewBox`.
 - **3D view (footprints):** the part on its footprint, built in the browser (CONTRACT.md Addendum 2) with
   [boarddd](https://github.com/CoolNamesAllTaken/boarddd) (`vendor/boarddd`: footprint, models, scene).

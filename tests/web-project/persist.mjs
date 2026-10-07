@@ -11,6 +11,8 @@
 // world but keeps the region on show. Back / forward return to the previous layer with that state, a
 // reload restores it, and a tab switch comes back to it. Schematic: the same for sheets (all A4 in the
 // mock, so the zoom stays too), including a sheet that is only in head (mode kept, note shown).
+// Arrows: ↑ / ↓ step the layer list front to back (no selection: from the top row), stop at the ends,
+// work from a layer checkbox, are ignored in the filter input and with Shift, and do not scroll the page.
 import fs from 'node:fs';
 import path from 'node:path';
 import { serve, launch, settle, args } from './harness.mjs';
@@ -288,8 +290,74 @@ async function schematic() {
   check(/identical/.test(s1.note), `schematic diff on unchanged sheet: no note (${s1.note})`);
 }
 
+async function arrows() {
+  // --- ↑ / ↓: up / down the layer list, stopping at the ends; the selection, render and URL follow -------
+  await page.goto(`${base}${P}/layout?view=top&mode=side`);
+  await stable();
+  // window listeners run after the viewer's (document) one: did it prevent the default (scrolling)?
+  const probe = () => page.evaluate(() => {
+    window.__prevented = null;
+    if (!window.__probe) window.addEventListener('keydown', (e) => { if (e.key.startsWith('Arrow')) window.__prevented = e.defaultPrevented; });
+    window.__probe = true;
+  });
+  await probe();
+  const order = await page.locator('.layer-name').allTextContents();
+  const scrolled = () => page.evaluate(() => (document.querySelector('#main')?.scrollTop || 0) + scrollY);
+  const s0 = await snapshot();
+  check(s0.selected === null && s0.item === '', `arrows setup: ${JSON.stringify(s0)}`);
+  let px = await pixels();
+  const press = async (key, want, tag = key) => {
+    await page.keyboard.press(key);
+    await stable();
+    const s = await snapshot();
+    check(s.item === want && s.selected === want, `arrows ${tag}: URL item ${s.item}, selected ${s.selected}, expected ${want}`);
+    check(s.mode === 'side' && s.view === null, `arrows ${tag}: mode ${s.mode}, view ${s.view}`);
+    return s;
+  };
+  await press('ArrowDown', order[0], 'first ArrowDown (nothing selected: the top row)');
+  check(await page.evaluate(() => window.__prevented) === true, 'arrows: ArrowDown not prevented (the page scrolls)');
+  check(await scrolled() === 0, 'arrows: the page scrolled');
+  px = await redrawn('arrows ArrowDown', px, order[0]);
+  await press('ArrowDown', order[1]);
+  await press('ArrowDown', order[2]);
+  px = await redrawn('arrows ArrowDown x2', px, order[2]);
+  await press('ArrowUp', order[1]);
+  await press('ArrowUp', order[0]);
+  await press('ArrowUp', order[0], 'ArrowUp at the top (no wrap)');
+  await page.goBack();
+  await stable();
+  check((await snapshot()).item === order[1], 'arrows: back does not return to the previous layer');
+  await page.goForward();
+  await stable();
+  await clickLayer(order.at(-1));
+  await stable();
+  await press('ArrowDown', order.at(-1), 'ArrowDown at the bottom (no wrap)');
+  await press('ArrowUp', order.at(-2));
+  await press('Shift+ArrowUp', order.at(-2), 'Shift+ArrowUp (ignored)');
+  // from a layer checkbox (focus stays on it after a tick) the arrows still step
+  await page.locator('.layer-row input[type=checkbox]').nth(order.length - 1).click();
+  await press('ArrowUp', order.at(-3), 'ArrowUp from a checkbox');
+  // typing in the filter: ignored, not prevented
+  await page.locator('#sidebar input').focus();
+  await page.keyboard.press('ArrowDown');
+  await stable();
+  check((await snapshot()).item === order.at(-3), 'arrows: ArrowDown in the filter input changed the layer');
+  check(await page.evaluate(() => window.__prevented) === false, 'arrows: ArrowDown in the filter input was prevented');
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press('?');
+  check(/↑ \/ ↓/.test(await page.locator('#help').textContent()), 'arrows: not in the ? help');
+  await shot('layout-arrows-help');
+  await page.keyboard.press('Escape');
+  // the schematic has no layer list: arrows are left to the page
+  await page.goto(`${base}${P}/schematic`);
+  await stable();
+  await probe();
+  await page.keyboard.press('ArrowDown');
+  check(await page.evaluate(() => window.__prevented) === false, 'arrows: ArrowDown prevented in the schematic');
+}
+
 // a broken step stops its section; what failed before it is still reported
-for (const run of [layout, schematic]) {
+for (const run of [layout, schematic, arrows]) {
   try { await run(); } catch (e) { problems.push(`${run.name}: stopped: ${e.message.split('\n')[0]}`); }
 }
 await browser.close();

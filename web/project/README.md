@@ -39,7 +39,8 @@ python3 OUT/serve.py                          # 127.0.0.1, random port, opens th
   ticked in Layers, or diffed, widen it to their `extent_mm` (notes often sit beside the board), and
   Fit fits that frame. The layer list reads top to bottom (F.*, In1.Cu, In2.Cu, …, B.*); paint order is
   its reverse. Without WebGL2, or from file://, it shows the per-layer SVG exports instead (with a pixel diff).
-- **Selected layer** (click a layer name, or `[` / `]`; `…/layout/<layer>` in the URL): every compare mode
+- **Selected layer** (click a layer name, `↑` / `↓` up / down the list stopping at the ends, or `[` / `]`
+  wrapping; `…/layout/<layer>` in the URL): every compare mode
   shows that one layer, base vs head (side by side, onion, swipe, head / base only; Diff its diff), in its
   KiCad colour on a dark ground, the same per-layer gerber render as Diff, without the realistic face.
   Top / Bottom / Layers clear the selection and show that board view again (no layer in the URL);
