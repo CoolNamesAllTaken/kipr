@@ -89,8 +89,8 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
               "nets_changed": 4,
               "erc": {"new": 0, "fixed": 1}, "drc": {"new": 2, "fixed": 0},       // null when the check could not run
               "grid": {"count": 1, "points": 23},    // checks.grid count/points; null when off or no schematic
-              "impedance": {"rows": 3, "violations": 1, "new_violations": 1,   // checks.impedance.count; null without a board
-                            "stackup_shifts": 0, "width_changes": 1},
+              "impedance": {"rows": 3, "violations": 1, "length_out_mm": 2.8,   // checks.impedance.count + solver; null without a board
+                            "new_violations": 1, "stackup_shifts": 0, "width_changes": 1, "solver": "field"},
               "fonts_missing": 1},                   // len(fonts.missing)
   "schematic": Schematic | null,
   "pcb": Pcb | null,
@@ -430,11 +430,18 @@ its most telling item (label, bus entry, bus, wire, junction, no-connect).
 
 ### Impedance
 
-`checks.impedance`: a **closed-form estimate** of the impedance of every net class that has an impedance target,
-on every copper layer its tracks use, on base and head. It is a review aid: it never fails the run, and the
-numbers are boarddd's quasi-static closed-form models (`boarddd.impedance` tier 1: within about 2 % of a field
-solver inside their validity ranges; fab tolerances are ±10 % and the stackup data usually matters more).
-`null` when neither side has a board (or boarddd could not be imported; see `errors`).
+`checks.impedance`: the impedance of every net class that has an impedance target, on every copper layer its
+tracks use, on base and head, evaluated per track width and judged by the controlled length out of tolerance. It is
+a review aid: it never fails the run. `null` when neither side has a board (or boarddd could not be imported; see
+`errors`).
+
+**Solver** (`solver`): `field` is boarddd's tier-2 2D quasi-static field solver (`boarddd.impedance.fieldsolver`,
+the `[field]` extra: numpy and scipy) on the real cross-section: every layer's εr, the solder mask on any outer
+structure (single and differential, CPWG too), differential coplanar included. Each number carries the solver's
+error estimate (`error_pct`, from its grid refinement). `closedform` is boarddd's tier-1 models (within about 2 % of
+a field solver inside their validity ranges; inputs outside them are listed in `validity`). `auto` (the default)
+uses the field solver when it is installed, else falls back to closed form and says why in `solver_note`;
+`KIPR_IMPEDANCE_SOLVER=closedform` (the workflow's `impedance-solver` input) forces closed form.
 
 Inputs, per side, from the committed files:
 
@@ -444,25 +451,45 @@ Inputs, per side, from the committed files:
   Nets belong to their effective class (explicit assignment or pattern).
 - **Stackup**: the board's `(setup (stackup))` (thickness, εr; mask thickness and εr). Missing values take
   KiCad's defaults (εr 4.5, copper 35 µm, mask 10 µm / εr 3.3), noted in `notes`.
-- **Geometry**: the class's tracks (segments and arcs) per layer. `width` is the width with the longest total
-  length there (`widths` lists all). For a differential class, `gap` is the edge-to-edge distance between the
-  pair's parallel overlapping segments (longest coupled length wins; `gaps` lists all), else the class's
-  `diff_pair_gap`. For a coplanar class, `coplanar_gap` is max(class clearance, clearance of the other-net copper
-  zones beside the track on that layer).
+- **Geometry**: the class's tracks (segments and arcs, zero-length ones dropped) per layer, grouped into
+  `segments` by width and, for a differential class, by `gap`, the edge-to-edge distance to the pair's other net's
+  nearest parallel overlapping segment (each P-side segment's coupled length counts; else the class's
+  `diff_pair_gap`, noted). For a coplanar class, `coplanar_gap` is max(class clearance, clearance of the other-net
+  copper zones beside the track on that layer). Left out of the evaluation and listed in `excluded` with a reason:
+  - `covered`: a segment lying inside a wider segment of the same net (the copper is the wider one);
+  - `launch`: a *run* (connected segments of one net and width) whose width differs from the class's main width
+    (the longest-routed one over all its layers, covered tracks aside), at most `rules.launch_max_mm` (3 mm) long,
+    with an end on a pad of its net on that layer (a connector/castellation launch or a neck-down into a pad);
+  - `breakout`: a pair section whose gap is more than 2× the class's main gap (the longest-coupled one over all
+    its layers) and at most 3 mm long: the pair fanning out to its pads;
+  - `uncoupled`: pair length with no parallel segment of the other net beside it;
+  - `short`: a run shorter than `rules.min_run_mm` (0.5 mm).
+  Everything else is controlled length: a neck-down that does not end on a pad, or a long wide stretch, is
+  evaluated at its own geometry.
 - **Structure**: outer layers are microstrip (coplanar: grounded CPW when a copper zone of another net is
-  beside the track, else microstrip), inner layers stripline; when that differs from the class's structure the
-  row says so in `notes`. Differential coplanar has no closed-form model: it is evaluated as edge-coupled
-  microstrip (an upper bound). Mask is modelled for single-ended microstrip only.
+  beside the track, else microstrip), inner layers stripline (with the field solver, a coplanar class with a zone
+  beside it on an inner layer is embedded CPWG); when that differs from the class's structure the row says so in
+  `notes`. Differential coplanar: with the field solver, solved as such (`model` null: tier 1 has none); in closed
+  form it is evaluated as edge-coupled microstrip (an upper bound), noted.
+- **Verdict**: each segment group is within tolerance or not; `length_out_mm` is the controlled length (any
+  width) out of tolerance, and the side is `within` when that is 0. `width`, `gap`, `Z`, `deviation_pct`, `model`
+  and `params` are the longest group's (what the tables show); `worst_deviation_pct` is the largest |deviation| of
+  any group. A side with no controlled length (only launches/stubs) has `Z`/`within` null and a note.
 
 ```jsonc
-{"method": "closed-form estimate (boarddd.impedance tier 1, quasi-static)",
- "boarddd": "0.3.0",                 // boarddd version used
+{"method": "field solver (boarddd.impedance tier 2, 2D quasi-static)",   // or "closed-form estimate (boarddd.impedance tier 1, quasi-static)"
+ "solver": "field",                  // field | closedform
+ "solver_note": null,                // why closed form was used (fallback or requested); null with the field solver
+ "boarddd": "0.4.0",                 // boarddd version used
  "tolerance_default_pct": 10.0,
+ "rules": {"min_run_mm": 0.5, "launch_max_mm": 3.0},
+ "field_solves": 7,                  // distinct cross-sections solved (cached); 0 in closed form
  "classes": ["DP_90_MS", "SE_50_CP"],   // classes with a target on either side
  "stackup_changes": [{"layer": "dielectric 1", "field": "thickness", "base": 1.51, "head": 1.2}],  // field: thickness | epsilon_r | layer (added/removed: base/head true/false)
  "count": {"rows": 3,                // head rows
-           "violations": 1,          // head rows out of tolerance
-           "new_violations": 1,      // ... that were not out of tolerance on base (or are new)
+           "violations": 1,          // head rows with controlled length out of tolerance
+           "length_out_mm": 2.8,     // their total length out of tolerance
+           "new_violations": 1,      // ... rows that were not out of tolerance on base (or are new)
            "stackup_shifts": 0, "width_changes": 1},
  "rows": [ImpedanceRow, …]}          // sorted by class, layer
 ```
@@ -485,18 +512,28 @@ Inputs, per side, from the committed files:
 
 ```jsonc
 {"class": "SE_50_CP", "layer": "F.Cu", "nets": ["/RF/ANT"],
- "width": 0.26, "widths": [{"width": 0.26, "length_mm": 34.9}],
- "length_mm": 34.9,
- "gap": null, "gaps": [{"gap": 0.15, "length_mm": 99.8}],   // differential only
+ "width": 0.26,                      // the longest controlled group's width (and gap)
+ "widths": [{"width": 0.26, "length_mm": 34.9}, {"width": 0.8, "length_mm": 4.8}],   // every routed width, excluded ones too
+ "routed_mm": 41.5,                  // all tracks of the class on this layer
+ "length_mm": 34.9,                  // controlled length (what was evaluated)
+ "gap": null, "gaps": [{"gap": 0.15, "length_mm": 99.8}],   // differential only (gaps: every coupled gap)
  "coplanar_gap": 0.15,               // coplanar only
  "structure": "coplanar_grounded",   // microstrip | stripline | coplanar_grounded (what was evaluated)
- "model": "cpwg",                    // boarddd.impedance model id
- "params": {"w": 0.26, "t": 0.035, "h": 0.2104, "er": 4.4, "gap": 0.15},   // the model's inputs, mm
- "Z": 53.42,                         // Ω: Z0, or Zdiff for differential targets
+ "solver": "field",                  // field | closedform
+ "model": "cpwg",                    // boarddd.impedance tier-1 model id (null: no closed-form model, field only)
+ "params": {"w": 0.26, "t": 0.035, "h": 0.2104, "er": 4.4, "c": 0.015, "erc": 3.8, "gap": 0.15},   // the inputs, mm
+ "Z": 51.01,                         // Ω: Z0, or Zdiff for differential targets (longest group)
  "Zcommon": null,                    // differential: Zeven / 2
- "deviation_pct": 6.84,              // (Z - target) / target
- "within": true,                     // |deviation| <= tolerance
- "validity": ["w/h = 0.099 is outside 0.25..4 (boarddd mask model)"],   // inputs outside the model's validity range
+ "Z_closedform": 51.17,              // the tier-1 value at the same geometry (null without a model)
+ "error_pct": 0.43,                  // field solver error estimate, the largest over the groups; null in closed form
+ "deviation_pct": 2.03,              // (Z - target) / target, longest group
+ "worst_deviation_pct": 2.03,        // largest |deviation| of any group (signed)
+ "length_out_mm": 0,                 // controlled length out of tolerance
+ "within": true,                     // length_out_mm == 0 (null: nothing controlled)
+ "segments": [{"width": 0.26, "gap": null, "length_mm": 34.9, "Z": 51.01, "Zcommon": null, "deviation_pct": 2.03,
+               "within": true, "error_pct": 0.43, "error": null}],   // one per (width, gap), longest first
+ "excluded": [{"width": 0.8, "reason": "launch", "length_mm": 4.76}],   // covered | launch | breakout | uncoupled | short
+ "validity": [],                     // closed form: inputs outside the model's validity range (none for the field solver)
  "notes": ["coplanar with a plane below: evaluated as grounded CPW"],  // structure choices, defaulted stackup values
  "error": null}                      // why there is no Z (no gap, no reference plane…)
 ```

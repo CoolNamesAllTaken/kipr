@@ -10,7 +10,8 @@
 #   project-review-data    project-review.json
 #   pr-meta                pr.json, read by project-review-publish.yml
 # New ERC/DRC errors and warnings and off-grid schematic items also show up as annotations on the
-# changed files. Net classes with an impedance target get a closed-form Z estimate per layer (checks.impedance).
+# changed files. Net classes with an impedance target get a Z estimate per layer and track width (checks.impedance:
+# boarddd's field solver, or its closed-form models with impedance-solver: closedform).
 #
 # Caller (see docs/project.md):
 #   on: pull_request: paths: ["**/*.kicad_pcb", "**/*.kicad_sch", "**/*.kicad_pro"]
@@ -33,9 +34,13 @@ on:
         type: string
         default: CoolNamesAllTaken/kipr
       boarddd-ref:
-        description: boarddd git ref (tag/sha) for the impedance check and KiCad readers; empty = the commit kipr pins in its pyproject.toml
+        description: boarddd git ref (tag/sha) for the impedance check and KiCad readers; empty = the ref kipr pins in its pyproject.toml
         type: string
-        default: ""
+        default: v0.4.0
+      impedance-solver:
+        description: "checks.impedance solver: auto (boarddd's field solver; installs numpy + scipy, about 145 MB) or closedform (tier-1 models only, nothing extra installed)"
+        type: string
+        default: auto
       projects:
         description: only review projects whose directory (or its name) matches one of these globs (space/comma/newline separated; empty = all)
         type: string
@@ -116,6 +121,7 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       KIPR_SPEC: kipr @ git+https://github.com/${{ inputs.kipr-repository }}@${{ inputs.kipr-ref }}
+      KIPR_IMPEDANCE_SOLVER: ${{ inputs.impedance-solver }}
       MAX_MB: ${{ inputs.max-artifact-mb }}
     steps:
       - name: Prepare tools
@@ -211,12 +217,21 @@ jobs:
         run: |
           python3 -m venv --system-site-packages "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/venv/bin/pip" install -q "$KIPR_SPEC"   # pulls boarddd at kipr's pinned commit
+          spec="$KIPR_SPEC"; extra=""
+          if [ "$KIPR_IMPEDANCE_SOLVER" != closedform ]; then   # the field solver: kipr[field] (numpy, scipy)
+            spec="${KIPR_SPEC/kipr @/kipr[field] @}"; extra="[field]"
+          fi
+          t0=$(date +%s)
+          "$RUNNER_TEMP/venv/bin/pip" install -q "$spec"   # pulls boarddd at kipr's pinned ref
           if [ -n "$BOARDDD_REF" ]; then
             "$RUNNER_TEMP/venv/bin/pip" install -q --force-reinstall --no-deps \
-              "boarddd @ git+https://github.com/CoolNamesAllTaken/boarddd@${BOARDDD_REF}#subdirectory=python"
+              "boarddd${extra} @ git+https://github.com/CoolNamesAllTaken/boarddd@${BOARDDD_REF}#subdirectory=python"
           fi
+          echo "kipr install: $(( $(date +%s) - t0 )) s"
+          site=$("$RUNNER_TEMP/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          du -sh "$site" "$site"/scipy* "$site"/numpy* 2>/dev/null || true
           "$RUNNER_TEMP/venv/bin/python" -c 'import boarddd, boarddd.impedance; print("boarddd", boarddd.__version__)'
+          "$RUNNER_TEMP/venv/bin/python" -c 'from kipr.project import impedance as im; print("impedance solver:", *im.pick_solver())'
           "$RUNNER_TEMP/venv/bin/kipr" project --help > /dev/null
           # export cache key: kicad-cli version + image + extra libraries (they change ERC/DRC and the
           # 3D models, which kipr's per-export keys don't see); exports are keyed by file blobs inside

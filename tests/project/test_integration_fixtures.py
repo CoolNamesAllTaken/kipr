@@ -179,7 +179,7 @@ def test_impedance_check(doc):
     0.5 -> 0.4 mm and core 1.51 -> 1.2 mm on head), and a new SE_50_MS class on complex_hierarchy's LED_A."""
     pic = proj(doc, "pic_programmer")
     z = pic["checks"]["impedance"]
-    assert z["method"].startswith("closed-form estimate") and z["classes"] == ["SE_50_MS"]
+    assert z["solver"] in ("field", "closedform") and z["classes"] == ["SE_50_MS"]
     assert z["stackup_changes"] == [{"layer": "dielectric 1", "field": "thickness", "base": 1.51, "head": 1.2}]
     (r,) = z["rows"]
     assert (r["class"], r["layer"], r["status"]) == ("SE_50_MS", "B.Cu", "changed")
@@ -187,10 +187,16 @@ def test_impedance_check(doc):
     assert r["base"]["model"] == "coated_microstrip" and r["base"]["params"]["h"] == 1.51 and r["head"]["params"]["h"] == 1.2
     assert set(r["flags"]) == {"width_change", "stackup_shift", "violation"} and r["severity"] == "warn"
     assert r["shift_pct"] < -5 and r["head"]["within"] is False
-    assert pic["summary"]["impedance"] == {"rows": 1, "violations": 1, "new_violations": 0, "stackup_shifts": 1,
-                                           "width_changes": 1}
+    out = r["head"]["length_out_mm"]
+    assert out > 0 and out == r["head"]["length_mm"]  # the whole controlled length is out
+    assert pic["summary"]["impedance"] == {"rows": 1, "violations": 1, "length_out_mm": out, "new_violations": 0,
+                                           "stackup_shifts": 1, "width_changes": 1, "solver": z["solver"]}
     ch = proj(doc, "complex_hierarchy")["checks"]["impedance"]
     (r,) = ch["rows"]
     assert (r["class"], r["layer"], r["status"], r["base"]) == ("SE_50_MS", "B.Cu", "added", None)
     assert r["head"]["width"] == 0.15 and r["flags"] == ["new_violation"] and r["severity"] == "bad"
-    assert r["head"]["Z"] > 100 and r["head"]["validity"]  # 0.15 mm on 1.6 mm FR4: far from 50 Ω, outside the mask fit
+    assert r["head"]["Z"] > 100  # 0.15 mm on 1.6 mm FR4: far from 50 Ω
+    if ch["solver"] == "closedform":
+        assert r["head"]["validity"]  # outside the mask fit
+    else:
+        assert not r["head"]["validity"] and 0 < r["head"]["error_pct"] < 2 and r["head"]["Z_closedform"] > 100
