@@ -4,7 +4,9 @@
 //            as a module.
 //   file://  browsers block module scripts and fetch() there, so load data.js (project-review.json,
 //            written by kipr/project/site.py) and js/bundle.js, the same modules as one classic script.
-//            The gerber renderer (WebAssembly) and the 3D module can't load from disk; those views say so.
+//            ES modules can't load from disk, so the gerber renderer (boarddd/gerber + its WASM) and the
+//            3D module come from the classic-script pcba3d/pcba3d.bundle.js and the offline/ data packs
+//            (gerber.js offlineRenderer, pcba3d/build_offline.mjs); without them those views say so.
 (function () {
   'use strict';
   function add(src, module) {

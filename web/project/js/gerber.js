@@ -1,4 +1,5 @@
-// Gerber rendering through our wasm-gerber-renderer fork (vendored in ../vendor/wasm-gerber-renderer).
+// Gerber rendering through boarddd/gerber (vendored with boarddd in ../vendor/boarddd: src/gerber plus the
+// wasm renderer core in third_party/wasm-gerber-renderer/core).
 //
 // One hidden WebGL2 canvas and renderer, loaded on first use. Every render frames an explicit mm box
 // (never `fit`), so a render of any layer set lands on exactly the same pixels, and the result is copied
@@ -31,28 +32,25 @@ async function getRenderer() {
   if (!rendererPromise) {
     rendererPromise = (async () => {
       if (OFFLINE) return offlineRenderer();
-      const mod = await import('../vendor/wasm-gerber-renderer/index.js');
+      const mod = await import('../vendor/boarddd/src/gerber/index.js');
       glCanvas = document.createElement('canvas');
       glCanvas.width = 16; glCanvas.height = 16;
-      const wasmUrl = new URL('../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm', import.meta.url);
       // wasm-bindgen's init takes {module_or_path}; a bare URL still works but logs a deprecation warning
-      const renderer = await mod.createGerberRenderer(glCanvas, { wasmInitInput: { module_or_path: wasmUrl } });
-      // the fork's board compositing and layer diff (claud/board-diff); same renderer, same frame rules
-      const [board, diff] = await Promise.all([
-        import('../vendor/wasm-gerber-renderer/board.js'),
-        import('../vendor/wasm-gerber-renderer/diff.js'),
-      ]);
-      return { mod, renderer, board, diff };
+      const renderer = await mod.createGerberRenderer(glCanvas, { wasmInitInput: { module_or_path: new URL(`../${WASM_KEY}`, import.meta.url) } });
+      // board compositing and the layer diff are part of boarddd/gerber too: same renderer, same frame rules
+      return { mod, renderer, board: mod, diff: mod };
     })();
     rendererPromise.catch(() => { rendererPromise = null; });
   }
   return rendererPromise;
 }
 
-const WASM_KEY = 'vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm';
+// the vendored wasm, relative to web/project/ (also its key in the file:// pack offline/pcba3d-vendor.js)
+const WASM_KEY = 'vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm';
 
 /** file://: ES modules and fetch() are blocked, so take the renderer from the classic 3D bundle
- * (window.KIPR_GERBER = {index, board, diff, wasmGlue}) and the WASM from its data pack. */
+ * (window.KIPR_GERBER = {gerber, wasmGlue}: boarddd/gerber and the wasm-bindgen glue) and the WASM from
+ * its data pack. */
 async function offlineRenderer() {
   await loadOfflineBundle();
   const g = window.KIPR_GERBER;
@@ -60,8 +58,8 @@ async function offlineRenderer() {
   if (!g || !bytes) throw new Error('offline gerber renderer not available (no pcba3d bundle or WASM pack)');
   glCanvas = document.createElement('canvas');
   glCanvas.width = 16; glCanvas.height = 16;
-  const renderer = await g.index.createGerberRenderer(glCanvas, { wasmModule: g.wasmGlue, wasmInitInput: { module_or_path: bytes } });
-  return { mod: g.index, renderer, board: g.board, diff: g.diff };
+  const renderer = await g.gerber.createGerberRenderer(glCanvas, { wasmModule: g.wasmGlue, wasmInitInput: { module_or_path: bytes } });
+  return { mod: g.gerber, renderer, board: g.gerber, diff: g.gerber };
 }
 
 /**

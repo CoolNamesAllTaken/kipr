@@ -37,9 +37,9 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ESBUILD = process.env.ESBUILD || 'esbuild@0.28.2';
 // The names the module looks the WASM and the fab files up by, from the module itself. Importing
-// gerberboard.js needs the shared renderer vendored (it is, wherever there is a WASM to pack).
+// gerberboard.js needs boarddd vendored (it is, wherever there is a WASM to pack).
 const { OFFLINE_WASM_KEY: WASM_KEY, FAB_KINDS } = await import('./gerberboard.js').catch(() => ({
-  OFFLINE_WASM_KEY: 'vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm',
+  OFFLINE_WASM_KEY: 'vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm',
   FAB_KINDS: new Set(['copper', 'mask', 'silk', 'outline', 'drill']),
 }));
 const WASM_FILE = resolve(HERE, '..', WASM_KEY);

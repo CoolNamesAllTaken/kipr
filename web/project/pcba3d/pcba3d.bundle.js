@@ -23306,8 +23306,8 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
         ];
         position.set(coordinates, positionSize * vertices * face);
         uv.set(uv1, uvSize * vertices * face);
-        const fill = [face, face, face, face, face, face];
-        faceIndex.set(fill, faceIndexSize * vertices * face);
+        const fill2 = [face, face, face, face, face, face];
+        faceIndex.set(fill2, faceIndexSize * vertices * face);
       }
       const planes = new BufferGeometry();
       planes.setAttribute("position", new BufferAttribute(position, positionSize));
@@ -36302,21 +36302,461 @@ void main() {
     return side;
   }
 
-  // vendor/wasm-gerber-renderer/index.js
-  var wasm_gerber_renderer_exports = {};
-  __export(wasm_gerber_renderer_exports, {
+  // ../vendor/boarddd/src/gerber/index.js
+  var gerber_exports = {};
+  __export(gerber_exports, {
+    COPPER_COLOR: () => COPPER_COLOR,
+    DIFF_STYLE: () => DIFF_STYLE,
+    FACE_ROLES: () => FACE_ROLES,
+    FINISH_COLORS: () => FINISH_COLORS,
     GerberRenderer: () => GerberRenderer,
+    LAYER_ROLES: () => LAYER_ROLES,
+    LAYER_STYLES: () => LAYER_STYLES,
+    MASK_COLORS: () => MASK_COLORS,
+    MAX_DIFF_SOURCES: () => MAX_DIFF_SOURCES,
+    OUTLINE_TOLERANCE_MM: () => OUTLINE_TOLERANCE_MM,
+    SILK_COLORS: () => SILK_COLORS,
+    SUBSTRATE_COLOR: () => SUBSTRATE_COLOR,
+    addBoardLayers: () => addBoardLayers,
+    addLayerDiff: () => addLayerDiff,
+    analyzeBoardDiff: () => analyzeBoardDiff,
+    analyzeLayerDiff: () => analyzeLayerDiff,
+    applyHoleMask: () => applyHoleMask,
+    boardCutouts: () => boardCutouts,
+    boardOutline: () => boardOutline,
+    boardPalette: () => boardPalette,
+    boundsOf: () => boundsOf,
+    brightnessToAlpha: () => brightnessToAlpha,
     calculateFitView: () => calculateFitView,
+    circlePath: () => circlePath,
+    copyScaled: () => copyScaled,
     createGerberRenderer: () => createGerberRenderer,
+    cutHoles: () => cutHoles,
+    diffHoles: () => diffHoles,
+    diffPatterns: () => diffPatterns,
+    distinctHoles: () => distinctHoles,
+    drillShape: () => drillShape,
+    dropEmptyTools: () => dropEmptyTools,
+    faceRasterSize: () => faceRasterSize,
+    finishColor: () => finishColor,
+    fitView: () => fitView,
+    flattenOnto: () => flattenOnto,
+    flipRows: () => flipRows,
+    frameView: () => frameView,
+    geometryText: () => geometryText,
+    gerberExtents: () => gerberExtents,
+    groupBoardLayers: () => groupBoardLayers,
+    hasGeometry: () => hasGeometry,
+    hasInk: () => hasInk,
+    holeMask: () => holeMask,
+    holesPath: () => holesPath,
+    holesToGerber: () => holesToGerber,
+    layerRole: () => layerRole,
+    maskColor: () => maskColor,
+    measureLayers: () => measureLayers,
+    outlineContours: () => outlineContours,
+    padBounds: () => padBounds,
+    parseExcellon: () => parseExcellon,
+    parseHexColor: () => parseHexColor,
+    pickBoard: () => pickBoard,
+    pixelRectToWorld: () => pixelRectToWorld,
+    pixelsPerUnit: () => pixelsPerUnit,
+    plotsProfile: () => plotsProfile,
+    prepareDiffSources: () => prepareDiffSources,
+    project: () => project,
+    projectHoles: () => projectHoles,
     projectToCanvas: () => projectToCanvas,
+    rasterToWorld: () => rasterToWorld,
+    readRendererPixels: () => readRendererPixels,
+    renderBoard: () => renderBoard,
+    renderFaceRaster: () => renderFaceRaster,
     renderGerberToCanvas: () => renderGerberToCanvas,
     renderGerberToPng: () => renderGerberToPng,
     renderGerberToPngStream: () => renderGerberToPngStream,
+    renderLayerDiff: () => renderLayerDiff,
+    resolveColor: () => resolveColor,
+    ringsToGerber: () => ringsToGerber,
+    selectFace: () => selectFace,
+    sharedView: () => sharedView,
+    signedArea: () => signedArea2,
+    silkColor: () => silkColor,
+    slotPath: () => slotPath,
+    summarizeDiffPixels: () => summarizeDiffPixels,
+    toHexColor: () => toHexColor,
+    traceLayer: () => traceLayer,
+    traceMask: () => traceMask,
+    unionBounds: () => unionBounds,
+    unproject: () => unproject,
     unprojectFromCanvas: () => unprojectFromCanvas,
-    viewExtent: () => viewExtent
+    viewExtent: () => viewExtent,
+    withFrameSize: () => withFrameSize,
+    withoutEmptyTools: () => withoutEmptyTools,
+    withoutProfile: () => withoutProfile,
+    worldToPixelRect: () => worldToPixelRect
   });
 
-  // vendor/wasm-gerber-renderer/shared.js
+  // ../vendor/boarddd/src/gerber/drills.js
+  var APER_FUNCTION = /TA\.AperFunction,([^,\s]+)/i;
+  var TOOL_DEF = /^T(\d+)(?:[A-BD-Z][-\d.]*)*C([-+]?[\d.]+)/i;
+  var TOOL_SELECT = /^T(\d+)\s*$/i;
+  var HOLE = /^(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?(?:G85(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?)?$/i;
+  var ROUT = /^G0([0-3])(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?/i;
+  var UNITS = /^(METRIC|INCH)(?:,(LZ|TZ))?(?:,(0+)\.(0+))?/i;
+  var KICAD_FORMAT = /FORMAT=\{(\d+):(\d+)\/\s*\w+\s*\/\s*(metric|inch)\s*\/\s*([^}]*)\}/i;
+  var MOTION = /^(?:[XY][-+\d.]|G0[0-3]|G85|M1[5-7]\b)/i;
+  function dropEmptyTools(text) {
+    const source = String(text ?? "");
+    const lines = source.split(/\r?\n/);
+    const empty = /* @__PURE__ */ new Map();
+    for (const raw of lines) {
+      const found = TOOL_DEF.exec(raw.trim());
+      if (found && !(Number(found[2]) > 0)) {
+        const tool = Number(found[1]);
+        if (!empty.has(tool)) empty.set(tool, { tool, diameter: Number(found[2]), hits: 0 });
+      }
+    }
+    if (!empty.size) return { text, dropped: [], warning: null };
+    const newline = source.includes("\r\n") ? "\r\n" : "\n";
+    const out = [];
+    let dropping = null;
+    let inBody = false;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (line === "%" || /^M95\b/i.test(line)) inBody = true;
+      const definition = TOOL_DEF.exec(line);
+      const select = definition && inBody ? definition : TOOL_SELECT.exec(line);
+      if (definition && !inBody) {
+        if (!empty.has(Number(definition[1]))) out.push(raw);
+        continue;
+      }
+      if (select) {
+        dropping = empty.get(Number(select[1])) ?? null;
+        if (!dropping) out.push(raw);
+        continue;
+      }
+      if (dropping && MOTION.test(line)) {
+        if (/^[XY]/i.test(line)) dropping.hits += 1;
+        continue;
+      }
+      if (/^(M30|M00)\b/i.test(line)) dropping = null;
+      out.push(raw);
+    }
+    const dropped = [...empty.values()];
+    const hits = dropped.reduce((sum, entry) => sum + entry.hits, 0);
+    const tools = dropped.map((entry) => `T${entry.tool}C${entry.diameter}`).join(", ");
+    return {
+      text: out.join(newline),
+      dropped,
+      warning: `Dropped ${dropped.length === 1 ? "a drill tool" : `${dropped.length} drill tools`} with no diameter (${tools}) and ${hits} ${hits === 1 ? "hit" : "hits"}`
+    };
+  }
+  function withoutEmptyTools(text) {
+    return dropEmptyTools(text).text;
+  }
+  function parseExcellon(text, options = {}) {
+    const lines = String(text ?? "").split(/\r?\n/);
+    let metric = true;
+    let zeros = "LZ";
+    let integerDigits = null;
+    let decimalDigits = null;
+    const defaultPlated = options.plated ?? true;
+    const diameters = /* @__PURE__ */ new Map();
+    const plating = /* @__PURE__ */ new Map();
+    let pendingPlated = null;
+    let current = null;
+    let inBody = false;
+    let routDown = false;
+    let at = null;
+    const holes = [];
+    const scale = () => metric ? 1 : 25.4;
+    const coordinate = (raw) => {
+      if (raw == null) return null;
+      if (raw.includes(".")) return Number(raw) * scale();
+      const negative = raw.startsWith("-");
+      const digits = raw.replace(/^[-+]/, "");
+      const intDigits = integerDigits ?? (metric ? 3 : 2);
+      const decDigits = decimalDigits ?? (metric ? 3 : 4);
+      let value;
+      if (zeros === "TZ") {
+        value = Number(digits) / 10 ** decDigits;
+      } else {
+        const padded = digits.padEnd(intDigits + decDigits, "0");
+        value = Number(padded.slice(0, intDigits) + "." + padded.slice(intDigits));
+      }
+      return (negative ? -value : value) * scale();
+    };
+    let skipped = 0;
+    const add = (x, y, x2 = null, y2 = null) => {
+      const diameter = current == null ? 0 : diameters.get(current) ?? 0;
+      if (!(diameter > 0)) {
+        skipped += 1;
+        return;
+      }
+      holes.push({
+        x,
+        y,
+        diameter,
+        plated: plating.get(current) ?? defaultPlated,
+        x2,
+        y2
+      });
+    };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith(";")) {
+        const found = APER_FUNCTION.exec(line);
+        if (found) pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
+        const format = KICAD_FORMAT.exec(line);
+        if (format) {
+          integerDigits = Number(format[1]);
+          decimalDigits = Number(format[2]);
+          metric = format[3].toLowerCase() === "metric";
+          const suppression = format[4].toLowerCase();
+          if (suppression.includes("suppress trailing")) zeros = "LZ";
+          else if (suppression.includes("suppress leading")) zeros = "TZ";
+        }
+        continue;
+      }
+      if (line === "%" || /^M95\b/i.test(line)) {
+        inBody = true;
+        continue;
+      }
+      const units = UNITS.exec(line);
+      if (units) {
+        metric = units[1].toUpperCase() === "METRIC";
+        if (units[2]) zeros = units[2].toUpperCase();
+        if (units[3]) {
+          integerDigits = units[3].length;
+          decimalDigits = units[4].length;
+        }
+        continue;
+      }
+      if (/^M72\b/i.test(line)) {
+        metric = false;
+        continue;
+      }
+      if (/^M71\b/i.test(line)) {
+        metric = true;
+        continue;
+      }
+      if (/^M15\b/i.test(line)) {
+        routDown = true;
+        continue;
+      }
+      if (/^M1[67]\b/i.test(line)) {
+        routDown = false;
+        continue;
+      }
+      if (/^G05\b/i.test(line)) {
+        at = null;
+        routDown = false;
+        continue;
+      }
+      if (/^(M48|M30|M00|FMAT|G90|G91|ICI|VER|DETECT|ATC)/i.test(line)) continue;
+      const definition = TOOL_DEF.exec(line);
+      if (definition && !inBody) {
+        const tool = Number(definition[1]);
+        diameters.set(tool, Number(definition[2]) * scale());
+        plating.set(tool, pendingPlated ?? defaultPlated);
+        pendingPlated = null;
+        continue;
+      }
+      if (definition && inBody) {
+        const tool = Number(definition[1]);
+        if (!diameters.has(tool)) diameters.set(tool, Number(definition[2]) * scale());
+        current = tool;
+        at = null;
+        routDown = false;
+        continue;
+      }
+      const select = TOOL_SELECT.exec(line);
+      if (select) {
+        current = Number(select[1]);
+        at = null;
+        routDown = false;
+        continue;
+      }
+      const motion = ROUT.exec(line);
+      if (motion) {
+        const x = coordinate(motion[2]) ?? at?.[0] ?? null;
+        const y = coordinate(motion[3]) ?? at?.[1] ?? null;
+        if (x == null || y == null) continue;
+        if (routDown && at && (x !== at[0] || y !== at[1])) {
+          add(at[0], at[1], x, y);
+        }
+        at = [x, y];
+        continue;
+      }
+      const hit = HOLE.exec(line);
+      if (hit && current != null && (hit[1] != null || hit[2] != null)) {
+        const x = coordinate(hit[1]) ?? at?.[0] ?? null;
+        const y = coordinate(hit[2]) ?? at?.[1] ?? null;
+        if (x == null || y == null) continue;
+        const slotted = hit[3] != null || hit[4] != null;
+        const x2 = slotted ? coordinate(hit[3]) ?? x : null;
+        const y2 = slotted ? coordinate(hit[4]) ?? y : null;
+        at = slotted ? [x2, y2] : [x, y];
+        add(x, y, x2, y2);
+      }
+    }
+    if (skipped && typeof options.onWarning === "function") {
+      options.onWarning(`Left out ${skipped} drill ${skipped === 1 ? "hit" : "hits"} of tools with no diameter`);
+    }
+    return holes;
+  }
+  function holeKey(hole, digits = 3) {
+    const round = (value) => Number(value).toFixed(digits);
+    const ends = [`${round(hole.x)},${round(hole.y)}`];
+    if (hole.x2 != null && hole.y2 != null) ends.push(`${round(hole.x2)},${round(hole.y2)}`);
+    ends.sort();
+    return `${ends.join("|")}|${round(hole.diameter ?? hole.d)}`;
+  }
+  function distinctHoles(holes) {
+    const seen = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const hole of holes) {
+      const key = holeKey(hole);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(hole);
+    }
+    return result;
+  }
+  function diffHoles(baseHoles, headHoles, { tolerance = 1e-3 } = {}) {
+    const digits = Math.max(0, Math.round(-Math.log10(tolerance)));
+    const key = (hole) => `${holeKey(hole, digits)}|${hole.plated === false ? "n" : "p"}`;
+    const remaining = /* @__PURE__ */ new Map();
+    for (const hole of headHoles) {
+      const k = key(hole);
+      if (!remaining.has(k)) remaining.set(k, []);
+      remaining.get(k).push(hole);
+    }
+    const removed = [];
+    const unchanged = [];
+    for (const hole of baseHoles) {
+      const bucket = remaining.get(key(hole));
+      if (bucket && bucket.length) {
+        bucket.shift();
+        unchanged.push(hole);
+      } else {
+        removed.push(hole);
+      }
+    }
+    const added = [...remaining.values()].flat();
+    return { added, removed, unchanged, changed: added.length + removed.length > 0 };
+  }
+  function projectHoles(holes, projectPoint, pixelsPerMm, { minRadius = 0.6 } = {}) {
+    return holes.filter((hole) => !hole.filled).map((hole) => [
+      projectPoint(hole.x, hole.y),
+      hole.x2 == null || hole.y2 == null ? null : projectPoint(hole.x2, hole.y2),
+      Math.max(minRadius, (hole.diameter ?? hole.d) / 2 * pixelsPerMm),
+      hole
+    ]);
+  }
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var fixed = (value) => Number(value).toFixed(2);
+  function slotPath(x1, y1, x2, y2, radius) {
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    if (length === 0) return circlePath(x1, y1, radius);
+    const nx = -(y2 - y1) / length * radius;
+    const ny = (x2 - x1) / length * radius;
+    const at = (x, y) => `${fixed(x)},${fixed(y)}`;
+    const arc = `A${fixed(radius)},${fixed(radius)} 0 0 0 `;
+    return `M${at(x1 + nx, y1 + ny)} L${at(x2 + nx, y2 + ny)} ${arc}${at(x2 - nx, y2 - ny)} L${at(x1 - nx, y1 - ny)} ${arc}${at(x1 + nx, y1 + ny)} Z`;
+  }
+  function circlePath(x, y, radius) {
+    const r = fixed(radius);
+    return `M${fixed(x + radius)},${fixed(y)} A${r},${r} 0 1 0 ${fixed(x - radius)},${fixed(y)} A${r},${r} 0 1 0 ${fixed(x + radius)},${fixed(y)} Z`;
+  }
+  function holesPath(projected) {
+    return projected.map(
+      ([near, far, radius]) => !far || far[0] === near[0] && far[1] === near[1] ? circlePath(near[0], near[1], radius) : slotPath(near[0], near[1], far[0], far[1], radius)
+    ).join(" ");
+  }
+  function drillShape(near, far, radius, doc = globalThis.document) {
+    const [x1, y1] = near;
+    if (!far || far[0] === x1 && far[1] === y1) {
+      const circle = doc.createElementNS(SVG_NS, "circle");
+      circle.setAttribute("cx", fixed(x1));
+      circle.setAttribute("cy", fixed(y1));
+      circle.setAttribute("r", fixed(radius));
+      return circle;
+    }
+    const path = doc.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", slotPath(x1, y1, far[0], far[1], radius));
+    return path;
+  }
+  function holeMask(projected, width, height) {
+    if (!projected.length) return "";
+    const d = holesPath(projected);
+    const w = fixed(width);
+    const h2 = fixed(height);
+    const svg = `<svg xmlns="${SVG_NS}" width="${w}" height="${h2}" viewBox="0 0 ${w} ${h2}"><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h2}"><rect width="${w}" height="${h2}" fill="#fff"/><path d="${d}" fill="#000"/></mask><rect width="${w}" height="${h2}" fill="#fff" mask="url(#m)"/></svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  }
+  function applyHoleMask(element, mask) {
+    const style = element.style;
+    style.maskImage = style.webkitMaskImage = mask;
+    style.maskSize = style.webkitMaskSize = mask ? "100% 100%" : "";
+    style.maskRepeat = style.webkitMaskRepeat = mask ? "no-repeat" : "";
+  }
+  function cutHoles(context, projected) {
+    if (!projected.length) return;
+    const previous = context.globalCompositeOperation;
+    context.globalCompositeOperation = "destination-out";
+    context.fillStyle = "#000";
+    context.beginPath();
+    for (const [near, far, radius] of projected) {
+      if (!far || far[0] === near[0] && far[1] === near[1]) {
+        context.moveTo(near[0] + radius, near[1]);
+        context.arc(near[0], near[1], radius, 0, Math.PI * 2);
+      } else {
+        const angle = Math.atan2(far[1] - near[1], far[0] - near[0]);
+        context.moveTo(
+          near[0] + Math.cos(angle + Math.PI / 2) * radius,
+          near[1] + Math.sin(angle + Math.PI / 2) * radius
+        );
+        context.arc(near[0], near[1], radius, angle + Math.PI / 2, angle + 3 * Math.PI / 2);
+        context.arc(far[0], far[1], radius, angle - Math.PI / 2, angle + Math.PI / 2);
+        context.closePath();
+      }
+    }
+    context.fill("nonzero");
+    context.globalCompositeOperation = previous;
+  }
+  function holesToGerber(holes) {
+    const apertures = /* @__PURE__ */ new Map();
+    for (const hole of holes) {
+      const diameter = Number(hole.diameter ?? hole.d);
+      if (!(diameter > 0)) continue;
+      const key = diameter.toFixed(6);
+      if (!apertures.has(key)) apertures.set(key, 10 + apertures.size);
+    }
+    const coordinate = (value) => String(Math.round(Number(value) * 1e6));
+    const lines = ["%FSLAX46Y46*%", "%MOMM*%", "%LPD*%", "G01*"];
+    for (const [key, code] of apertures) lines.push(`%ADD${code}C,${key}*%`);
+    let selected = null;
+    for (const hole of holes) {
+      const diameter = Number(hole.diameter ?? hole.d);
+      if (!(diameter > 0)) continue;
+      const code = apertures.get(diameter.toFixed(6));
+      if (code !== selected) {
+        lines.push(`D${code}*`);
+        selected = code;
+      }
+      const at = `X${coordinate(hole.x)}Y${coordinate(hole.y)}`;
+      if (hole.x2 == null || hole.y2 == null || hole.x2 === hole.x && hole.y2 === hole.y) {
+        lines.push(`${at}D03*`);
+      } else {
+        lines.push(`${at}D02*`, `X${coordinate(hole.x2)}Y${coordinate(hole.y2)}D01*`);
+      }
+    }
+    lines.push("M02*");
+    return lines.join("\n") + "\n";
+  }
+
+  // ../vendor/boarddd/third_party/wasm-gerber-renderer/core/shared.js
   var DEV_WASM_MODULE_PATH = "../../wasm/pkg/wasm_gerber_processor.js";
   var DEFAULT_WASM_MODULE_URLS = [
     new URL("./wasm/wasm_gerber_processor.js", KIPR_PCBA3D_SCRIPT_URL),
@@ -36571,6 +37011,7 @@ void main() {
         frameOptions.minimumFeaturePixels,
         DEFAULT_MINIMUM_FEATURE_PIXELS
       ),
+      antiAliasing: frameOptions.antiAliasing === true,
       renderDrills: frameOptions.renderDrills !== false,
       globalAlpha: numberOrDefault(frameOptions.globalAlpha, DEFAULT_GLOBAL_ALPHA),
       compositeMode: normalizeCompositeMode(frameOptions.compositeMode),
@@ -36708,6 +37149,9 @@ void main() {
     if (typeof processor.set_minimum_feature_pixels === "function" && frameOptions.minimumFeaturePixels != null) {
       processor.set_minimum_feature_pixels(frameOptions.minimumFeaturePixels);
     }
+    if (typeof processor.set_anti_aliasing === "function") {
+      processor.set_anti_aliasing(frameOptions.antiAliasing === true);
+    }
   }
   function addLayerToProcessor(processor, content, offsetX, offsetY) {
     if (offsetX !== 0 || offsetY !== 0) {
@@ -36718,7 +37162,18 @@ void main() {
     }
     return processor.add_layer(content);
   }
+  function prepareDrillContent(content, name, ...handlers) {
+    const { text, dropped, warning } = dropEmptyTools(content);
+    if (warning) {
+      const message = name ? `${name}: ${warning}` : warning;
+      const handler = handlers.find((candidate) => typeof candidate === "function");
+      if (handler) handler(message, { name: name || null, dropped });
+      else console.warn(`wasm-gerber-renderer: ${message}`);
+    }
+    return text;
+  }
   function addDrillLayerToProcessor(processor, content, offsetX, offsetY) {
+    content = withoutEmptyTools(content);
     if (offsetX !== 0 || offsetY !== 0) {
       if (typeof processor.add_drill_layer_with_offset !== "function") {
         throw new Error("Drill layer offsets require an updated WASM renderer.");
@@ -36843,9 +37298,9 @@ void main() {
     return hasToolDeclaration && hasDrillCommand;
   }
   function resolveDrillRenderColors(background) {
-    const { fill, hasBackground } = normalizeDrillFillColor(background);
+    const { fill: fill2, hasBackground } = normalizeDrillFillColor(background);
     return {
-      fill,
+      fill: fill2,
       hasBackground
     };
   }
@@ -37390,11 +37845,11 @@ void main() {
     }
     try {
       const color = parseColor(background, true);
-      const fill = color.slice(0, 3).map((value) => value / 255);
+      const fill2 = color.slice(0, 3).map((value) => value / 255);
       if (color[3] !== 255) {
-        return { fill, hasBackground: false };
+        return { fill: fill2, hasBackground: false };
       }
-      return { fill, hasBackground: true };
+      return { fill: fill2, hasBackground: true };
     } catch (_error) {
       return { fill: [0, 0, 0], hasBackground: false };
     }
@@ -37469,7 +37924,7 @@ void main() {
     }
   }
 
-  // vendor/wasm-gerber-renderer/index.js
+  // ../vendor/boarddd/third_party/wasm-gerber-renderer/core/index.js
   var DEFAULT_STREAM_EXPORT_BAND_BYTES = 128 * 1024 * 1024;
   async function createGerberRenderer(canvas, rendererOptions = {}) {
     return GerberRenderer.create(canvas, rendererOptions);
@@ -37873,7 +38328,12 @@ void main() {
         }
         const result = addDrillLayerToProcessor(
           this.frame.processor,
-          content,
+          prepareDrillContent(
+            content,
+            options.name || getSourceName(source),
+            options.onWarning,
+            this.rendererOptions.onWarning
+          ),
           offsetX,
           offsetY
         );
@@ -38529,11 +38989,1594 @@ void main() {
     gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
-  // vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor.js
+  // ../vendor/boarddd/src/gerber/palette.js
+  var SUBSTRATE_COLOR = "#c9b27c";
+  var COPPER_COLOR = "#cc9933";
+  var MASK_COLORS = Object.freeze({
+    green: "#0d5229",
+    lightgreen: "#5ba80c",
+    saturatedgreen: "#0d680b",
+    mattegreen: "#2e5b3a",
+    red: "#b51315",
+    lightred: "#d2280e",
+    blue: "#023ba2",
+    lightblue: "#364f74",
+    greenblue: "#154650",
+    black: "#0b0b0b",
+    matteblack: "#1c1c1c",
+    white: "#f5f5f5",
+    purple: "#200235",
+    lightpurple: "#771f5b",
+    yellow: "#c2c300"
+  });
+  var SILK_COLORS = Object.freeze({
+    white: "#f5f5f5",
+    black: "#080808",
+    yellow: "#e6d82e",
+    red: "#c81e1e",
+    blue: "#1e50c8",
+    green: "#28a03c"
+  });
+  var FINISH_COLORS = Object.freeze({
+    enig: "#d4af37",
+    enepig: "#d4af37",
+    gold: "#d4af37",
+    hardgold: "#d4af37",
+    hasl: "#c0c0c8",
+    haslleadfree: "#c0c0c8",
+    leadfreehasl: "#c0c0c8",
+    immersionsilver: "#d8d8dc",
+    immersiontin: "#c8c8cc",
+    osp: "#cc9933",
+    none: "#cc9933"
+  });
+  var LAYER_STYLES = Object.freeze({
+    outline: Object.freeze({ color: [0.85, 0.85, 0.35], alpha: 1 }),
+    copper: Object.freeze({ color: [0.8, 0.6, 0.2], alpha: 1 }),
+    mask: Object.freeze({ color: [0.05, 0.32, 0.16], alpha: 1 }),
+    paste: Object.freeze({ color: [0.65, 0.65, 0.7], alpha: 0.9 }),
+    silk: Object.freeze({ color: [0.96, 0.96, 0.96], alpha: 1 }),
+    fab: Object.freeze({ color: [0.45, 0.55, 0.75], alpha: 0.9 }),
+    doc: Object.freeze({ color: [0.4, 0.4, 0.45], alpha: 0.8 }),
+    drill: Object.freeze({ color: [0.83, 0.69, 0.22], alpha: 1 })
+  });
+  function parseHexColor(hex) {
+    const text = String(hex ?? "").trim();
+    let match = /^#([0-9a-f]{6})$/i.exec(text);
+    if (match) {
+      const value = match[1];
+      return [0, 2, 4].map((at) => parseInt(value.slice(at, at + 2), 16) / 255);
+    }
+    match = /^#([0-9a-f]{3})$/i.exec(text);
+    if (match) {
+      return [...match[1]].map((digit) => parseInt(digit + digit, 16) / 255);
+    }
+    return null;
+  }
+  function toHexColor(color) {
+    return "#" + color.slice(0, 3).map(
+      (channel) => Math.round(Math.min(1, Math.max(0, Number(channel))) * 255).toString(16).padStart(2, "0")
+    ).join("");
+  }
+  function colorKey(name) {
+    return String(name).toLowerCase().replace(/[\s_\-()]+/g, "");
+  }
+  function resolveColor(value, table = {}) {
+    if (value == null || value === "") return null;
+    if (Array.isArray(value)) {
+      if (value.length < 3 || !value.slice(0, 3).every(Number.isFinite)) return null;
+      return value.slice(0, 3).map(Number);
+    }
+    const hex = parseHexColor(value);
+    if (hex) return hex;
+    const named = table[colorKey(value)];
+    return named ? parseHexColor(named) : null;
+  }
+  function maskColor(value) {
+    return resolveColor(value, MASK_COLORS);
+  }
+  function silkColor(value) {
+    if (typeof value === "string" && colorKey(value) === "none") return "none";
+    return resolveColor(value, SILK_COLORS);
+  }
+  function finishColor(value) {
+    return resolveColor(value, FINISH_COLORS);
+  }
+  function boardPalette(options = {}) {
+    const substrate = resolveColor(options.substrate) ?? parseHexColor(SUBSTRATE_COLOR);
+    const copper = resolveColor(options.copper) ?? parseHexColor(COPPER_COLOR);
+    const finish = finishColor(options.finish) ?? parseHexColor(FINISH_COLORS.enig);
+    const mask = maskColor(options.mask) ?? parseHexColor(MASK_COLORS.green);
+    const silk = options.silk === void 0 ? parseHexColor(SILK_COLORS.white) : silkColor(options.silk);
+    const maskAlpha = clampAlpha(options.maskAlpha, 0.9);
+    const silkAlpha = clampAlpha(options.silkAlpha, 1);
+    return {
+      substrate,
+      copper,
+      finish,
+      mask: { color: mask, alpha: maskAlpha },
+      silk: silk === "none" ? null : { color: silk ?? parseHexColor(SILK_COLORS.white), alpha: silkAlpha },
+      paste: {
+        color: resolveColor(options.paste) ?? [...LAYER_STYLES.paste.color],
+        alpha: clampAlpha(options.pasteAlpha, LAYER_STYLES.paste.alpha)
+      },
+      plating: resolveColor(options.plating) ?? finish
+    };
+  }
+  function clampAlpha(value, fallback) {
+    const number = Number(value);
+    if (value == null || !Number.isFinite(number)) return fallback;
+    return Math.min(1, Math.max(0, number));
+  }
+
+  // ../vendor/boarddd/src/gerber/contour.js
+  var SOLID = 128;
+  var SIMPLIFY_PX = 0.75;
+  var AROUND = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  function traceLayer(rgba, width, height, minArea = 12) {
+    const solid = new Uint8Array(width * height);
+    for (let i = 0, at = 0; i < rgba.length; i += 4, at += 1) {
+      solid[at] = rgba[i + 3] >= SOLID ? 1 : 0;
+    }
+    return traceMask(solid, width, height, minArea);
+  }
+  function traceMask(solid, width, height, minArea = 12) {
+    const isSolid = (x, y) => x >= 0 && y >= 0 && x < width && y < height && solid[y * width + x] === 1;
+    const owner = new Int32Array(width * height).fill(-1);
+    const shapes = [];
+    let label = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = y * width + x;
+        if (!solid[at] || owner[at] !== -1) continue;
+        const outline = followBoundary(isSolid, width, height, x, y);
+        const box = { minX: x, maxX: x, minY: y, maxY: y };
+        const area2 = fill(isSolid, owner, label, width, height, x, y, box);
+        label += 1;
+        if (area2 < minArea || outline.length < 3) continue;
+        shapes.push({
+          outer: simplify(outline, SIMPLIFY_PX),
+          holes: [],
+          label: label - 1,
+          box,
+          area: area2
+        });
+      }
+    }
+    shapes.forEach((shape) => findHoles(solid, owner, shape, width, height, minArea));
+    return shapes.map(({ outer, holes }) => ({ outer, holes }));
+  }
+  function findHoles(solid, owner, shape, width, height, minArea) {
+    const { box, label } = shape;
+    const boxWidth = box.maxX - box.minX + 1;
+    const boxHeight = box.maxY - box.minY + 1;
+    if (boxWidth < 3 || boxHeight < 3 || shape.area === boxWidth * boxHeight) return;
+    const mark = new Uint8Array(boxWidth * boxHeight);
+    const local = (x, y) => (y - box.minY) * boxWidth + (x - box.minX);
+    const inBox = (x, y) => x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY;
+    const passable = (x, y) => inBox(x, y) && owner[y * width + x] !== label;
+    const stack = [];
+    const reach = (x, y) => {
+      if (!passable(x, y) || mark[local(x, y)] === 1) return;
+      mark[local(x, y)] = 1;
+      stack.push(x, y);
+    };
+    for (let x = box.minX; x <= box.maxX; x += 1) {
+      reach(x, box.minY);
+      reach(x, box.maxY);
+    }
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      reach(box.minX, y);
+      reach(box.maxX, y);
+    }
+    while (stack.length) {
+      const y = stack.pop();
+      const x = stack.pop();
+      for (let i = 0; i < 8; i += 1) reach(x + AROUND[i][0], y + AROUND[i][1]);
+    }
+    const isHole = (x, y) => inBox(x, y) && solid[y * width + x] === 0 && mark[local(x, y)] !== 1;
+    for (let y = box.minY; y <= box.maxY; y += 1) {
+      for (let x = box.minX; x <= box.maxX; x += 1) {
+        if (!isHole(x, y) || mark[local(x, y)] === 2) continue;
+        const ours = owner[(y - 1) * width + x] === label;
+        const outline = ours ? followBoundary(isHole, width, height, x, y) : null;
+        let area2 = 0;
+        mark[local(x, y)] = 2;
+        stack.push(x, y);
+        while (stack.length) {
+          const cy = stack.pop();
+          const cx = stack.pop();
+          area2 += 1;
+          for (let i = 0; i < 8; i += 1) {
+            const nx = cx + AROUND[i][0];
+            const ny = cy + AROUND[i][1];
+            if (isHole(nx, ny) && mark[local(nx, ny)] !== 2) {
+              mark[local(nx, ny)] = 2;
+              stack.push(nx, ny);
+            }
+          }
+        }
+        if (outline && area2 >= minArea && outline.length >= 3) {
+          shape.holes.push(simplify(outline, SIMPLIFY_PX));
+        }
+      }
+    }
+  }
+  function followBoundary(inside, width, height, startX, startY) {
+    const points = [];
+    let x = startX, y = startY;
+    let heading = 6;
+    let firstStep = null;
+    for (let step = 0; step < width * height * 4 + 8; step += 1) {
+      points.push([x, y]);
+      let found = -1;
+      for (let turn = 0; turn < 8; turn += 1) {
+        const at = (heading + 6 + turn) % 8;
+        if (inside(x + AROUND[at][0], y + AROUND[at][1])) {
+          found = at;
+          break;
+        }
+      }
+      if (found === -1) break;
+      const nx = x + AROUND[found][0];
+      const ny = y + AROUND[found][1];
+      if (firstStep === null) {
+        firstStep = { x: nx, y: ny, heading: found };
+      } else if (nx === firstStep.x && ny === firstStep.y && found === firstStep.heading) {
+        break;
+      }
+      x = nx;
+      y = ny;
+      heading = found;
+    }
+    return points;
+  }
+  function fill(inside, labels, label, width, height, startX, startY, box = null) {
+    const queue = [startY * width + startX];
+    labels[queue[0]] = label;
+    let area2 = 0;
+    while (queue.length) {
+      const at = queue.pop();
+      area2 += 1;
+      const x = at % width;
+      const y = (at - x) / width;
+      if (box) {
+        if (x < box.minX) box.minX = x;
+        if (x > box.maxX) box.maxX = x;
+        if (y < box.minY) box.minY = y;
+        if (y > box.maxY) box.maxY = y;
+      }
+      for (let i = 0; i < 8; i += 1) {
+        const nx = x + AROUND[i][0];
+        const ny = y + AROUND[i][1];
+        const next = ny * width + nx;
+        if (inside(nx, ny) && labels[next] === -1) {
+          labels[next] = label;
+          queue.push(next);
+        }
+      }
+    }
+    return area2;
+  }
+  function simplify(points, tolerance) {
+    if (points.length < 4) return points;
+    const keep = new Uint8Array(points.length);
+    keep[0] = 1;
+    keep[points.length - 1] = 1;
+    const stack = [[0, points.length - 1]];
+    while (stack.length) {
+      const [first, last] = stack.pop();
+      let worst = 0, at = -1;
+      for (let i = first + 1; i < last; i += 1) {
+        const distance = perpendicular(points[i], points[first], points[last]);
+        if (distance > worst) {
+          worst = distance;
+          at = i;
+        }
+      }
+      if (at !== -1 && worst > tolerance) {
+        keep[at] = 1;
+        stack.push([first, at], [at, last]);
+      }
+    }
+    return points.filter((_, i) => keep[i]);
+  }
+  function perpendicular(point, a, b) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-9) return Math.hypot(point[0] - a[0], point[1] - a[1]);
+    return Math.abs(dy * point[0] - dx * point[1] + b[0] * a[1] - b[1] * a[0]) / length;
+  }
+  function flipRows(pixels, width, height) {
+    const stride = width * 4;
+    const row = new Uint8ClampedArray(stride);
+    for (let top = 0, bottom = height - 1; top < bottom; top += 1, bottom -= 1) {
+      const a = top * stride;
+      const b = bottom * stride;
+      row.set(pixels.subarray(a, a + stride));
+      pixels.copyWithin(a, b, b + stride);
+      pixels.set(row, b);
+    }
+    return pixels;
+  }
+  function brightnessToAlpha(pixels) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i + 3] = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+    }
+    return pixels;
+  }
+
+  // ../vendor/boarddd/src/gerber/raster.js
+  function readRendererPixels(renderer, { rect = null, bottomUp = false, into = null } = {}) {
+    const gl = renderer.getContext();
+    const canvas = renderer.canvas;
+    const x = rect ? rect.x : 0;
+    const width = rect ? rect.width : canvas.width;
+    const height = rect ? rect.height : canvas.height;
+    const y = rect ? canvas.height - rect.y - rect.height : 0;
+    const pixels = into ?? new Uint8Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const previous = gl.getParameter(gl.PACK_ALIGNMENT);
+    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    try {
+      gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    } finally {
+      gl.pixelStorei(gl.PACK_ALIGNMENT, previous);
+    }
+    if (!bottomUp) flipRows(pixels, width, height);
+    return { pixels, width, height };
+  }
+  function hasInk(canvas, minShare = 0.01) {
+    try {
+      const context = canvas.getContext("2d");
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let lit = 0;
+      for (let index = 3; index < pixels.length; index += 4) if (pixels[index] > 8) lit += 1;
+      return lit >= canvas.width * canvas.height * minShare;
+    } catch (_error) {
+      return false;
+    }
+  }
+  function makeCanvas(width, height) {
+    if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      return canvas;
+    }
+    if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
+    throw new Error("No canvas implementation is available.");
+  }
+  function copyScaled(source, maxPx = 560) {
+    const width = source.width;
+    const height = source.height;
+    if (!width || !height) return null;
+    const scale = Math.min(1, maxPx / Math.max(width, height));
+    const copy = makeCanvas(
+      Math.max(1, Math.round(width * scale)),
+      Math.max(1, Math.round(height * scale))
+    );
+    const context = copy.getContext("2d");
+    if (!context) return null;
+    context.drawImage(source, 0, 0, copy.width, copy.height);
+    return copy;
+  }
+  function flattenOnto(source, color) {
+    const flat = makeCanvas(source.width, source.height);
+    const context = flat.getContext("2d");
+    if (!context) return source;
+    context.fillStyle = color;
+    context.fillRect(0, 0, flat.width, flat.height);
+    context.drawImage(source, 0, 0);
+    return flat;
+  }
+
+  // ../vendor/boarddd/src/gerber/layers.js
+  var APERTURE_FUNCTION = /^%TA\.AperFunction,([^,*]*)/i;
+  var CLEAR_ATTRIBUTE = /^%TD(\.AperFunction)?\*%/i;
+  var APERTURE_DEFINE = /^%ADD(\d+)/;
+  var APERTURE_SELECT = /^(?:G54)?D(\d+)\*$/;
+  var DRAW = /D0[123]\*$/;
+  var REGION = /^G3[67]\*/;
+  function profileApertures(lines) {
+    const found = /* @__PURE__ */ new Set();
+    let attribute = "";
+    for (const line of lines) {
+      const stripped = line.trim();
+      const opened = APERTURE_FUNCTION.exec(stripped);
+      if (opened) {
+        attribute = opened[1].trim().toLowerCase();
+        continue;
+      }
+      if (CLEAR_ATTRIBUTE.test(stripped)) {
+        attribute = "";
+        continue;
+      }
+      const defined = APERTURE_DEFINE.exec(stripped);
+      if (defined && attribute === "profile") {
+        found.add(defined[1]);
+      }
+    }
+    return found;
+  }
+  function plotsProfile(text) {
+    return typeof text === "string" && text.includes("AperFunction") && profileApertures(text.split(/\r?\n/)).size > 0;
+  }
+  function withoutProfile(text) {
+    if (typeof text !== "string" || !text.includes("AperFunction")) return text;
+    const lines = text.split(/(?<=\n)/);
+    const profile = profileApertures(lines);
+    if (profile.size === 0) return text;
+    const kept = [];
+    let drawing = false;
+    for (const line of lines) {
+      const stripped = line.trim();
+      const selected = APERTURE_SELECT.exec(stripped);
+      if (selected) {
+        drawing = profile.has(selected[1]);
+        kept.push(line);
+        continue;
+      }
+      if (REGION.test(stripped)) drawing = false;
+      if (drawing && DRAW.test(stripped)) continue;
+      kept.push(line);
+    }
+    return kept.join("");
+  }
+  function hasGeometry(text) {
+    return typeof text === "string" && /D0?[13]\*|G36\*/.test(text);
+  }
+  var LAYER_ROLES = Object.freeze([
+    "copper",
+    "mask",
+    "silk",
+    "paste",
+    "outline",
+    "drill",
+    "fab",
+    "doc",
+    "other"
+  ]);
+  var FILE_FUNCTION = /%TF\.FileFunction,([^*]*)\*%/i;
+  function fromFileFunction(content) {
+    const match = FILE_FUNCTION.exec(content.slice(0, 2e4));
+    if (!match) return null;
+    const parts = match[1].split(",").map((part) => part.trim());
+    const kind = parts[0].toLowerCase();
+    const sideOf = (value) => {
+      const lower = String(value ?? "").toLowerCase();
+      if (lower === "top") return "top";
+      if (lower === "bot" || lower === "bottom") return "bottom";
+      if (lower === "inr" || lower === "inner") return "inner";
+      return null;
+    };
+    switch (kind) {
+      case "copper": {
+        const index = /^L(\d+)$/i.exec(parts[1] ?? "");
+        return {
+          role: "copper",
+          side: sideOf(parts[2]),
+          index: index ? Number(index[1]) : null
+        };
+      }
+      case "soldermask":
+        return { role: "mask", side: sideOf(parts[1]) };
+      case "legend":
+        return { role: "silk", side: sideOf(parts[1]) };
+      case "paste":
+        return { role: "paste", side: sideOf(parts[1]) };
+      case "profile":
+        return { role: "outline", side: null };
+      case "plated":
+      case "nonplated":
+        return { role: "drill", side: null, plated: kind === "plated" };
+      case "assemblydrawing":
+        return { role: "fab", side: sideOf(parts[1]) };
+      case "other":
+      case "drawing":
+      case "fabricationdrawing":
+        return { role: "doc", side: null };
+      default:
+        return null;
+    }
+  }
+  var NAME_RULES = [
+    // KiCad layer names inside file names: board-F_Cu.gbr, board-In2_Cu.g3, board-Edge_Cuts.gm1
+    [/(^|[^a-z0-9])f[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "top" }],
+    [/(^|[^a-z0-9])b[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "bottom" }],
+    [/(^|[^a-z0-9])in(\d+)[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "inner" }],
+    [/(^|[^a-z0-9])f[._]mask([^a-z0-9]|$)/i, { role: "mask", side: "top" }],
+    [/(^|[^a-z0-9])b[._]mask([^a-z0-9]|$)/i, { role: "mask", side: "bottom" }],
+    [/(^|[^a-z0-9])f[._]silks?(creen)?([^a-z0-9]|$)/i, { role: "silk", side: "top" }],
+    [/(^|[^a-z0-9])b[._]silks?(creen)?([^a-z0-9]|$)/i, { role: "silk", side: "bottom" }],
+    [/(^|[^a-z0-9])f[._]paste([^a-z0-9]|$)/i, { role: "paste", side: "top" }],
+    [/(^|[^a-z0-9])b[._]paste([^a-z0-9]|$)/i, { role: "paste", side: "bottom" }],
+    [/(^|[^a-z0-9])f[._](fab|courtyard)([^a-z0-9]|$)/i, { role: "fab", side: "top" }],
+    [/(^|[^a-z0-9])b[._](fab|courtyard)([^a-z0-9]|$)/i, { role: "fab", side: "bottom" }],
+    [/(^|[^a-z0-9])edge[._]cuts([^a-z0-9]|$)/i, { role: "outline", side: null }],
+    [/(^|[^a-z0-9])(dwgs|cmts|eco\d)[._]user([^a-z0-9]|$)/i, { role: "doc", side: null }]
+  ];
+  var EXTENSION_RULES = /* @__PURE__ */ new Map([
+    [".gtl", { role: "copper", side: "top" }],
+    [".gbl", { role: "copper", side: "bottom" }],
+    [".gts", { role: "mask", side: "top" }],
+    [".gbs", { role: "mask", side: "bottom" }],
+    [".gto", { role: "silk", side: "top" }],
+    [".gbo", { role: "silk", side: "bottom" }],
+    [".gtp", { role: "paste", side: "top" }],
+    [".gbp", { role: "paste", side: "bottom" }],
+    [".gko", { role: "outline", side: null }],
+    [".gm1", { role: "outline", side: null }],
+    [".gml", { role: "outline", side: null }],
+    [".drl", { role: "drill", side: null }],
+    [".xln", { role: "drill", side: null }],
+    [".exc", { role: "drill", side: null }],
+    [".drd", { role: "drill", side: null }]
+  ]);
+  function layerRole(name = "", content = "") {
+    if (typeof content === "string" && content) {
+      const found = fromFileFunction(content);
+      if (found) return found;
+      if (/^\s*M48\b/m.test(content.slice(0, 2e3))) {
+        return { role: "drill", side: null, ...drillPlating(name) };
+      }
+    }
+    const base = String(name).split(/[\\/]/).pop();
+    for (const [pattern, result] of NAME_RULES) {
+      const match = pattern.exec(base);
+      if (match) {
+        if (result.side === "inner") {
+          return { ...result, index: Number(match[2]) + 1 };
+        }
+        return { ...result };
+      }
+    }
+    const lower = base.toLowerCase();
+    const dot2 = lower.lastIndexOf(".");
+    const extension = dot2 >= 0 ? lower.slice(dot2) : "";
+    const byExtension = EXTENSION_RULES.get(extension);
+    if (byExtension) {
+      return byExtension.role === "drill" ? { ...byExtension, ...drillPlating(base) } : { ...byExtension };
+    }
+    const inner = /^\.g(\d+)$/.exec(extension);
+    if (inner) return { role: "copper", side: "inner", index: Number(inner[1]) };
+    return { role: "other", side: null };
+  }
+  function drillPlating(name) {
+    const lower = String(name).toLowerCase();
+    if (/(^|[^a-z])npth([^a-z]|$)|non[-_ ]?plated/.test(lower)) return { plated: false };
+    if (/(^|[^a-z])pth([^a-z]|$)/.test(lower)) return { plated: true };
+    return {};
+  }
+  function groupBoardLayers(files) {
+    const face = () => ({ copper: null, mask: null, silk: null, paste: null, fab: null });
+    const board = { outline: null, top: face(), bottom: face(), inner: [], drills: [], other: [] };
+    for (const file of files) {
+      const entry = { name: file.name, source: file.source ?? file.content };
+      const found = layerRole(file.name, typeof file.content === "string" ? file.content : "");
+      if (found.role === "outline") {
+        if (!board.outline) board.outline = entry;
+        else board.other.push(entry);
+      } else if (found.role === "drill") {
+        board.drills.push({ ...entry, plated: found.plated ?? null });
+      } else if (found.role === "copper" && found.side === "inner") {
+        board.inner.push({ ...entry, index: found.index ?? null });
+      } else if ((found.side === "top" || found.side === "bottom") && found.role in board[found.side]) {
+        const slot = board[found.side];
+        if (slot[found.role] == null) slot[found.role] = entry;
+        else board.other.push(entry);
+      } else {
+        board.other.push(entry);
+      }
+    }
+    board.inner.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return board;
+  }
+
+  // ../vendor/boarddd/src/gerber/board.js
+  var FACE_ROLES = Object.freeze(["copper", "mask", "silk", "paste"]);
+  function unwrap(entry) {
+    if (entry == null) return null;
+    if (typeof entry === "object" && "source" in entry && !isBlob2(entry)) {
+      return { source: entry.source, name: entry.name };
+    }
+    return { source: entry, name: void 0 };
+  }
+  async function layerText(entry, strip) {
+    const { source, name } = unwrap(entry);
+    const text = await sourceToText(source);
+    return { source: strip ? withoutProfile(text) : text, name };
+  }
+  function selectFace(board, side = "top") {
+    const face = board[side] && typeof board[side] === "object" && !isSource(board[side]) ? board[side] : board;
+    return {
+      outline: board.outline ?? null,
+      copper: face.copper ?? null,
+      mask: face.mask ?? null,
+      silk: face.silk ?? null,
+      paste: face.paste ?? null,
+      drills: Array.isArray(board.drills) ? board.drills : board.drills ? [board.drills] : []
+    };
+  }
+  function isBlob2(value) {
+    return typeof Blob !== "undefined" && value instanceof Blob;
+  }
+  function isSource(value) {
+    return typeof value === "string" || value instanceof ArrayBuffer || ArrayBuffer.isView(value) || isBlob2(value) || value && typeof value === "object" && "source" in value;
+  }
+  async function addBoardLayers(renderer, board, options = {}) {
+    const face = selectFace(board, options.side ?? "top");
+    const palette2 = options.palette && options.palette.mask && options.palette.mask.color ? options.palette : boardPalette(options.palette ?? {});
+    const strip = options.stripProfile !== false;
+    const ids = {
+      outline: null,
+      substrate: null,
+      copper: null,
+      mask: null,
+      finish: null,
+      silk: null,
+      paste: null,
+      drills: []
+    };
+    const hidden = (layer) => renderer.renderLayer(layer, { visible: false });
+    const load = async (entry, stripIt) => {
+      if (!entry) return null;
+      const text = await layerText(entry, stripIt);
+      return hasGeometry(text.source) ? text : null;
+    };
+    const outline = await load(face.outline, false);
+    const copper = await load(face.copper, strip);
+    const maskText = face.mask ? await layerText(face.mask, strip) : null;
+    const mask = maskText && hasGeometry(maskText.source) ? maskText : null;
+    const maskEverywhere = maskText != null && mask == null;
+    const silkText = palette2.silk ? await load(face.silk, strip) : null;
+    const pasteText = options.paste === true ? await load(face.paste, strip) : null;
+    let outlineId = null;
+    if (outline) {
+      outlineId = await hidden(outline);
+      ids.outline = outlineId;
+    }
+    const boardArea = async (name, color, alpha) => {
+      if (outline) {
+        const twin2 = await hidden(outline);
+        return renderer.renderCompositeLayer([outlineId, twin2], {
+          name,
+          visibleAreas: ["00", "11"],
+          outlineLayerId: outlineId,
+          color,
+          alpha
+        });
+      }
+      const anchorText = mask ?? copper;
+      if (!anchorText) return null;
+      const anchor = await hidden(anchorText);
+      const twin = await hidden(anchorText);
+      return renderer.renderCompositeLayer([anchor, twin], {
+        name,
+        visibleAreas: ["00", "11"],
+        color,
+        alpha
+      });
+    };
+    if (options.substrate !== false) {
+      ids.substrate = await boardArea("Substrate", palette2.substrate, 1);
+    }
+    if (copper) {
+      ids.copper = await renderer.renderLayer(copper, {
+        color: palette2.copper,
+        alpha: 1
+      });
+    }
+    let maskSourceId = null;
+    if (maskEverywhere) {
+      ids.mask = await boardArea("Solder mask", palette2.mask.color, palette2.mask.alpha);
+    } else if (mask) {
+      const maskOptions = {
+        name: "Solder mask",
+        color: palette2.mask.color,
+        alpha: palette2.mask.alpha
+      };
+      if (outlineId != null) maskOptions.outlineLayerId = outlineId;
+      ids.mask = await renderer.renderInvertedLayer(mask, maskOptions);
+      maskSourceId = await hidden(mask);
+    }
+    if (options.finish !== false && ids.copper != null && maskSourceId != null) {
+      ids.finish = await renderer.renderCompositeLayer([ids.copper, maskSourceId], {
+        name: "Surface finish",
+        visibleAreas: ["11"],
+        color: palette2.finish,
+        alpha: 1
+      });
+    }
+    if (silkText) {
+      const silk = silkText;
+      const style = { color: palette2.silk.color, alpha: palette2.silk.alpha };
+      if (options.clipSilk !== false && (maskSourceId != null || outlineId != null)) {
+        const silkId = await hidden(silk);
+        const second = maskSourceId ?? await hidden(silk);
+        const shown = maskSourceId != null ? "10" : "11";
+        ids.silk = await renderer.renderCompositeLayer(
+          [silkId, second],
+          outlineId != null ? {
+            name: "Silkscreen",
+            inverted: true,
+            visibleAreas: ["00", "01", "10", "11"].filter((code) => code !== shown),
+            outlineLayerId: outlineId,
+            ...style
+          } : { name: "Silkscreen", visibleAreas: [shown], ...style }
+        );
+      } else {
+        ids.silk = await renderer.renderLayer(silk, style);
+      }
+    }
+    if (pasteText) {
+      ids.paste = await renderer.renderLayer(pasteText, {
+        color: palette2.paste.color,
+        alpha: palette2.paste.alpha
+      });
+    }
+    if (options.holes !== false) {
+      for (const drill of face.drills) {
+        const { source, name } = unwrap(drill);
+        const text = await sourceToText(source);
+        if (parseExcellon(text).length === 0) continue;
+        const id = await renderer.renderLayer(
+          { source: text, name: name ?? "drill.drl", kind: "drill" },
+          { color: palette2.plating }
+        );
+        if (id != null) ids.drills.push(id);
+      }
+    }
+    return ids;
+  }
+  async function renderBoard(renderer, board, options = {}) {
+    const { side = "top", mirror = true, palette: palette2, substrate, finish, clipSilk, paste, holes, stripProfile, ...frameOptions } = options;
+    let ids = null;
+    await renderer.withFrame(
+      {
+        background: null,
+        ...frameOptions,
+        compositeMode: "stack",
+        flipX: frameOptions.flipX ?? (side === "bottom" && mirror)
+      },
+      async () => {
+        ids = await addBoardLayers(renderer, board, {
+          side,
+          palette: palette2,
+          substrate,
+          finish,
+          clipSilk,
+          paste,
+          holes,
+          stripProfile
+        });
+      }
+    );
+    return { frame: renderer.lastFrame, ids };
+  }
+  function faceRasterSize(bounds, { pxPerMm = 32, minPx = 2048, maxPx = 6144, maxTextureSize = Infinity } = {}) {
+    const spanX = Math.max(bounds.maxX - bounds.minX, 1e-6);
+    const spanY = Math.max(bounds.maxY - bounds.minY, 1e-6);
+    const ceiling = Math.min(maxPx, maxTextureSize || maxPx);
+    let scale = Math.max(pxPerMm, minPx / spanX);
+    scale = Math.min(scale, ceiling / Math.max(spanX, spanY));
+    return {
+      width: Math.max(Math.round(spanX * scale), 1),
+      height: Math.max(Math.round(spanY * scale), 1),
+      pxPerMm: scale
+    };
+  }
+  async function renderFaceRaster(renderer, board, options = {}) {
+    const { bounds, side = "top", flatten: flatten2, ...rest } = options;
+    if (!bounds) throw new TypeError("renderFaceRaster needs world bounds.");
+    const size = options.width && options.height ? { width: options.width, height: options.height } : faceRasterSize(bounds, rest);
+    const view = calculateFitView(bounds, size.width, size.height, 0);
+    const palette2 = rest.palette && rest.palette.mask?.color ? rest.palette : boardPalette(rest.palette ?? {});
+    await renderBoard(renderer, board, {
+      ...pick(rest, ["substrate", "finish", "clipSilk", "paste", "holes", "stripProfile"]),
+      palette: palette2,
+      side,
+      mirror: false,
+      width: size.width,
+      height: size.height,
+      view
+    });
+    let canvas = renderer.canvas;
+    if (flatten2 !== false) {
+      canvas = flattenOnto(renderer.canvas, typeof flatten2 === "string" ? flatten2 : toHexColor(palette2.substrate));
+    }
+    return { canvas, width: size.width, height: size.height, bounds, view };
+  }
+  function pick(object, keys) {
+    const result = {};
+    for (const key of keys) if (object[key] !== void 0) result[key] = object[key];
+    return result;
+  }
+
+  // ../vendor/boarddd/src/gerber/view.js
+  function fitView(bounds, width, height, padding = 0) {
+    const view = calculateFitView(bounds, width, height, padding);
+    const { viewWidth, viewHeight } = viewExtent(width, height);
+    return { ...view, viewWidth, viewHeight, W: width, H: height };
+  }
+  function withFrameSize(view, width, height) {
+    const { viewWidth, viewHeight } = viewExtent(width, height);
+    return {
+      zoomX: view.zoomX,
+      zoomY: view.zoomY,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY,
+      viewWidth,
+      viewHeight,
+      W: width,
+      H: height
+    };
+  }
+  function frameView(view) {
+    return {
+      zoomX: view.zoomX,
+      zoomY: view.zoomY,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY
+    };
+  }
+  function project(view, x, y, { flip = false, scale = 1 } = {}) {
+    let { x: px2, y: py2 } = projectToCanvas(view, x, y, view.W, view.H);
+    if (flip) px2 = view.W - px2;
+    return [px2 / scale, py2 / scale];
+  }
+  function unproject(view, px2, py2, { flip = false, scale = 1 } = {}) {
+    let cx = px2 * scale;
+    if (flip) cx = view.W - cx;
+    const { x, y } = unprojectFromCanvas(view, cx, py2 * scale, view.W, view.H);
+    return [x, y];
+  }
+  function pixelsPerUnit(view) {
+    const { viewWidth } = viewExtent(view.W, view.H);
+    return Math.abs(view.zoomX) / viewWidth * view.W;
+  }
+  function boundsOf(points) {
+    if (!points || points.length === 0) return null;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of points) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    return { minX, maxX, minY, maxY };
+  }
+  function unionBounds(...boundsList) {
+    let result = null;
+    for (const bounds of boundsList.flat()) {
+      result = mergeBounds(result, bounds ?? null);
+    }
+    return result;
+  }
+  function padBounds(bounds, margin) {
+    if (!bounds) return null;
+    return {
+      minX: bounds.minX - margin,
+      maxX: bounds.maxX + margin,
+      minY: bounds.minY - margin,
+      maxY: bounds.maxY + margin
+    };
+  }
+  function sharedView(boundsList, width, height, padding = 0) {
+    const bounds = unionBounds(boundsList);
+    if (!bounds) throw new Error("sharedView needs at least one finite bounds.");
+    return fitView(bounds, width, height, padding);
+  }
+  function rasterToWorld(bounds, width, height, px2, py2) {
+    return [
+      bounds.minX + px2 / width * (bounds.maxX - bounds.minX),
+      bounds.maxY - py2 / height * (bounds.maxY - bounds.minY)
+    ];
+  }
+  function pixelRectToWorld(view, rect) {
+    const a = unprojectFromCanvas(view, rect.x, rect.y, view.W, view.H);
+    const b = unprojectFromCanvas(
+      view,
+      rect.x + rect.width,
+      rect.y + rect.height,
+      view.W,
+      view.H
+    );
+    return {
+      minX: Math.min(a.x, b.x),
+      maxX: Math.max(a.x, b.x),
+      minY: Math.min(a.y, b.y),
+      maxY: Math.max(a.y, b.y)
+    };
+  }
+  function worldToPixelRect(view, bounds) {
+    const a = projectToCanvas(view, bounds.minX, bounds.minY, view.W, view.H);
+    const b = projectToCanvas(view, bounds.maxX, bounds.maxY, view.W, view.H);
+    const x = Math.min(a.x, b.x);
+    const y = Math.min(a.y, b.y);
+    return { x, y, width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) };
+  }
+
+  // ../vendor/boarddd/src/gerber/diff.js
+  var DIFF_STYLE = Object.freeze({
+    removed: Object.freeze({ color: [0.93, 0.2, 0.2], alpha: 1 }),
+    added: Object.freeze({ color: [0.2, 0.82, 0.3], alpha: 1 }),
+    unchanged: Object.freeze({ color: [0.62, 0.64, 0.68], alpha: 0.3 })
+  });
+  var MAX_DIFF_SOURCES = 12;
+  function diffPatterns(baseCount, headCount) {
+    const total = baseCount + headCount;
+    if (baseCount < 1 || headCount < 1 || total > MAX_DIFF_SOURCES) {
+      throw new RangeError(
+        `A layer diff needs 1..${MAX_DIFF_SOURCES} sources in total with at least one per side.`
+      );
+    }
+    const removed = [];
+    const added = [];
+    const unchanged = [];
+    for (let code = 1; code < 2 ** total; code += 1) {
+      let pattern = "";
+      let inBase = false;
+      let inHead = false;
+      for (let slot = 0; slot < total; slot += 1) {
+        const on = code >> slot & 1;
+        pattern += on ? "1" : "0";
+        if (on && slot < baseCount) inBase = true;
+        if (on && slot >= baseCount) inHead = true;
+      }
+      if (inBase && inHead) unchanged.push(pattern);
+      else if (inBase) removed.push(pattern);
+      else added.push(pattern);
+    }
+    return { removed, added, unchanged };
+  }
+  function toList(side) {
+    if (side == null) return [];
+    return Array.isArray(side) ? side.filter((entry) => entry != null) : [side];
+  }
+  function unwrap2(entry) {
+    if (entry && typeof entry === "object" && "source" in entry && !(typeof Blob !== "undefined" && entry instanceof Blob)) {
+      return { source: entry.source, name: entry.name };
+    }
+    return { source: entry, name: void 0 };
+  }
+  async function prepareDiffSources(side, { stripProfile = false, onWarning } = {}) {
+    const prepared = [];
+    for (const entry of toList(side)) {
+      const { source, name } = unwrap2(entry);
+      let text = await sourceToText(source);
+      const drill = isDrillSource(source, name ?? "", text) || looksLikeDrillContent(text);
+      if (drill) {
+        const label = name ?? getSourceName(source);
+        const warn2 = (message) => {
+          const text2 = label ? `${label}: ${message}` : message;
+          if (typeof onWarning === "function") onWarning(text2);
+          else console.warn(`boarddd/gerber: ${text2}`);
+        };
+        text = holesToGerber(
+          parseExcellon(text, { plated: /npth/i.test(name ?? "") ? false : void 0, onWarning: warn2 })
+        );
+      } else if (stripProfile) {
+        text = withoutProfile(text);
+      }
+      prepared.push({
+        source: text,
+        name,
+        kind: "gerber",
+        // A file that draws nothing (a header-only drill or Gerber) is an
+        // absent side: the renderer would reject it.
+        empty: !hasGeometry(text)
+      });
+    }
+    return prepared;
+  }
+  function geometryText(text) {
+    return String(text).split(/\r?\n/).filter((line) => {
+      const trimmed = line.trim();
+      return trimmed !== "" && !/^G04[^*]*\*$/.test(trimmed) && !/^%T[FAOD][^%]*\*%$/.test(trimmed);
+    }).join("\n");
+  }
+  function sameGeometry(base, head) {
+    return base.length === head.length && base.every((entry, index) => geometryText(entry.source) === geometryText(head[index].source));
+  }
+  function styleOf(options, key) {
+    const base = DIFF_STYLE[key];
+    const custom = options.style?.[key] ?? {};
+    return {
+      color: custom.color ?? options.colors?.[key] ?? base.color,
+      alpha: custom.alpha ?? base.alpha
+    };
+  }
+  async function addLayerDiff(renderer, pair, options = {}) {
+    const base = options.prepared ? pair.base : await prepareDiffSources(pair.base, options);
+    const head = options.prepared ? pair.head : await prepareDiffSources(pair.head, options);
+    const ids = { removed: null, added: null, unchanged: null };
+    const baseLive = base.filter((entry) => !entry.empty);
+    const headLive = head.filter((entry) => !entry.empty);
+    const removedStyle = styleOf(options, "removed");
+    const addedStyle = styleOf(options, "added");
+    const unchangedStyle = styleOf(options, "unchanged");
+    const showUnchanged = options.showUnchanged !== false;
+    if (baseLive.length === 0 || headLive.length === 0) {
+      const present = baseLive.length ? baseLive : headLive;
+      const style = baseLive.length ? removedStyle : addedStyle;
+      let first = null;
+      for (const entry of present) {
+        const id = await renderer.renderLayer(entry, style);
+        first ?? (first = id);
+      }
+      ids[baseLive.length ? "removed" : "added"] = first;
+      return ids;
+    }
+    const patterns = diffPatterns(baseLive.length, headLive.length);
+    const sourceIds = [];
+    for (const entry of [...baseLive, ...headLive]) {
+      sourceIds.push(await renderer.renderLayer(entry, { visible: false }));
+    }
+    ids.unchanged = await renderer.renderCompositeLayer(sourceIds, {
+      name: "Unchanged",
+      visibleAreas: patterns.unchanged,
+      color: unchangedStyle.color,
+      alpha: unchangedStyle.alpha,
+      visible: showUnchanged
+    });
+    ids.removed = await renderer.renderCompositeLayer(sourceIds, {
+      name: "Removed",
+      visibleAreas: patterns.removed,
+      color: removedStyle.color,
+      alpha: removedStyle.alpha
+    });
+    ids.added = await renderer.renderCompositeLayer(sourceIds, {
+      name: "Added",
+      visibleAreas: patterns.added,
+      color: addedStyle.color,
+      alpha: addedStyle.alpha
+    });
+    return ids;
+  }
+  var DIFF_OPTION_KEYS = /* @__PURE__ */ new Set([
+    "style",
+    "colors",
+    "onWarning",
+    "showUnchanged",
+    "stripProfile",
+    "underlay",
+    "prepared",
+    "cellSize",
+    "mergeDistance",
+    "minRegionPixels",
+    "maxRegions",
+    "skipIdentical"
+  ]);
+  function splitOptions(options) {
+    const frame = {};
+    const diff = {};
+    for (const [key, value] of Object.entries(options)) {
+      (DIFF_OPTION_KEYS.has(key) ? diff : frame)[key] = value;
+    }
+    return { frame, diff };
+  }
+  async function addUnderlay(renderer, underlay, alphaOverride) {
+    for (const entry of underlay ?? []) {
+      const { source, name } = unwrap2(entry);
+      await renderer.renderLayer(
+        { source, name },
+        {
+          color: entry.color ?? [0.5, 0.5, 0.5],
+          alpha: alphaOverride ?? entry.alpha ?? 0.35
+        }
+      );
+    }
+  }
+  async function renderLayerDiff(renderer, pair, options = {}) {
+    const { frame: frameOptions, diff } = splitOptions(options);
+    const base = await prepareDiffSources(pair.base, diff);
+    const head = await prepareDiffSources(pair.head, diff);
+    let ids = null;
+    await renderer.withFrame(
+      { background: null, ...frameOptions, compositeMode: "stack" },
+      async () => {
+        await addUnderlay(renderer, diff.underlay);
+        ids = await addLayerDiff(renderer, { base, head }, { ...diff, prepared: true });
+      }
+    );
+    const frame = renderer.lastFrame;
+    return {
+      frame,
+      view: frame.view ? withFrameSize(frame.view, frame.width, frame.height) : null,
+      ids
+    };
+  }
+  var CLASS_STYLE = {
+    removed: { color: [1, 0, 0], alpha: 1 },
+    added: { color: [0, 1, 0], alpha: 1 },
+    unchanged: { color: [0, 0, 1], alpha: 1 }
+  };
+  async function analyzeLayerDiff(renderer, pair, options = {}) {
+    const { frame: frameOptions, diff } = splitOptions(options);
+    const base = await prepareDiffSources(pair.base, diff);
+    const head = await prepareDiffSources(pair.head, diff);
+    if (diff.skipIdentical !== false && sameGeometry(base, head)) {
+      return {
+        changed: false,
+        identical: true,
+        addedPixels: 0,
+        removedPixels: 0,
+        unchangedPixels: null,
+        regions: [],
+        truncated: false,
+        width: frameOptions.width ?? null,
+        height: frameOptions.height ?? null,
+        view: frameOptions.view && frameOptions.width && frameOptions.height ? withFrameSize(frameOptions.view, frameOptions.width, frameOptions.height) : null,
+        pixelSizeMm: null
+      };
+    }
+    await renderer.withFrame(
+      {
+        ...frameOptions,
+        background: null,
+        compositeMode: "stack"
+        // Coverage is what is being measured; no feature may be widened differently.
+      },
+      async () => {
+        await addUnderlay(renderer, diff.underlay, 0);
+        await addLayerDiff(renderer, { base, head }, {
+          prepared: true,
+          style: CLASS_STYLE,
+          showUnchanged: true
+        });
+      }
+    );
+    const frame = renderer.lastFrame;
+    const { pixels, width, height } = readRendererPixels(renderer, { bottomUp: true });
+    const summary2 = summarizeDiffPixels(pixels, width, height, { ...diff, bottomUp: true });
+    const view = frame.view ? withFrameSize(frame.view, width, height) : null;
+    for (const region of summary2.regions) {
+      region.world = view ? pixelRectToWorld(view, region.pixels) : null;
+    }
+    return {
+      ...summary2,
+      identical: false,
+      width,
+      height,
+      view,
+      pixelSizeMm: view ? 1 / pixelsPerUnit(view) : null
+    };
+  }
+  function summarizeDiffPixels(pixels, width, height, options = {}) {
+    const cellSize = Math.max(1, Math.round(options.cellSize ?? 8));
+    const mergeDistance = Math.max(0, options.mergeDistance ?? 16);
+    const minRegionPixels = Math.max(1, options.minRegionPixels ?? 1);
+    const maxRegions = Math.max(1, options.maxRegions ?? 500);
+    const bottomUp = options.bottomUp === true;
+    const cols = Math.ceil(width / cellSize);
+    const rows = Math.ceil(height / cellSize);
+    const cellCount = cols * rows;
+    const cellAdded = new Uint32Array(cellCount);
+    const cellRemoved = new Uint32Array(cellCount);
+    const cellMinX = new Int32Array(cellCount).fill(2147483647);
+    const cellMinY = new Int32Array(cellCount).fill(2147483647);
+    const cellMaxX = new Int32Array(cellCount).fill(-1);
+    const cellMaxY = new Int32Array(cellCount).fill(-1);
+    let addedPixels = 0;
+    let removedPixels = 0;
+    let unchangedPixels = 0;
+    const stride = width * 4;
+    for (let row = 0; row < height; row += 1) {
+      const y = bottomUp ? height - 1 - row : row;
+      const cellRow = (y / cellSize | 0) * cols;
+      let at = row * stride;
+      for (let x = 0; x < width; x += 1, at += 4) {
+        const alpha = pixels[at + 3];
+        if (alpha < 128) continue;
+        const red = pixels[at];
+        const green = pixels[at + 1];
+        let kind = 0;
+        if (red >= 128 && red > green) kind = 1;
+        else if (green >= 128) kind = 2;
+        else {
+          if (pixels[at + 2] >= 128) unchangedPixels += 1;
+          continue;
+        }
+        const cell = cellRow + (x / cellSize | 0);
+        if (kind === 1) {
+          removedPixels += 1;
+          cellRemoved[cell] += 1;
+        } else {
+          addedPixels += 1;
+          cellAdded[cell] += 1;
+        }
+        if (x < cellMinX[cell]) cellMinX[cell] = x;
+        if (x > cellMaxX[cell]) cellMaxX[cell] = x;
+        if (y < cellMinY[cell]) cellMinY[cell] = y;
+        if (y > cellMaxY[cell]) cellMaxY[cell] = y;
+      }
+    }
+    const reach = Math.ceil(mergeDistance / cellSize);
+    const visited = new Uint8Array(cellCount);
+    const regions = [];
+    const stack = [];
+    for (let start = 0; start < cellCount; start += 1) {
+      if (visited[start] || cellAdded[start] === 0 && cellRemoved[start] === 0) continue;
+      visited[start] = 1;
+      stack.push(start);
+      let added = 0;
+      let removed = 0;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      while (stack.length) {
+        const cell = stack.pop();
+        added += cellAdded[cell];
+        removed += cellRemoved[cell];
+        if (cellMinX[cell] < minX) minX = cellMinX[cell];
+        if (cellMinY[cell] < minY) minY = cellMinY[cell];
+        if (cellMaxX[cell] > maxX) maxX = cellMaxX[cell];
+        if (cellMaxY[cell] > maxY) maxY = cellMaxY[cell];
+        const cx = cell % cols;
+        const cy = (cell - cx) / cols;
+        for (let ny = Math.max(0, cy - reach); ny <= Math.min(rows - 1, cy + reach); ny += 1) {
+          for (let nx = Math.max(0, cx - reach); nx <= Math.min(cols - 1, cx + reach); nx += 1) {
+            const next = ny * cols + nx;
+            if (visited[next] || cellAdded[next] === 0 && cellRemoved[next] === 0) continue;
+            visited[next] = 1;
+            stack.push(next);
+          }
+        }
+      }
+      if (added + removed < minRegionPixels) continue;
+      regions.push({
+        kind: added && removed ? "mixed" : added ? "added" : "removed",
+        addedPixels: added,
+        removedPixels: removed,
+        pixels: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
+      });
+    }
+    regions.sort(
+      (a, b) => b.addedPixels + b.removedPixels - (a.addedPixels + a.removedPixels)
+    );
+    const truncated = regions.length > maxRegions;
+    if (truncated) regions.length = maxRegions;
+    return {
+      changed: regions.length > 0,
+      addedPixels,
+      removedPixels,
+      unchangedPixels,
+      regions,
+      truncated
+    };
+  }
+  async function measureLayers(renderer, sources, options = {}) {
+    const prepared = await prepareDiffSources(sources, options);
+    const live = prepared.filter((entry) => !entry.empty);
+    await renderer.withFrame(
+      { width: 1, height: 1, fit: false, background: null, compositeMode: "stack" },
+      async () => {
+        for (const entry of live) {
+          await renderer.renderLayer(entry, { visible: false });
+        }
+      }
+    );
+    const layers = [];
+    let bounds = null;
+    let index = 0;
+    for (const entry of prepared) {
+      if (entry.empty) {
+        layers.push({ name: entry.name ?? null, bounds: null });
+        continue;
+      }
+      const record = renderer.lastFrame.layers[index];
+      index += 1;
+      layers.push({ name: entry.name ?? record?.name ?? null, bounds: record?.bounds ?? null });
+      if (record?.bounds) {
+        bounds = bounds ? {
+          minX: Math.min(bounds.minX, record.bounds.minX),
+          maxX: Math.max(bounds.maxX, record.bounds.maxX),
+          minY: Math.min(bounds.minY, record.bounds.minY),
+          maxY: Math.max(bounds.maxY, record.bounds.maxY)
+        } : { ...record.bounds };
+      }
+    }
+    return { bounds, layers };
+  }
+  async function analyzeBoardDiff(renderer, layers, options = {}) {
+    const { width = 2048, height = 2048, padding = 0 } = options;
+    let view = options.view;
+    let bounds = null;
+    if (!view) {
+      const all = layers.flatMap((layer) => [...toList(layer.base), ...toList(layer.head)]);
+      const measured = await measureLayers(renderer, all, options);
+      bounds = measured.bounds;
+      if (!bounds) throw new Error("No layer of either revision has any geometry.");
+      view = calculateFitView(bounds, width, height, padding);
+    }
+    const frameView2 = {
+      zoomX: view.zoomX,
+      zoomY: view.zoomY,
+      offsetX: view.offsetX,
+      offsetY: view.offsetY
+    };
+    const reports = [];
+    for (const layer of layers) {
+      const report = await analyzeLayerDiff(
+        renderer,
+        { base: layer.base, head: layer.head },
+        { ...options, width, height, view: frameView2 }
+      );
+      reports.push({ name: layer.name, ...report });
+    }
+    return {
+      view: withFrameSize(frameView2, width, height),
+      bounds,
+      width,
+      height,
+      changed: reports.some((report) => report.changed),
+      layers: reports
+    };
+  }
+
+  // ../vendor/boarddd/src/gerber/outline.js
+  var OUTLINE_TOLERANCE_MM = 2e-3;
+  var ARC_SEGMENTS = 48;
+  var SAME_SHAPE = 0.98;
+  var FORMAT = /%FSLAX(\d)(\d)Y(\d)(\d)\*%/;
+  var UNITS2 = /%MO(MM|IN)\*%/;
+  var OP = /^(?:G0([123]))?(?:X([-+]?\d+))?(?:Y([-+]?\d+))?(?:I([-+]?\d+))?(?:J([-+]?\d+))?D0([123])\*$/;
+  var MODE = /^G0([123])\*$/;
+  var QUADRANT = /^G7([45])\*$/;
+  function scaleOf(text) {
+    const format = FORMAT.exec(text);
+    const decimals = format ? Number(format[2]) : 6;
+    const units = UNITS2.exec(text);
+    return (units && units[1] === "IN" ? 25.4 : 1) / 10 ** decimals;
+  }
+  function arcPoints(start, end, center, clockwise) {
+    const [sx, sy] = start;
+    const [ex, ey] = end;
+    const [cx, cy] = center;
+    const radius = Math.hypot(sx - cx, sy - cy);
+    if (radius <= 0) return [end];
+    const startAngle = Math.atan2(sy - cy, sx - cx);
+    let sweep = Math.atan2(ey - cy, ex - cx) - startAngle;
+    if (clockwise) {
+      while (sweep > 0) sweep -= 2 * Math.PI;
+      if (Math.abs(sweep) < 1e-9) sweep = -2 * Math.PI;
+    } else {
+      while (sweep < 0) sweep += 2 * Math.PI;
+      if (Math.abs(sweep) < 1e-9) sweep = 2 * Math.PI;
+    }
+    const steps = Math.max(
+      2,
+      Math.min(ARC_SEGMENTS, Math.floor(Math.abs(sweep) / (2 * Math.PI) * ARC_SEGMENTS) + 2)
+    );
+    const points = [];
+    for (let i = 1; i <= steps; i += 1) {
+      const angle = startAngle + sweep * i / steps;
+      points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
+    }
+    return points;
+  }
+  function quadrantCenter(start, end, i, j, clockwise) {
+    const [sx, sy] = start;
+    const [ex, ey] = end;
+    let best = [sx + i, sy + j];
+    let bestError = Infinity;
+    for (const di of [i, -i]) {
+      for (const dj of [j, -j]) {
+        const cx = sx + di;
+        const cy = sy + dj;
+        const rStart = Math.hypot(sx - cx, sy - cy);
+        const error2 = Math.abs(rStart - Math.hypot(ex - cx, ey - cy));
+        if (error2 > Math.max(rStart, 1) * 1e-3) continue;
+        let sweep = Math.atan2(ey - cy, ex - cx) - Math.atan2(sy - cy, sx - cx);
+        if (clockwise) while (sweep > 0) sweep -= 2 * Math.PI;
+        else while (sweep < 0) sweep += 2 * Math.PI;
+        if (Math.abs(sweep) > Math.PI / 2 + 1e-6) continue;
+        if (error2 < bestError) {
+          best = [cx, cy];
+          bestError = error2;
+        }
+      }
+    }
+    return best;
+  }
+  function strokesOf(text) {
+    const scale = scaleOf(text);
+    const strokes = [];
+    let current = [];
+    let x = 0;
+    let y = 0;
+    let mode = 1;
+    let singleQuadrant = false;
+    for (const raw of String(text).split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("%") || line.startsWith("G04") || line.startsWith("M")) continue;
+      const alone = MODE.exec(line);
+      if (alone) {
+        mode = Number(alone[1]);
+        continue;
+      }
+      const quadrant = QUADRANT.exec(line);
+      if (quadrant) {
+        singleQuadrant = quadrant[1] === "4";
+        continue;
+      }
+      const match = OP.exec(line);
+      if (!match) continue;
+      const [, g, rawX, rawY, rawI, rawJ, d] = match;
+      if (g) mode = Number(g);
+      const nx = rawX != null ? Number(rawX) * scale : x;
+      const ny = rawY != null ? Number(rawY) * scale : y;
+      if (d === "2") {
+        if (current.length > 1) strokes.push(current);
+        current = [[nx, ny]];
+      } else if (d === "1") {
+        if (!current.length) current = [[x, y]];
+        if (mode === 1 || rawI == null && rawJ == null) {
+          current.push([nx, ny]);
+        } else {
+          const i = rawI ? Number(rawI) * scale : 0;
+          const j = rawJ ? Number(rawJ) * scale : 0;
+          const center = singleQuadrant ? quadrantCenter([x, y], [nx, ny], i, j, mode === 2) : [x + i, y + j];
+          current.push(...arcPoints([x, y], [nx, ny], center, mode === 2));
+        }
+      }
+      x = nx;
+      y = ny;
+    }
+    if (current.length > 1) strokes.push(current);
+    return strokes;
+  }
+  function keyOf(point, tolerance) {
+    return `${Math.round(point[0] / tolerance)},${Math.round(point[1] / tolerance)}`;
+  }
+  function stitch(strokes, tolerance) {
+    const ends = /* @__PURE__ */ new Map();
+    strokes.forEach((stroke, index) => {
+      for (const point of [stroke[0], stroke[stroke.length - 1]]) {
+        const key = keyOf(point, tolerance);
+        if (!ends.has(key)) ends.set(key, []);
+        ends.get(key).push(index);
+      }
+    });
+    const used = new Array(strokes.length).fill(false);
+    const loops = [];
+    const closed = (chain) => chain.length > 2 && keyOf(chain[0], tolerance) === keyOf(chain[chain.length - 1], tolerance);
+    for (let index = 0; index < strokes.length; index += 1) {
+      if (used[index]) continue;
+      used[index] = true;
+      const chain = [...strokes[index]];
+      let extended = true;
+      while (extended && !closed(chain)) {
+        extended = false;
+        const tail = keyOf(chain[chain.length - 1], tolerance);
+        for (const candidate of ends.get(tail) ?? []) {
+          if (used[candidate]) continue;
+          const stroke = strokes[candidate];
+          if (keyOf(stroke[0], tolerance) === tail) {
+            chain.push(...stroke.slice(1));
+          } else if (keyOf(stroke[stroke.length - 1], tolerance) === tail) {
+            chain.push(...stroke.slice(0, -1).reverse());
+          } else {
+            continue;
+          }
+          used[candidate] = true;
+          extended = true;
+          break;
+        }
+      }
+      if (closed(chain)) loops.push(chain);
+    }
+    return loops;
+  }
+  function signedArea2(points) {
+    let total = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      const [x1, y1] = points[i];
+      const [x2, y2] = points[(i + 1) % points.length];
+      total += x1 * y2 - x2 * y1;
+    }
+    return total / 2;
+  }
+  function outlineContours(text, { tolerance = OUTLINE_TOLERANCE_MM } = {}) {
+    const found = [];
+    for (const loop of stitch(strokesOf(text), tolerance)) {
+      const points = loop.slice(0, -1);
+      if (points.length < 3) continue;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const [x, y] of points) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      found.push({ points, area: Math.abs(signedArea2(points)), bounds: { minX, maxX, minY, maxY } });
+    }
+    found.sort((a, b) => b.area - a.area);
+    return found;
+  }
+  function contains(outer, inner) {
+    return outer.bounds.minX <= inner.bounds.minX && outer.bounds.maxX >= inner.bounds.maxX && outer.bounds.minY <= inner.bounds.minY && outer.bounds.maxY >= inner.bounds.maxY;
+  }
+  function pickBoard(contours, { width = null, height = null } = {}) {
+    if (!contours.length) return null;
+    if (width && height) {
+      const error2 = (contour) => Math.abs(contour.bounds.maxX - contour.bounds.minX - width) + Math.abs(contour.bounds.maxY - contour.bounds.minY - height);
+      let best = contours[0];
+      for (const contour of contours) if (error2(contour) < error2(best)) best = contour;
+      if (error2(best) <= 2) return best;
+    }
+    return contours[0];
+  }
+  function sameLoop(a, b, tolerance) {
+    return Math.abs(a.bounds.minX - b.bounds.minX) <= tolerance && Math.abs(a.bounds.maxX - b.bounds.maxX) <= tolerance && Math.abs(a.bounds.minY - b.bounds.minY) <= tolerance && Math.abs(a.bounds.maxY - b.bounds.maxY) <= tolerance && (Math.max(a.area, b.area) <= 0 || Math.min(a.area, b.area) / Math.max(a.area, b.area) >= SAME_SHAPE);
+  }
+  function boardCutouts(contours, board, { tolerance = OUTLINE_TOLERANCE_MM } = {}) {
+    const kept = [];
+    for (const contour of contours) {
+      if (contour === board || !contains(board, contour)) continue;
+      if (board.area > 0 && contour.area / board.area >= SAME_SHAPE) continue;
+      if (kept.some((other) => sameLoop(contour, other, tolerance))) continue;
+      kept.push(contour);
+    }
+    return kept;
+  }
+  function boardOutline(text, options = {}) {
+    const contours = outlineContours(text, options);
+    const board = pickBoard(contours, options);
+    if (!board) return null;
+    const wind = (points, ccw) => signedArea2(points) > 0 === ccw ? points : [...points].reverse();
+    return {
+      outer: wind(board.points, true),
+      holes: boardCutouts(contours, board, options).map((cutout) => wind(cutout.points, false)),
+      bounds: { ...board.bounds }
+    };
+  }
+  function gerberExtents(text) {
+    const scale = scaleOf(text);
+    let x = 0;
+    let y = 0;
+    let bounds = null;
+    for (const raw of String(text).split(/\r?\n/)) {
+      const match = OP.exec(raw.trim());
+      if (!match) continue;
+      if (match[2] != null) x = Number(match[2]) * scale;
+      if (match[3] != null) y = Number(match[3]) * scale;
+      bounds = bounds ? {
+        minX: Math.min(bounds.minX, x),
+        maxX: Math.max(bounds.maxX, x),
+        minY: Math.min(bounds.minY, y),
+        maxY: Math.max(bounds.maxY, y)
+      } : { minX: x, maxX: x, minY: y, maxY: y };
+    }
+    return bounds;
+  }
+  function ringsToGerber(rings, { width = 0.01 } = {}) {
+    const at = (value) => Math.round(Number(value) * 1e6);
+    const lines = ["%FSLAX46Y46*%", "%MOMM*%", "%LPD*%", `%ADD10C,${Number(width).toFixed(6)}*%`, "D10*", "G01*"];
+    for (const ring of rings || []) {
+      if (!ring || ring.length < 2) continue;
+      lines.push(`X${at(ring[0][0])}Y${at(ring[0][1])}D02*`);
+      for (const [x, y] of ring.slice(1).concat([ring[0]])) lines.push(`X${at(x)}Y${at(y)}D01*`);
+    }
+    lines.push("M02*");
+    return lines.join("\n") + "\n";
+  }
+
+  // ../vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor.js
   var wasm_gerber_processor_exports = {};
   __export(wasm_gerber_processor_exports, {
     Boundary: () => Boundary,
     GerberProcessor: () => GerberProcessor,
+    decompress_unix_z: () => decompress_unix_z,
     default: () => wasm_gerber_processor_default,
     initSync: () => initSync,
     init_panic_hook: () => init_panic_hook,
@@ -38541,7 +40584,8 @@ void main() {
     parse_gerber_layer: () => parse_gerber_layer,
     parse_gerber_layer_payload_with_options: () => parse_gerber_layer_payload_with_options,
     parse_gerber_layer_with_options: () => parse_gerber_layer_with_options,
-    reserve_input_capacity: () => reserve_input_capacity
+    reserve_input_capacity: () => reserve_input_capacity,
+    take_last_odb_diagnostics: () => take_last_odb_diagnostics
   });
   var wasm;
   function isLikeNone(x) {
@@ -38700,6 +40744,32 @@ void main() {
     }
     return takeFromExternrefTable0(ret[0]);
   }
+  function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+  }
+  function decompress_unix_z(bytes, max_output_bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.decompress_unix_z(ptr0, len0, max_output_bytes);
+    if (ret[3]) {
+      throw takeFromExternrefTable0(ret[2]);
+    }
+    var v22 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v22;
+  }
+  function take_last_odb_diagnostics() {
+    const ret = wasm.take_last_odb_diagnostics();
+    let v1;
+    if (ret[0] !== 0) {
+      v1 = getStringFromWasm0(ret[0], ret[1]).slice();
+      wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v1;
+  }
   function parse_drill_layer(content, offset_x, offset_y) {
     const ptr0 = passStringToWasm0(content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
@@ -38718,12 +40788,6 @@ void main() {
   function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-  }
-  function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
   }
@@ -39011,6 +41075,15 @@ void main() {
       } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
       }
+    }
+    /**
+     * Turn anti-aliased layer masks on or off (default off). Independent of
+     * the minimum line width; applies to the viewer, screenshots and the
+     * renderer API alike because they all go through this processor.
+     * @param {boolean} enabled
+     */
+    set_anti_aliasing(enabled) {
+      wasm.gerberprocessor_set_anti_aliasing(this.__wbg_ptr, enabled);
     }
     /**
      * Add a worker-produced render payload directly to WebGL buffers.
@@ -39533,6 +41606,22 @@ void main() {
      */
     set_arc_tessellation_quality(arc_tessellation_quality) {
       wasm.gerberprocessor_set_arc_tessellation_quality(this.__wbg_ptr, arc_tessellation_quality);
+    }
+    /**
+     * Anti-aliasing state: `enabled`, `status` (off, pending, ready,
+     * size-limited, unsupported, unexpected), whether the shared multisample
+     * target and its stencil are allocated, the size a memory-limited
+     * allocation failed at, the code of an unexpected GL failure, and `mode`,
+     * the mode the masks were last drawn in ("multisampled" or
+     * "point-sampled"), which is uniform across a frame.
+     * @returns {any}
+     */
+    get_anti_aliasing_diagnostics() {
+      const ret = wasm.gerberprocessor_get_anti_aliasing_diagnostics(this.__wbg_ptr);
+      if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+      }
+      return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {number} composite_id
@@ -40217,6 +42306,9 @@ void main() {
     imports.wbg.__wbg_blendFunc_328efc81a0f974bb = function(arg0, arg1, arg2) {
       arg0.blendFunc(arg1 >>> 0, arg2 >>> 0);
     };
+    imports.wbg.__wbg_blitFramebuffer_574724ebc0e9dba2 = function(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
+      arg0.blitFramebuffer(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9 >>> 0, arg10 >>> 0);
+    };
     imports.wbg.__wbg_bufferData_121b54242e0dabb1 = function(arg0, arg1, arg2, arg3) {
       arg0.bufferData(arg1 >>> 0, arg2, arg3 >>> 0);
     };
@@ -40428,6 +42520,10 @@ void main() {
       const ret = result;
       return ret;
     };
+    imports.wbg.__wbg_isContextLost_39ddc15f15134247 = function(arg0) {
+      const ret = arg0.isContextLost();
+      return ret;
+    };
     imports.wbg.__wbg_isEnabled_70d65043ac834ae5 = function(arg0, arg1) {
       const ret = arg0.isEnabled(arg1 >>> 0);
       return ret;
@@ -40499,6 +42595,9 @@ void main() {
       return handleError(function(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
         arg0.readPixels(arg1, arg2, arg3, arg4, arg5 >>> 0, arg6 >>> 0, arg7 === 0 ? void 0 : getArrayU8FromWasm0(arg7, arg8));
       }, arguments);
+    };
+    imports.wbg.__wbg_renderbufferStorageMultisample_27bb7c36f04a927f = function(arg0, arg1, arg2, arg3, arg4, arg5) {
+      arg0.renderbufferStorageMultisample(arg1 >>> 0, arg2, arg3 >>> 0, arg4, arg5);
     };
     imports.wbg.__wbg_renderbufferStorage_c0da78888bd26a9d = function(arg0, arg1, arg2, arg3, arg4) {
       arg0.renderbufferStorage(arg1 >>> 0, arg2 >>> 0, arg3, arg4);
@@ -40664,1686 +42763,6 @@ void main() {
   }
   var wasm_gerber_processor_default = __wbg_init;
 
-  // vendor/wasm-gerber-renderer/board.js
-  var board_exports = {};
-  __export(board_exports, {
-    FACE_ROLES: () => FACE_ROLES,
-    addBoardLayers: () => addBoardLayers,
-    faceRasterSize: () => faceRasterSize,
-    renderBoard: () => renderBoard,
-    renderFaceRaster: () => renderFaceRaster,
-    selectFace: () => selectFace
-  });
-
-  // vendor/wasm-gerber-renderer/palette.js
-  var SUBSTRATE_COLOR = "#c9b27c";
-  var COPPER_COLOR = "#cc9933";
-  var MASK_COLORS = Object.freeze({
-    green: "#0d5229",
-    lightgreen: "#5ba80c",
-    saturatedgreen: "#0d680b",
-    mattegreen: "#2e5b3a",
-    red: "#b51315",
-    lightred: "#d2280e",
-    blue: "#023ba2",
-    lightblue: "#364f74",
-    greenblue: "#154650",
-    black: "#0b0b0b",
-    matteblack: "#1c1c1c",
-    white: "#f5f5f5",
-    purple: "#200235",
-    lightpurple: "#771f5b",
-    yellow: "#c2c300"
-  });
-  var SILK_COLORS = Object.freeze({
-    white: "#f5f5f5",
-    black: "#080808",
-    yellow: "#e6d82e",
-    red: "#c81e1e",
-    blue: "#1e50c8",
-    green: "#28a03c"
-  });
-  var FINISH_COLORS = Object.freeze({
-    enig: "#d4af37",
-    enepig: "#d4af37",
-    gold: "#d4af37",
-    hardgold: "#d4af37",
-    hasl: "#c0c0c8",
-    haslleadfree: "#c0c0c8",
-    leadfreehasl: "#c0c0c8",
-    immersionsilver: "#d8d8dc",
-    immersiontin: "#c8c8cc",
-    osp: "#cc9933",
-    none: "#cc9933"
-  });
-  var LAYER_STYLES = Object.freeze({
-    outline: Object.freeze({ color: [0.85, 0.85, 0.35], alpha: 1 }),
-    copper: Object.freeze({ color: [0.8, 0.6, 0.2], alpha: 1 }),
-    mask: Object.freeze({ color: [0.05, 0.32, 0.16], alpha: 1 }),
-    paste: Object.freeze({ color: [0.65, 0.65, 0.7], alpha: 0.9 }),
-    silk: Object.freeze({ color: [0.96, 0.96, 0.96], alpha: 1 }),
-    fab: Object.freeze({ color: [0.45, 0.55, 0.75], alpha: 0.9 }),
-    doc: Object.freeze({ color: [0.4, 0.4, 0.45], alpha: 0.8 }),
-    drill: Object.freeze({ color: [0.83, 0.69, 0.22], alpha: 1 })
-  });
-  function parseHexColor(hex) {
-    const text = String(hex ?? "").trim();
-    let match = /^#([0-9a-f]{6})$/i.exec(text);
-    if (match) {
-      const value = match[1];
-      return [0, 2, 4].map((at) => parseInt(value.slice(at, at + 2), 16) / 255);
-    }
-    match = /^#([0-9a-f]{3})$/i.exec(text);
-    if (match) {
-      return [...match[1]].map((digit) => parseInt(digit + digit, 16) / 255);
-    }
-    return null;
-  }
-  function toHexColor(color) {
-    return "#" + color.slice(0, 3).map(
-      (channel) => Math.round(Math.min(1, Math.max(0, Number(channel))) * 255).toString(16).padStart(2, "0")
-    ).join("");
-  }
-  function colorKey(name) {
-    return String(name).toLowerCase().replace(/[\s_\-()]+/g, "");
-  }
-  function resolveColor(value, table = {}) {
-    if (value == null || value === "") return null;
-    if (Array.isArray(value)) {
-      if (value.length < 3 || !value.slice(0, 3).every(Number.isFinite)) return null;
-      return value.slice(0, 3).map(Number);
-    }
-    const hex = parseHexColor(value);
-    if (hex) return hex;
-    const named = table[colorKey(value)];
-    return named ? parseHexColor(named) : null;
-  }
-  function maskColor(value) {
-    return resolveColor(value, MASK_COLORS);
-  }
-  function silkColor(value) {
-    if (typeof value === "string" && colorKey(value) === "none") return "none";
-    return resolveColor(value, SILK_COLORS);
-  }
-  function finishColor(value) {
-    return resolveColor(value, FINISH_COLORS);
-  }
-  function boardPalette(options = {}) {
-    const substrate = resolveColor(options.substrate) ?? parseHexColor(SUBSTRATE_COLOR);
-    const copper = resolveColor(options.copper) ?? parseHexColor(COPPER_COLOR);
-    const finish = finishColor(options.finish) ?? parseHexColor(FINISH_COLORS.enig);
-    const mask = maskColor(options.mask) ?? parseHexColor(MASK_COLORS.green);
-    const silk = options.silk === void 0 ? parseHexColor(SILK_COLORS.white) : silkColor(options.silk);
-    const maskAlpha = clampAlpha(options.maskAlpha, 0.9);
-    const silkAlpha = clampAlpha(options.silkAlpha, 1);
-    return {
-      substrate,
-      copper,
-      finish,
-      mask: { color: mask, alpha: maskAlpha },
-      silk: silk === "none" ? null : { color: silk ?? parseHexColor(SILK_COLORS.white), alpha: silkAlpha },
-      paste: {
-        color: resolveColor(options.paste) ?? [...LAYER_STYLES.paste.color],
-        alpha: clampAlpha(options.pasteAlpha, LAYER_STYLES.paste.alpha)
-      },
-      plating: resolveColor(options.plating) ?? finish
-    };
-  }
-  function clampAlpha(value, fallback) {
-    const number = Number(value);
-    if (value == null || !Number.isFinite(number)) return fallback;
-    return Math.min(1, Math.max(0, number));
-  }
-
-  // vendor/wasm-gerber-renderer/raster.js
-  var raster_exports = {};
-  __export(raster_exports, {
-    copyScaled: () => copyScaled,
-    flattenOnto: () => flattenOnto,
-    hasInk: () => hasInk,
-    readRendererPixels: () => readRendererPixels
-  });
-
-  // vendor/wasm-gerber-renderer/contour.js
-  function flipRows(pixels, width, height) {
-    const stride = width * 4;
-    const row = new Uint8ClampedArray(stride);
-    for (let top = 0, bottom = height - 1; top < bottom; top += 1, bottom -= 1) {
-      const a = top * stride;
-      const b = bottom * stride;
-      row.set(pixels.subarray(a, a + stride));
-      pixels.copyWithin(a, b, b + stride);
-      pixels.set(row, b);
-    }
-    return pixels;
-  }
-
-  // vendor/wasm-gerber-renderer/raster.js
-  function readRendererPixels(renderer, { rect = null, bottomUp = false, into = null } = {}) {
-    const gl = renderer.getContext();
-    const canvas = renderer.canvas;
-    const x = rect ? rect.x : 0;
-    const width = rect ? rect.width : canvas.width;
-    const height = rect ? rect.height : canvas.height;
-    const y = rect ? canvas.height - rect.y - rect.height : 0;
-    const pixels = into ?? new Uint8Array(width * height * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const previous = gl.getParameter(gl.PACK_ALIGNMENT);
-    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
-    try {
-      gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-    } finally {
-      gl.pixelStorei(gl.PACK_ALIGNMENT, previous);
-    }
-    if (!bottomUp) flipRows(pixels, width, height);
-    return { pixels, width, height };
-  }
-  function hasInk(canvas, minShare = 0.01) {
-    try {
-      const context = canvas.getContext("2d");
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let lit = 0;
-      for (let index = 3; index < pixels.length; index += 4) if (pixels[index] > 8) lit += 1;
-      return lit >= canvas.width * canvas.height * minShare;
-    } catch (_error) {
-      return false;
-    }
-  }
-  function makeCanvas(width, height) {
-    if (typeof document !== "undefined") {
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      return canvas;
-    }
-    if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
-    throw new Error("No canvas implementation is available.");
-  }
-  function copyScaled(source, maxPx = 560) {
-    const width = source.width;
-    const height = source.height;
-    if (!width || !height) return null;
-    const scale = Math.min(1, maxPx / Math.max(width, height));
-    const copy = makeCanvas(
-      Math.max(1, Math.round(width * scale)),
-      Math.max(1, Math.round(height * scale))
-    );
-    const context = copy.getContext("2d");
-    if (!context) return null;
-    context.drawImage(source, 0, 0, copy.width, copy.height);
-    return copy;
-  }
-  function flattenOnto(source, color) {
-    const flat = makeCanvas(source.width, source.height);
-    const context = flat.getContext("2d");
-    if (!context) return source;
-    context.fillStyle = color;
-    context.fillRect(0, 0, flat.width, flat.height);
-    context.drawImage(source, 0, 0);
-    return flat;
-  }
-
-  // vendor/wasm-gerber-renderer/layers.js
-  var layers_exports = {};
-  __export(layers_exports, {
-    LAYER_ROLES: () => LAYER_ROLES,
-    groupBoardLayers: () => groupBoardLayers,
-    hasGeometry: () => hasGeometry,
-    layerRole: () => layerRole,
-    plotsProfile: () => plotsProfile,
-    withoutProfile: () => withoutProfile
-  });
-  var APERTURE_FUNCTION = /^%TA\.AperFunction,([^,*]*)/i;
-  var CLEAR_ATTRIBUTE = /^%TD(\.AperFunction)?\*%/i;
-  var APERTURE_DEFINE = /^%ADD(\d+)/;
-  var APERTURE_SELECT = /^(?:G54)?D(\d+)\*$/;
-  var DRAW = /D0[123]\*$/;
-  var REGION = /^G3[67]\*/;
-  function profileApertures(lines) {
-    const found = /* @__PURE__ */ new Set();
-    let attribute = "";
-    for (const line of lines) {
-      const stripped = line.trim();
-      const opened = APERTURE_FUNCTION.exec(stripped);
-      if (opened) {
-        attribute = opened[1].trim().toLowerCase();
-        continue;
-      }
-      if (CLEAR_ATTRIBUTE.test(stripped)) {
-        attribute = "";
-        continue;
-      }
-      const defined = APERTURE_DEFINE.exec(stripped);
-      if (defined && attribute === "profile") {
-        found.add(defined[1]);
-      }
-    }
-    return found;
-  }
-  function plotsProfile(text) {
-    return typeof text === "string" && text.includes("AperFunction") && profileApertures(text.split(/\r?\n/)).size > 0;
-  }
-  function withoutProfile(text) {
-    if (typeof text !== "string" || !text.includes("AperFunction")) return text;
-    const lines = text.split(/(?<=\n)/);
-    const profile = profileApertures(lines);
-    if (profile.size === 0) return text;
-    const kept = [];
-    let drawing = false;
-    for (const line of lines) {
-      const stripped = line.trim();
-      const selected = APERTURE_SELECT.exec(stripped);
-      if (selected) {
-        drawing = profile.has(selected[1]);
-        kept.push(line);
-        continue;
-      }
-      if (REGION.test(stripped)) drawing = false;
-      if (drawing && DRAW.test(stripped)) continue;
-      kept.push(line);
-    }
-    return kept.join("");
-  }
-  function hasGeometry(text) {
-    return typeof text === "string" && /D0?[13]\*|G36\*/.test(text);
-  }
-  var LAYER_ROLES = Object.freeze([
-    "copper",
-    "mask",
-    "silk",
-    "paste",
-    "outline",
-    "drill",
-    "fab",
-    "doc",
-    "other"
-  ]);
-  var FILE_FUNCTION = /%TF\.FileFunction,([^*]*)\*%/i;
-  function fromFileFunction(content) {
-    const match = FILE_FUNCTION.exec(content.slice(0, 2e4));
-    if (!match) return null;
-    const parts = match[1].split(",").map((part) => part.trim());
-    const kind = parts[0].toLowerCase();
-    const sideOf = (value) => {
-      const lower = String(value ?? "").toLowerCase();
-      if (lower === "top") return "top";
-      if (lower === "bot" || lower === "bottom") return "bottom";
-      if (lower === "inr" || lower === "inner") return "inner";
-      return null;
-    };
-    switch (kind) {
-      case "copper": {
-        const index = /^L(\d+)$/i.exec(parts[1] ?? "");
-        return {
-          role: "copper",
-          side: sideOf(parts[2]),
-          index: index ? Number(index[1]) : null
-        };
-      }
-      case "soldermask":
-        return { role: "mask", side: sideOf(parts[1]) };
-      case "legend":
-        return { role: "silk", side: sideOf(parts[1]) };
-      case "paste":
-        return { role: "paste", side: sideOf(parts[1]) };
-      case "profile":
-        return { role: "outline", side: null };
-      case "plated":
-      case "nonplated":
-        return { role: "drill", side: null, plated: kind === "plated" };
-      case "assemblydrawing":
-        return { role: "fab", side: sideOf(parts[1]) };
-      case "other":
-      case "drawing":
-      case "fabricationdrawing":
-        return { role: "doc", side: null };
-      default:
-        return null;
-    }
-  }
-  var NAME_RULES = [
-    // KiCad layer names inside file names: board-F_Cu.gbr, board-In2_Cu.g3, board-Edge_Cuts.gm1
-    [/(^|[^a-z0-9])f[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "top" }],
-    [/(^|[^a-z0-9])b[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "bottom" }],
-    [/(^|[^a-z0-9])in(\d+)[._]cu([^a-z0-9]|$)/i, { role: "copper", side: "inner" }],
-    [/(^|[^a-z0-9])f[._]mask([^a-z0-9]|$)/i, { role: "mask", side: "top" }],
-    [/(^|[^a-z0-9])b[._]mask([^a-z0-9]|$)/i, { role: "mask", side: "bottom" }],
-    [/(^|[^a-z0-9])f[._]silks?(creen)?([^a-z0-9]|$)/i, { role: "silk", side: "top" }],
-    [/(^|[^a-z0-9])b[._]silks?(creen)?([^a-z0-9]|$)/i, { role: "silk", side: "bottom" }],
-    [/(^|[^a-z0-9])f[._]paste([^a-z0-9]|$)/i, { role: "paste", side: "top" }],
-    [/(^|[^a-z0-9])b[._]paste([^a-z0-9]|$)/i, { role: "paste", side: "bottom" }],
-    [/(^|[^a-z0-9])f[._](fab|courtyard)([^a-z0-9]|$)/i, { role: "fab", side: "top" }],
-    [/(^|[^a-z0-9])b[._](fab|courtyard)([^a-z0-9]|$)/i, { role: "fab", side: "bottom" }],
-    [/(^|[^a-z0-9])edge[._]cuts([^a-z0-9]|$)/i, { role: "outline", side: null }],
-    [/(^|[^a-z0-9])(dwgs|cmts|eco\d)[._]user([^a-z0-9]|$)/i, { role: "doc", side: null }]
-  ];
-  var EXTENSION_RULES = /* @__PURE__ */ new Map([
-    [".gtl", { role: "copper", side: "top" }],
-    [".gbl", { role: "copper", side: "bottom" }],
-    [".gts", { role: "mask", side: "top" }],
-    [".gbs", { role: "mask", side: "bottom" }],
-    [".gto", { role: "silk", side: "top" }],
-    [".gbo", { role: "silk", side: "bottom" }],
-    [".gtp", { role: "paste", side: "top" }],
-    [".gbp", { role: "paste", side: "bottom" }],
-    [".gko", { role: "outline", side: null }],
-    [".gm1", { role: "outline", side: null }],
-    [".gml", { role: "outline", side: null }],
-    [".drl", { role: "drill", side: null }],
-    [".xln", { role: "drill", side: null }],
-    [".exc", { role: "drill", side: null }],
-    [".drd", { role: "drill", side: null }]
-  ]);
-  function layerRole(name = "", content = "") {
-    if (typeof content === "string" && content) {
-      const found = fromFileFunction(content);
-      if (found) return found;
-      if (/^\s*M48\b/m.test(content.slice(0, 2e3))) {
-        return { role: "drill", side: null, ...drillPlating(name) };
-      }
-    }
-    const base = String(name).split(/[\\/]/).pop();
-    for (const [pattern, result] of NAME_RULES) {
-      const match = pattern.exec(base);
-      if (match) {
-        if (result.side === "inner") {
-          return { ...result, index: Number(match[2]) + 1 };
-        }
-        return { ...result };
-      }
-    }
-    const lower = base.toLowerCase();
-    const dot2 = lower.lastIndexOf(".");
-    const extension = dot2 >= 0 ? lower.slice(dot2) : "";
-    const byExtension = EXTENSION_RULES.get(extension);
-    if (byExtension) {
-      return byExtension.role === "drill" ? { ...byExtension, ...drillPlating(base) } : { ...byExtension };
-    }
-    const inner = /^\.g(\d+)$/.exec(extension);
-    if (inner) return { role: "copper", side: "inner", index: Number(inner[1]) };
-    return { role: "other", side: null };
-  }
-  function drillPlating(name) {
-    const lower = String(name).toLowerCase();
-    if (/(^|[^a-z])npth([^a-z]|$)|non[-_ ]?plated/.test(lower)) return { plated: false };
-    if (/(^|[^a-z])pth([^a-z]|$)/.test(lower)) return { plated: true };
-    return {};
-  }
-  function groupBoardLayers(files) {
-    const face = () => ({ copper: null, mask: null, silk: null, paste: null, fab: null });
-    const board = { outline: null, top: face(), bottom: face(), inner: [], drills: [], other: [] };
-    for (const file of files) {
-      const entry = { name: file.name, source: file.source ?? file.content };
-      const found = layerRole(file.name, typeof file.content === "string" ? file.content : "");
-      if (found.role === "outline") {
-        if (!board.outline) board.outline = entry;
-        else board.other.push(entry);
-      } else if (found.role === "drill") {
-        board.drills.push({ ...entry, plated: found.plated ?? null });
-      } else if (found.role === "copper" && found.side === "inner") {
-        board.inner.push({ ...entry, index: found.index ?? null });
-      } else if ((found.side === "top" || found.side === "bottom") && found.role in board[found.side]) {
-        const slot = board[found.side];
-        if (slot[found.role] == null) slot[found.role] = entry;
-        else board.other.push(entry);
-      } else {
-        board.other.push(entry);
-      }
-    }
-    board.inner.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    return board;
-  }
-
-  // vendor/wasm-gerber-renderer/drills.js
-  var drills_exports = {};
-  __export(drills_exports, {
-    applyHoleMask: () => applyHoleMask,
-    circlePath: () => circlePath,
-    cutHoles: () => cutHoles,
-    diffHoles: () => diffHoles,
-    distinctHoles: () => distinctHoles,
-    drillShape: () => drillShape,
-    holeMask: () => holeMask,
-    holesPath: () => holesPath,
-    holesToGerber: () => holesToGerber,
-    parseExcellon: () => parseExcellon,
-    projectHoles: () => projectHoles,
-    slotPath: () => slotPath
-  });
-  var APER_FUNCTION = /TA\.AperFunction,([^,\s]+)/i;
-  var TOOL_DEF = /^T(\d+)(?:[A-BD-Z][-\d.]*)*C([\d.]+)/i;
-  var TOOL_SELECT = /^T(\d+)\s*$/i;
-  var HOLE = /^(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?(?:G85(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?)?$/i;
-  var ROUT = /^G0([0-3])(?:X([-+]?[\d.]+))?(?:Y([-+]?[\d.]+))?/i;
-  var UNITS = /^(METRIC|INCH)(?:,(LZ|TZ))?(?:,(0+)\.(0+))?/i;
-  var KICAD_FORMAT = /FORMAT=\{(\d+):(\d+)\/\s*\w+\s*\/\s*(metric|inch)\s*\/\s*([^}]*)\}/i;
-  function parseExcellon(text, options = {}) {
-    const lines = String(text ?? "").split(/\r?\n/);
-    let metric = true;
-    let zeros = "LZ";
-    let integerDigits = null;
-    let decimalDigits = null;
-    const defaultPlated = options.plated ?? true;
-    const diameters = /* @__PURE__ */ new Map();
-    const plating = /* @__PURE__ */ new Map();
-    let pendingPlated = null;
-    let current = null;
-    let inBody = false;
-    let routDown = false;
-    let at = null;
-    const holes = [];
-    const scale = () => metric ? 1 : 25.4;
-    const coordinate = (raw) => {
-      if (raw == null) return null;
-      if (raw.includes(".")) return Number(raw) * scale();
-      const negative = raw.startsWith("-");
-      const digits = raw.replace(/^[-+]/, "");
-      const intDigits = integerDigits ?? (metric ? 3 : 2);
-      const decDigits = decimalDigits ?? (metric ? 3 : 4);
-      let value;
-      if (zeros === "TZ") {
-        value = Number(digits) / 10 ** decDigits;
-      } else {
-        const padded = digits.padEnd(intDigits + decDigits, "0");
-        value = Number(padded.slice(0, intDigits) + "." + padded.slice(intDigits));
-      }
-      return (negative ? -value : value) * scale();
-    };
-    const add = (x, y, x2 = null, y2 = null) => {
-      const diameter = current == null ? 0 : diameters.get(current) ?? 0;
-      if (!(diameter > 0)) return;
-      holes.push({
-        x,
-        y,
-        diameter,
-        plated: plating.get(current) ?? defaultPlated,
-        x2,
-        y2
-      });
-    };
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (line.startsWith(";")) {
-        const found = APER_FUNCTION.exec(line);
-        if (found) pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
-        const format = KICAD_FORMAT.exec(line);
-        if (format) {
-          integerDigits = Number(format[1]);
-          decimalDigits = Number(format[2]);
-          metric = format[3].toLowerCase() === "metric";
-          const suppression = format[4].toLowerCase();
-          if (suppression.includes("suppress trailing")) zeros = "LZ";
-          else if (suppression.includes("suppress leading")) zeros = "TZ";
-        }
-        continue;
-      }
-      if (line === "%" || /^M95\b/i.test(line)) {
-        inBody = true;
-        continue;
-      }
-      const units = UNITS.exec(line);
-      if (units) {
-        metric = units[1].toUpperCase() === "METRIC";
-        if (units[2]) zeros = units[2].toUpperCase();
-        if (units[3]) {
-          integerDigits = units[3].length;
-          decimalDigits = units[4].length;
-        }
-        continue;
-      }
-      if (/^M72\b/i.test(line)) {
-        metric = false;
-        continue;
-      }
-      if (/^M71\b/i.test(line)) {
-        metric = true;
-        continue;
-      }
-      if (/^M15\b/i.test(line)) {
-        routDown = true;
-        continue;
-      }
-      if (/^M1[67]\b/i.test(line)) {
-        routDown = false;
-        continue;
-      }
-      if (/^G05\b/i.test(line)) {
-        at = null;
-        routDown = false;
-        continue;
-      }
-      if (/^(M48|M30|M00|FMAT|G90|G91|ICI|VER|DETECT|ATC)/i.test(line)) continue;
-      const definition = TOOL_DEF.exec(line);
-      if (definition && !inBody) {
-        const tool = Number(definition[1]);
-        diameters.set(tool, Number(definition[2]) * scale());
-        plating.set(tool, pendingPlated ?? defaultPlated);
-        pendingPlated = null;
-        continue;
-      }
-      if (definition && inBody) {
-        const tool = Number(definition[1]);
-        if (!diameters.has(tool)) diameters.set(tool, Number(definition[2]) * scale());
-        current = tool;
-        at = null;
-        routDown = false;
-        continue;
-      }
-      const select = TOOL_SELECT.exec(line);
-      if (select) {
-        current = Number(select[1]);
-        at = null;
-        routDown = false;
-        continue;
-      }
-      const motion = ROUT.exec(line);
-      if (motion) {
-        const x = coordinate(motion[2]) ?? at?.[0] ?? null;
-        const y = coordinate(motion[3]) ?? at?.[1] ?? null;
-        if (x == null || y == null) continue;
-        if (routDown && at && (x !== at[0] || y !== at[1])) {
-          add(at[0], at[1], x, y);
-        }
-        at = [x, y];
-        continue;
-      }
-      const hit = HOLE.exec(line);
-      if (hit && current != null && (hit[1] != null || hit[2] != null)) {
-        const x = coordinate(hit[1]) ?? at?.[0] ?? null;
-        const y = coordinate(hit[2]) ?? at?.[1] ?? null;
-        if (x == null || y == null) continue;
-        const slotted = hit[3] != null || hit[4] != null;
-        const x2 = slotted ? coordinate(hit[3]) ?? x : null;
-        const y2 = slotted ? coordinate(hit[4]) ?? y : null;
-        at = slotted ? [x2, y2] : [x, y];
-        add(x, y, x2, y2);
-      }
-    }
-    return holes;
-  }
-  function holeKey(hole, digits = 3) {
-    const round = (value) => Number(value).toFixed(digits);
-    const ends = [`${round(hole.x)},${round(hole.y)}`];
-    if (hole.x2 != null && hole.y2 != null) ends.push(`${round(hole.x2)},${round(hole.y2)}`);
-    ends.sort();
-    return `${ends.join("|")}|${round(hole.diameter ?? hole.d)}`;
-  }
-  function distinctHoles(holes) {
-    const seen = /* @__PURE__ */ new Set();
-    const result = [];
-    for (const hole of holes) {
-      const key = holeKey(hole);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(hole);
-    }
-    return result;
-  }
-  function diffHoles(baseHoles, headHoles, { tolerance = 1e-3 } = {}) {
-    const digits = Math.max(0, Math.round(-Math.log10(tolerance)));
-    const key = (hole) => `${holeKey(hole, digits)}|${hole.plated === false ? "n" : "p"}`;
-    const remaining = /* @__PURE__ */ new Map();
-    for (const hole of headHoles) {
-      const k = key(hole);
-      if (!remaining.has(k)) remaining.set(k, []);
-      remaining.get(k).push(hole);
-    }
-    const removed = [];
-    const unchanged = [];
-    for (const hole of baseHoles) {
-      const bucket = remaining.get(key(hole));
-      if (bucket && bucket.length) {
-        bucket.shift();
-        unchanged.push(hole);
-      } else {
-        removed.push(hole);
-      }
-    }
-    const added = [...remaining.values()].flat();
-    return { added, removed, unchanged, changed: added.length + removed.length > 0 };
-  }
-  function projectHoles(holes, projectPoint, pixelsPerMm, { minRadius = 0.6 } = {}) {
-    return holes.filter((hole) => !hole.filled).map((hole) => [
-      projectPoint(hole.x, hole.y),
-      hole.x2 == null || hole.y2 == null ? null : projectPoint(hole.x2, hole.y2),
-      Math.max(minRadius, (hole.diameter ?? hole.d) / 2 * pixelsPerMm),
-      hole
-    ]);
-  }
-  var SVG_NS = "http://www.w3.org/2000/svg";
-  var fixed = (value) => Number(value).toFixed(2);
-  function slotPath(x1, y1, x2, y2, radius) {
-    const length = Math.hypot(x2 - x1, y2 - y1);
-    if (length === 0) return circlePath(x1, y1, radius);
-    const nx = -(y2 - y1) / length * radius;
-    const ny = (x2 - x1) / length * radius;
-    const at = (x, y) => `${fixed(x)},${fixed(y)}`;
-    const arc = `A${fixed(radius)},${fixed(radius)} 0 0 0 `;
-    return `M${at(x1 + nx, y1 + ny)} L${at(x2 + nx, y2 + ny)} ${arc}${at(x2 - nx, y2 - ny)} L${at(x1 - nx, y1 - ny)} ${arc}${at(x1 + nx, y1 + ny)} Z`;
-  }
-  function circlePath(x, y, radius) {
-    const r = fixed(radius);
-    return `M${fixed(x + radius)},${fixed(y)} A${r},${r} 0 1 0 ${fixed(x - radius)},${fixed(y)} A${r},${r} 0 1 0 ${fixed(x + radius)},${fixed(y)} Z`;
-  }
-  function holesPath(projected) {
-    return projected.map(
-      ([near, far, radius]) => !far || far[0] === near[0] && far[1] === near[1] ? circlePath(near[0], near[1], radius) : slotPath(near[0], near[1], far[0], far[1], radius)
-    ).join(" ");
-  }
-  function drillShape(near, far, radius, doc = globalThis.document) {
-    const [x1, y1] = near;
-    if (!far || far[0] === x1 && far[1] === y1) {
-      const circle = doc.createElementNS(SVG_NS, "circle");
-      circle.setAttribute("cx", fixed(x1));
-      circle.setAttribute("cy", fixed(y1));
-      circle.setAttribute("r", fixed(radius));
-      return circle;
-    }
-    const path = doc.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", slotPath(x1, y1, far[0], far[1], radius));
-    return path;
-  }
-  function holeMask(projected, width, height) {
-    if (!projected.length) return "";
-    const d = holesPath(projected);
-    const w = fixed(width);
-    const h2 = fixed(height);
-    const svg = `<svg xmlns="${SVG_NS}" width="${w}" height="${h2}" viewBox="0 0 ${w} ${h2}"><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h2}"><rect width="${w}" height="${h2}" fill="#fff"/><path d="${d}" fill="#000"/></mask><rect width="${w}" height="${h2}" fill="#fff" mask="url(#m)"/></svg>`;
-    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-  }
-  function applyHoleMask(element, mask) {
-    const style = element.style;
-    style.maskImage = style.webkitMaskImage = mask;
-    style.maskSize = style.webkitMaskSize = mask ? "100% 100%" : "";
-    style.maskRepeat = style.webkitMaskRepeat = mask ? "no-repeat" : "";
-  }
-  function cutHoles(context, projected) {
-    if (!projected.length) return;
-    const previous = context.globalCompositeOperation;
-    context.globalCompositeOperation = "destination-out";
-    context.fillStyle = "#000";
-    context.beginPath();
-    for (const [near, far, radius] of projected) {
-      if (!far || far[0] === near[0] && far[1] === near[1]) {
-        context.moveTo(near[0] + radius, near[1]);
-        context.arc(near[0], near[1], radius, 0, Math.PI * 2);
-      } else {
-        const angle = Math.atan2(far[1] - near[1], far[0] - near[0]);
-        context.moveTo(
-          near[0] + Math.cos(angle + Math.PI / 2) * radius,
-          near[1] + Math.sin(angle + Math.PI / 2) * radius
-        );
-        context.arc(near[0], near[1], radius, angle + Math.PI / 2, angle + 3 * Math.PI / 2);
-        context.arc(far[0], far[1], radius, angle - Math.PI / 2, angle + Math.PI / 2);
-        context.closePath();
-      }
-    }
-    context.fill("nonzero");
-    context.globalCompositeOperation = previous;
-  }
-  function holesToGerber(holes) {
-    const apertures = /* @__PURE__ */ new Map();
-    for (const hole of holes) {
-      const diameter = Number(hole.diameter ?? hole.d);
-      if (!(diameter > 0)) continue;
-      const key = diameter.toFixed(6);
-      if (!apertures.has(key)) apertures.set(key, 10 + apertures.size);
-    }
-    const coordinate = (value) => String(Math.round(Number(value) * 1e6));
-    const lines = ["%FSLAX46Y46*%", "%MOMM*%", "%LPD*%", "G01*"];
-    for (const [key, code] of apertures) lines.push(`%ADD${code}C,${key}*%`);
-    let selected = null;
-    for (const hole of holes) {
-      const diameter = Number(hole.diameter ?? hole.d);
-      if (!(diameter > 0)) continue;
-      const code = apertures.get(diameter.toFixed(6));
-      if (code !== selected) {
-        lines.push(`D${code}*`);
-        selected = code;
-      }
-      const at = `X${coordinate(hole.x)}Y${coordinate(hole.y)}`;
-      if (hole.x2 == null || hole.y2 == null || hole.x2 === hole.x && hole.y2 === hole.y) {
-        lines.push(`${at}D03*`);
-      } else {
-        lines.push(`${at}D02*`, `X${coordinate(hole.x2)}Y${coordinate(hole.y2)}D01*`);
-      }
-    }
-    lines.push("M02*");
-    return lines.join("\n") + "\n";
-  }
-
-  // vendor/wasm-gerber-renderer/board.js
-  var FACE_ROLES = Object.freeze(["copper", "mask", "silk", "paste"]);
-  function unwrap(entry) {
-    if (entry == null) return null;
-    if (typeof entry === "object" && "source" in entry && !isBlob2(entry)) {
-      return { source: entry.source, name: entry.name };
-    }
-    return { source: entry, name: void 0 };
-  }
-  async function layerText(entry, strip) {
-    const { source, name } = unwrap(entry);
-    const text = await sourceToText(source);
-    return { source: strip ? withoutProfile(text) : text, name };
-  }
-  function selectFace(board, side = "top") {
-    const face = board[side] && typeof board[side] === "object" && !isSource(board[side]) ? board[side] : board;
-    return {
-      outline: board.outline ?? null,
-      copper: face.copper ?? null,
-      mask: face.mask ?? null,
-      silk: face.silk ?? null,
-      paste: face.paste ?? null,
-      drills: Array.isArray(board.drills) ? board.drills : board.drills ? [board.drills] : []
-    };
-  }
-  function isBlob2(value) {
-    return typeof Blob !== "undefined" && value instanceof Blob;
-  }
-  function isSource(value) {
-    return typeof value === "string" || value instanceof ArrayBuffer || ArrayBuffer.isView(value) || isBlob2(value) || value && typeof value === "object" && "source" in value;
-  }
-  async function addBoardLayers(renderer, board, options = {}) {
-    const face = selectFace(board, options.side ?? "top");
-    const palette2 = options.palette && options.palette.mask && options.palette.mask.color ? options.palette : boardPalette(options.palette ?? {});
-    const strip = options.stripProfile !== false;
-    const ids = {
-      outline: null,
-      substrate: null,
-      copper: null,
-      mask: null,
-      finish: null,
-      silk: null,
-      paste: null,
-      drills: []
-    };
-    const hidden = (layer) => renderer.renderLayer(layer, { visible: false });
-    const load = async (entry, stripIt) => {
-      if (!entry) return null;
-      const text = await layerText(entry, stripIt);
-      return hasGeometry(text.source) ? text : null;
-    };
-    const outline = await load(face.outline, false);
-    const copper = await load(face.copper, strip);
-    const maskText = face.mask ? await layerText(face.mask, strip) : null;
-    const mask = maskText && hasGeometry(maskText.source) ? maskText : null;
-    const maskEverywhere = maskText != null && mask == null;
-    const silkText = palette2.silk ? await load(face.silk, strip) : null;
-    const pasteText = options.paste === true ? await load(face.paste, strip) : null;
-    let outlineId = null;
-    if (outline) {
-      outlineId = await hidden(outline);
-      ids.outline = outlineId;
-    }
-    const boardArea = async (name, color, alpha) => {
-      if (outline) {
-        const twin2 = await hidden(outline);
-        return renderer.renderCompositeLayer([outlineId, twin2], {
-          name,
-          visibleAreas: ["00", "11"],
-          outlineLayerId: outlineId,
-          color,
-          alpha
-        });
-      }
-      const anchorText = mask ?? copper;
-      if (!anchorText) return null;
-      const anchor = await hidden(anchorText);
-      const twin = await hidden(anchorText);
-      return renderer.renderCompositeLayer([anchor, twin], {
-        name,
-        visibleAreas: ["00", "11"],
-        color,
-        alpha
-      });
-    };
-    if (options.substrate !== false) {
-      ids.substrate = await boardArea("Substrate", palette2.substrate, 1);
-    }
-    if (copper) {
-      ids.copper = await renderer.renderLayer(copper, {
-        color: palette2.copper,
-        alpha: 1
-      });
-    }
-    let maskSourceId = null;
-    if (maskEverywhere) {
-      ids.mask = await boardArea("Solder mask", palette2.mask.color, palette2.mask.alpha);
-    } else if (mask) {
-      const maskOptions = {
-        name: "Solder mask",
-        color: palette2.mask.color,
-        alpha: palette2.mask.alpha
-      };
-      if (outlineId != null) maskOptions.outlineLayerId = outlineId;
-      ids.mask = await renderer.renderInvertedLayer(mask, maskOptions);
-      maskSourceId = await hidden(mask);
-    }
-    if (options.finish !== false && ids.copper != null && maskSourceId != null) {
-      ids.finish = await renderer.renderCompositeLayer([ids.copper, maskSourceId], {
-        name: "Surface finish",
-        visibleAreas: ["11"],
-        color: palette2.finish,
-        alpha: 1
-      });
-    }
-    if (silkText) {
-      const silk = silkText;
-      const style = { color: palette2.silk.color, alpha: palette2.silk.alpha };
-      if (options.clipSilk !== false && (maskSourceId != null || outlineId != null)) {
-        const silkId = await hidden(silk);
-        const second = maskSourceId ?? await hidden(silk);
-        const shown = maskSourceId != null ? "10" : "11";
-        ids.silk = await renderer.renderCompositeLayer(
-          [silkId, second],
-          outlineId != null ? {
-            name: "Silkscreen",
-            inverted: true,
-            visibleAreas: ["00", "01", "10", "11"].filter((code) => code !== shown),
-            outlineLayerId: outlineId,
-            ...style
-          } : { name: "Silkscreen", visibleAreas: [shown], ...style }
-        );
-      } else {
-        ids.silk = await renderer.renderLayer(silk, style);
-      }
-    }
-    if (pasteText) {
-      ids.paste = await renderer.renderLayer(pasteText, {
-        color: palette2.paste.color,
-        alpha: palette2.paste.alpha
-      });
-    }
-    if (options.holes !== false) {
-      for (const drill of face.drills) {
-        const { source, name } = unwrap(drill);
-        const text = await sourceToText(source);
-        if (parseExcellon(text).length === 0) continue;
-        const id = await renderer.renderLayer(
-          { source: text, name: name ?? "drill.drl", kind: "drill" },
-          { color: palette2.plating }
-        );
-        if (id != null) ids.drills.push(id);
-      }
-    }
-    return ids;
-  }
-  async function renderBoard(renderer, board, options = {}) {
-    const { side = "top", mirror = true, palette: palette2, substrate, finish, clipSilk, paste, holes, stripProfile, ...frameOptions } = options;
-    let ids = null;
-    await renderer.withFrame(
-      {
-        background: null,
-        ...frameOptions,
-        compositeMode: "stack",
-        flipX: frameOptions.flipX ?? (side === "bottom" && mirror)
-      },
-      async () => {
-        ids = await addBoardLayers(renderer, board, {
-          side,
-          palette: palette2,
-          substrate,
-          finish,
-          clipSilk,
-          paste,
-          holes,
-          stripProfile
-        });
-      }
-    );
-    return { frame: renderer.lastFrame, ids };
-  }
-  function faceRasterSize(bounds, { pxPerMm = 32, minPx = 2048, maxPx = 6144, maxTextureSize = Infinity } = {}) {
-    const spanX = Math.max(bounds.maxX - bounds.minX, 1e-6);
-    const spanY = Math.max(bounds.maxY - bounds.minY, 1e-6);
-    const ceiling = Math.min(maxPx, maxTextureSize || maxPx);
-    let scale = Math.max(pxPerMm, minPx / spanX);
-    scale = Math.min(scale, ceiling / Math.max(spanX, spanY));
-    return {
-      width: Math.max(Math.round(spanX * scale), 1),
-      height: Math.max(Math.round(spanY * scale), 1),
-      pxPerMm: scale
-    };
-  }
-  async function renderFaceRaster(renderer, board, options = {}) {
-    const { bounds, side = "top", flatten: flatten2, ...rest } = options;
-    if (!bounds) throw new TypeError("renderFaceRaster needs world bounds.");
-    const size = options.width && options.height ? { width: options.width, height: options.height } : faceRasterSize(bounds, rest);
-    const view = calculateFitView(bounds, size.width, size.height, 0);
-    const palette2 = rest.palette && rest.palette.mask?.color ? rest.palette : boardPalette(rest.palette ?? {});
-    await renderBoard(renderer, board, {
-      ...pick(rest, ["substrate", "finish", "clipSilk", "paste", "holes", "stripProfile"]),
-      palette: palette2,
-      side,
-      mirror: false,
-      width: size.width,
-      height: size.height,
-      view
-    });
-    let canvas = renderer.canvas;
-    if (flatten2 !== false) {
-      canvas = flattenOnto(renderer.canvas, typeof flatten2 === "string" ? flatten2 : toHexColor(palette2.substrate));
-    }
-    return { canvas, width: size.width, height: size.height, bounds, view };
-  }
-  function pick(object, keys) {
-    const result = {};
-    for (const key of keys) if (object[key] !== void 0) result[key] = object[key];
-    return result;
-  }
-
-  // vendor/wasm-gerber-renderer/diff.js
-  var diff_exports = {};
-  __export(diff_exports, {
-    DIFF_STYLE: () => DIFF_STYLE,
-    MAX_DIFF_SOURCES: () => MAX_DIFF_SOURCES,
-    addLayerDiff: () => addLayerDiff,
-    analyzeBoardDiff: () => analyzeBoardDiff,
-    analyzeLayerDiff: () => analyzeLayerDiff,
-    diffPatterns: () => diffPatterns,
-    geometryText: () => geometryText,
-    measureLayers: () => measureLayers,
-    prepareDiffSources: () => prepareDiffSources,
-    renderLayerDiff: () => renderLayerDiff,
-    summarizeDiffPixels: () => summarizeDiffPixels
-  });
-
-  // vendor/wasm-gerber-renderer/view.js
-  function withFrameSize(view, width, height) {
-    const { viewWidth, viewHeight } = viewExtent(width, height);
-    return {
-      zoomX: view.zoomX,
-      zoomY: view.zoomY,
-      offsetX: view.offsetX,
-      offsetY: view.offsetY,
-      viewWidth,
-      viewHeight,
-      W: width,
-      H: height
-    };
-  }
-  function pixelsPerUnit(view) {
-    const { viewWidth } = viewExtent(view.W, view.H);
-    return Math.abs(view.zoomX) / viewWidth * view.W;
-  }
-  function pixelRectToWorld(view, rect) {
-    const a = unprojectFromCanvas(view, rect.x, rect.y, view.W, view.H);
-    const b = unprojectFromCanvas(
-      view,
-      rect.x + rect.width,
-      rect.y + rect.height,
-      view.W,
-      view.H
-    );
-    return {
-      minX: Math.min(a.x, b.x),
-      maxX: Math.max(a.x, b.x),
-      minY: Math.min(a.y, b.y),
-      maxY: Math.max(a.y, b.y)
-    };
-  }
-
-  // vendor/wasm-gerber-renderer/diff.js
-  var DIFF_STYLE = Object.freeze({
-    removed: Object.freeze({ color: [0.93, 0.2, 0.2], alpha: 1 }),
-    added: Object.freeze({ color: [0.2, 0.82, 0.3], alpha: 1 }),
-    unchanged: Object.freeze({ color: [0.62, 0.64, 0.68], alpha: 0.3 })
-  });
-  var MAX_DIFF_SOURCES = 12;
-  function diffPatterns(baseCount, headCount) {
-    const total = baseCount + headCount;
-    if (baseCount < 1 || headCount < 1 || total > MAX_DIFF_SOURCES) {
-      throw new RangeError(
-        `A layer diff needs 1..${MAX_DIFF_SOURCES} sources in total with at least one per side.`
-      );
-    }
-    const removed = [];
-    const added = [];
-    const unchanged = [];
-    for (let code = 1; code < 2 ** total; code += 1) {
-      let pattern = "";
-      let inBase = false;
-      let inHead = false;
-      for (let slot = 0; slot < total; slot += 1) {
-        const on = code >> slot & 1;
-        pattern += on ? "1" : "0";
-        if (on && slot < baseCount) inBase = true;
-        if (on && slot >= baseCount) inHead = true;
-      }
-      if (inBase && inHead) unchanged.push(pattern);
-      else if (inBase) removed.push(pattern);
-      else added.push(pattern);
-    }
-    return { removed, added, unchanged };
-  }
-  function toList(side) {
-    if (side == null) return [];
-    return Array.isArray(side) ? side.filter((entry) => entry != null) : [side];
-  }
-  function unwrap2(entry) {
-    if (entry && typeof entry === "object" && "source" in entry && !(typeof Blob !== "undefined" && entry instanceof Blob)) {
-      return { source: entry.source, name: entry.name };
-    }
-    return { source: entry, name: void 0 };
-  }
-  async function prepareDiffSources(side, { stripProfile = false } = {}) {
-    const prepared = [];
-    for (const entry of toList(side)) {
-      const { source, name } = unwrap2(entry);
-      let text = await sourceToText(source);
-      const drill = isDrillSource(source, name ?? "", text) || looksLikeDrillContent(text);
-      if (drill) {
-        text = holesToGerber(parseExcellon(text, { plated: /npth/i.test(name ?? "") ? false : void 0 }));
-      } else if (stripProfile) {
-        text = withoutProfile(text);
-      }
-      prepared.push({
-        source: text,
-        name,
-        kind: "gerber",
-        // A file that draws nothing (a header-only drill or Gerber) is an
-        // absent side: the renderer would reject it.
-        empty: !hasGeometry(text)
-      });
-    }
-    return prepared;
-  }
-  function geometryText(text) {
-    return String(text).split(/\r?\n/).filter((line) => {
-      const trimmed = line.trim();
-      return trimmed !== "" && !/^G04[^*]*\*$/.test(trimmed) && !/^%T[FAOD][^%]*\*%$/.test(trimmed);
-    }).join("\n");
-  }
-  function sameGeometry(base, head) {
-    return base.length === head.length && base.every((entry, index) => geometryText(entry.source) === geometryText(head[index].source));
-  }
-  function styleOf(options, key) {
-    const base = DIFF_STYLE[key];
-    const custom = options.style?.[key] ?? {};
-    return {
-      color: custom.color ?? options.colors?.[key] ?? base.color,
-      alpha: custom.alpha ?? base.alpha
-    };
-  }
-  async function addLayerDiff(renderer, pair, options = {}) {
-    const base = options.prepared ? pair.base : await prepareDiffSources(pair.base, options);
-    const head = options.prepared ? pair.head : await prepareDiffSources(pair.head, options);
-    const ids = { removed: null, added: null, unchanged: null };
-    const baseLive = base.filter((entry) => !entry.empty);
-    const headLive = head.filter((entry) => !entry.empty);
-    const removedStyle = styleOf(options, "removed");
-    const addedStyle = styleOf(options, "added");
-    const unchangedStyle = styleOf(options, "unchanged");
-    const showUnchanged = options.showUnchanged !== false;
-    if (baseLive.length === 0 || headLive.length === 0) {
-      const present = baseLive.length ? baseLive : headLive;
-      const style = baseLive.length ? removedStyle : addedStyle;
-      let first = null;
-      for (const entry of present) {
-        const id = await renderer.renderLayer(entry, style);
-        first ?? (first = id);
-      }
-      ids[baseLive.length ? "removed" : "added"] = first;
-      return ids;
-    }
-    const patterns = diffPatterns(baseLive.length, headLive.length);
-    const sourceIds = [];
-    for (const entry of [...baseLive, ...headLive]) {
-      sourceIds.push(await renderer.renderLayer(entry, { visible: false }));
-    }
-    ids.unchanged = await renderer.renderCompositeLayer(sourceIds, {
-      name: "Unchanged",
-      visibleAreas: patterns.unchanged,
-      color: unchangedStyle.color,
-      alpha: unchangedStyle.alpha,
-      visible: showUnchanged
-    });
-    ids.removed = await renderer.renderCompositeLayer(sourceIds, {
-      name: "Removed",
-      visibleAreas: patterns.removed,
-      color: removedStyle.color,
-      alpha: removedStyle.alpha
-    });
-    ids.added = await renderer.renderCompositeLayer(sourceIds, {
-      name: "Added",
-      visibleAreas: patterns.added,
-      color: addedStyle.color,
-      alpha: addedStyle.alpha
-    });
-    return ids;
-  }
-  var DIFF_OPTION_KEYS = /* @__PURE__ */ new Set([
-    "style",
-    "colors",
-    "showUnchanged",
-    "stripProfile",
-    "underlay",
-    "prepared",
-    "cellSize",
-    "mergeDistance",
-    "minRegionPixels",
-    "maxRegions",
-    "skipIdentical"
-  ]);
-  function splitOptions(options) {
-    const frame = {};
-    const diff = {};
-    for (const [key, value] of Object.entries(options)) {
-      (DIFF_OPTION_KEYS.has(key) ? diff : frame)[key] = value;
-    }
-    return { frame, diff };
-  }
-  async function addUnderlay(renderer, underlay, alphaOverride) {
-    for (const entry of underlay ?? []) {
-      const { source, name } = unwrap2(entry);
-      await renderer.renderLayer(
-        { source, name },
-        {
-          color: entry.color ?? [0.5, 0.5, 0.5],
-          alpha: alphaOverride ?? entry.alpha ?? 0.35
-        }
-      );
-    }
-  }
-  async function renderLayerDiff(renderer, pair, options = {}) {
-    const { frame: frameOptions, diff } = splitOptions(options);
-    const base = await prepareDiffSources(pair.base, diff);
-    const head = await prepareDiffSources(pair.head, diff);
-    let ids = null;
-    await renderer.withFrame(
-      { background: null, ...frameOptions, compositeMode: "stack" },
-      async () => {
-        await addUnderlay(renderer, diff.underlay);
-        ids = await addLayerDiff(renderer, { base, head }, { ...diff, prepared: true });
-      }
-    );
-    const frame = renderer.lastFrame;
-    return {
-      frame,
-      view: frame.view ? withFrameSize(frame.view, frame.width, frame.height) : null,
-      ids
-    };
-  }
-  var CLASS_STYLE = {
-    removed: { color: [1, 0, 0], alpha: 1 },
-    added: { color: [0, 1, 0], alpha: 1 },
-    unchanged: { color: [0, 0, 1], alpha: 1 }
-  };
-  async function analyzeLayerDiff(renderer, pair, options = {}) {
-    const { frame: frameOptions, diff } = splitOptions(options);
-    const base = await prepareDiffSources(pair.base, diff);
-    const head = await prepareDiffSources(pair.head, diff);
-    if (diff.skipIdentical !== false && sameGeometry(base, head)) {
-      return {
-        changed: false,
-        identical: true,
-        addedPixels: 0,
-        removedPixels: 0,
-        unchangedPixels: null,
-        regions: [],
-        truncated: false,
-        width: frameOptions.width ?? null,
-        height: frameOptions.height ?? null,
-        view: frameOptions.view && frameOptions.width && frameOptions.height ? withFrameSize(frameOptions.view, frameOptions.width, frameOptions.height) : null,
-        pixelSizeMm: null
-      };
-    }
-    await renderer.withFrame(
-      {
-        ...frameOptions,
-        background: null,
-        compositeMode: "stack"
-        // Coverage is what is being measured; no feature may be widened differently.
-      },
-      async () => {
-        await addUnderlay(renderer, diff.underlay, 0);
-        await addLayerDiff(renderer, { base, head }, {
-          prepared: true,
-          style: CLASS_STYLE,
-          showUnchanged: true
-        });
-      }
-    );
-    const frame = renderer.lastFrame;
-    const { pixels, width, height } = readRendererPixels(renderer, { bottomUp: true });
-    const summary2 = summarizeDiffPixels(pixels, width, height, { ...diff, bottomUp: true });
-    const view = frame.view ? withFrameSize(frame.view, width, height) : null;
-    for (const region of summary2.regions) {
-      region.world = view ? pixelRectToWorld(view, region.pixels) : null;
-    }
-    return {
-      ...summary2,
-      identical: false,
-      width,
-      height,
-      view,
-      pixelSizeMm: view ? 1 / pixelsPerUnit(view) : null
-    };
-  }
-  function summarizeDiffPixels(pixels, width, height, options = {}) {
-    const cellSize = Math.max(1, Math.round(options.cellSize ?? 8));
-    const mergeDistance = Math.max(0, options.mergeDistance ?? 16);
-    const minRegionPixels = Math.max(1, options.minRegionPixels ?? 1);
-    const maxRegions = Math.max(1, options.maxRegions ?? 500);
-    const bottomUp = options.bottomUp === true;
-    const cols = Math.ceil(width / cellSize);
-    const rows = Math.ceil(height / cellSize);
-    const cellCount = cols * rows;
-    const cellAdded = new Uint32Array(cellCount);
-    const cellRemoved = new Uint32Array(cellCount);
-    const cellMinX = new Int32Array(cellCount).fill(2147483647);
-    const cellMinY = new Int32Array(cellCount).fill(2147483647);
-    const cellMaxX = new Int32Array(cellCount).fill(-1);
-    const cellMaxY = new Int32Array(cellCount).fill(-1);
-    let addedPixels = 0;
-    let removedPixels = 0;
-    let unchangedPixels = 0;
-    const stride = width * 4;
-    for (let row = 0; row < height; row += 1) {
-      const y = bottomUp ? height - 1 - row : row;
-      const cellRow = (y / cellSize | 0) * cols;
-      let at = row * stride;
-      for (let x = 0; x < width; x += 1, at += 4) {
-        const alpha = pixels[at + 3];
-        if (alpha < 128) continue;
-        const red = pixels[at];
-        const green = pixels[at + 1];
-        let kind = 0;
-        if (red >= 128 && red > green) kind = 1;
-        else if (green >= 128) kind = 2;
-        else {
-          if (pixels[at + 2] >= 128) unchangedPixels += 1;
-          continue;
-        }
-        const cell = cellRow + (x / cellSize | 0);
-        if (kind === 1) {
-          removedPixels += 1;
-          cellRemoved[cell] += 1;
-        } else {
-          addedPixels += 1;
-          cellAdded[cell] += 1;
-        }
-        if (x < cellMinX[cell]) cellMinX[cell] = x;
-        if (x > cellMaxX[cell]) cellMaxX[cell] = x;
-        if (y < cellMinY[cell]) cellMinY[cell] = y;
-        if (y > cellMaxY[cell]) cellMaxY[cell] = y;
-      }
-    }
-    const reach = Math.ceil(mergeDistance / cellSize);
-    const visited = new Uint8Array(cellCount);
-    const regions = [];
-    const stack = [];
-    for (let start = 0; start < cellCount; start += 1) {
-      if (visited[start] || cellAdded[start] === 0 && cellRemoved[start] === 0) continue;
-      visited[start] = 1;
-      stack.push(start);
-      let added = 0;
-      let removed = 0;
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      while (stack.length) {
-        const cell = stack.pop();
-        added += cellAdded[cell];
-        removed += cellRemoved[cell];
-        if (cellMinX[cell] < minX) minX = cellMinX[cell];
-        if (cellMinY[cell] < minY) minY = cellMinY[cell];
-        if (cellMaxX[cell] > maxX) maxX = cellMaxX[cell];
-        if (cellMaxY[cell] > maxY) maxY = cellMaxY[cell];
-        const cx = cell % cols;
-        const cy = (cell - cx) / cols;
-        for (let ny = Math.max(0, cy - reach); ny <= Math.min(rows - 1, cy + reach); ny += 1) {
-          for (let nx = Math.max(0, cx - reach); nx <= Math.min(cols - 1, cx + reach); nx += 1) {
-            const next = ny * cols + nx;
-            if (visited[next] || cellAdded[next] === 0 && cellRemoved[next] === 0) continue;
-            visited[next] = 1;
-            stack.push(next);
-          }
-        }
-      }
-      if (added + removed < minRegionPixels) continue;
-      regions.push({
-        kind: added && removed ? "mixed" : added ? "added" : "removed",
-        addedPixels: added,
-        removedPixels: removed,
-        pixels: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
-      });
-    }
-    regions.sort(
-      (a, b) => b.addedPixels + b.removedPixels - (a.addedPixels + a.removedPixels)
-    );
-    const truncated = regions.length > maxRegions;
-    if (truncated) regions.length = maxRegions;
-    return {
-      changed: regions.length > 0,
-      addedPixels,
-      removedPixels,
-      unchangedPixels,
-      regions,
-      truncated
-    };
-  }
-  async function measureLayers(renderer, sources, options = {}) {
-    const prepared = await prepareDiffSources(sources, options);
-    const live = prepared.filter((entry) => !entry.empty);
-    await renderer.withFrame(
-      { width: 1, height: 1, fit: false, background: null, compositeMode: "stack" },
-      async () => {
-        for (const entry of live) {
-          await renderer.renderLayer(entry, { visible: false });
-        }
-      }
-    );
-    const layers = [];
-    let bounds = null;
-    let index = 0;
-    for (const entry of prepared) {
-      if (entry.empty) {
-        layers.push({ name: entry.name ?? null, bounds: null });
-        continue;
-      }
-      const record = renderer.lastFrame.layers[index];
-      index += 1;
-      layers.push({ name: entry.name ?? record?.name ?? null, bounds: record?.bounds ?? null });
-      if (record?.bounds) {
-        bounds = bounds ? {
-          minX: Math.min(bounds.minX, record.bounds.minX),
-          maxX: Math.max(bounds.maxX, record.bounds.maxX),
-          minY: Math.min(bounds.minY, record.bounds.minY),
-          maxY: Math.max(bounds.maxY, record.bounds.maxY)
-        } : { ...record.bounds };
-      }
-    }
-    return { bounds, layers };
-  }
-  async function analyzeBoardDiff(renderer, layers, options = {}) {
-    const { width = 2048, height = 2048, padding = 0 } = options;
-    let view = options.view;
-    let bounds = null;
-    if (!view) {
-      const all = layers.flatMap((layer) => [...toList(layer.base), ...toList(layer.head)]);
-      const measured = await measureLayers(renderer, all, options);
-      bounds = measured.bounds;
-      if (!bounds) throw new Error("No layer of either revision has any geometry.");
-      view = calculateFitView(bounds, width, height, padding);
-    }
-    const frameView = {
-      zoomX: view.zoomX,
-      zoomY: view.zoomY,
-      offsetX: view.offsetX,
-      offsetY: view.offsetY
-    };
-    const reports = [];
-    for (const layer of layers) {
-      const report = await analyzeLayerDiff(
-        renderer,
-        { base: layer.base, head: layer.head },
-        { ...options, width, height, view: frameView }
-      );
-      reports.push({ name: layer.name, ...report });
-    }
-    return {
-      view: withFrameSize(frameView, width, height),
-      bounds,
-      width,
-      height,
-      changed: reports.some((report) => report.changed),
-      layers: reports
-    };
-  }
-
-  // vendor/wasm-gerber-renderer/outline.js
-  var outline_exports = {};
-  __export(outline_exports, {
-    OUTLINE_TOLERANCE_MM: () => OUTLINE_TOLERANCE_MM,
-    boardCutouts: () => boardCutouts,
-    boardOutline: () => boardOutline,
-    gerberExtents: () => gerberExtents,
-    outlineContours: () => outlineContours,
-    pickBoard: () => pickBoard,
-    signedArea: () => signedArea2
-  });
-  var OUTLINE_TOLERANCE_MM = 2e-3;
-  var ARC_SEGMENTS = 48;
-  var SAME_SHAPE = 0.98;
-  var FORMAT = /%FSLAX(\d)(\d)Y(\d)(\d)\*%/;
-  var UNITS2 = /%MO(MM|IN)\*%/;
-  var OP = /^(?:G0([123]))?(?:X([-+]?\d+))?(?:Y([-+]?\d+))?(?:I([-+]?\d+))?(?:J([-+]?\d+))?D0([123])\*$/;
-  var MODE = /^G0([123])\*$/;
-  var QUADRANT = /^G7([45])\*$/;
-  function scaleOf(text) {
-    const format = FORMAT.exec(text);
-    const decimals = format ? Number(format[2]) : 6;
-    const units = UNITS2.exec(text);
-    return (units && units[1] === "IN" ? 25.4 : 1) / 10 ** decimals;
-  }
-  function arcPoints(start, end, center, clockwise) {
-    const [sx, sy] = start;
-    const [ex, ey] = end;
-    const [cx, cy] = center;
-    const radius = Math.hypot(sx - cx, sy - cy);
-    if (radius <= 0) return [end];
-    const startAngle = Math.atan2(sy - cy, sx - cx);
-    let sweep = Math.atan2(ey - cy, ex - cx) - startAngle;
-    if (clockwise) {
-      while (sweep > 0) sweep -= 2 * Math.PI;
-      if (Math.abs(sweep) < 1e-9) sweep = -2 * Math.PI;
-    } else {
-      while (sweep < 0) sweep += 2 * Math.PI;
-      if (Math.abs(sweep) < 1e-9) sweep = 2 * Math.PI;
-    }
-    const steps = Math.max(
-      2,
-      Math.min(ARC_SEGMENTS, Math.floor(Math.abs(sweep) / (2 * Math.PI) * ARC_SEGMENTS) + 2)
-    );
-    const points = [];
-    for (let i = 1; i <= steps; i += 1) {
-      const angle = startAngle + sweep * i / steps;
-      points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
-    }
-    return points;
-  }
-  function quadrantCenter(start, end, i, j, clockwise) {
-    const [sx, sy] = start;
-    const [ex, ey] = end;
-    let best = [sx + i, sy + j];
-    let bestError = Infinity;
-    for (const di of [i, -i]) {
-      for (const dj of [j, -j]) {
-        const cx = sx + di;
-        const cy = sy + dj;
-        const rStart = Math.hypot(sx - cx, sy - cy);
-        const error2 = Math.abs(rStart - Math.hypot(ex - cx, ey - cy));
-        if (error2 > Math.max(rStart, 1) * 1e-3) continue;
-        let sweep = Math.atan2(ey - cy, ex - cx) - Math.atan2(sy - cy, sx - cx);
-        if (clockwise) while (sweep > 0) sweep -= 2 * Math.PI;
-        else while (sweep < 0) sweep += 2 * Math.PI;
-        if (Math.abs(sweep) > Math.PI / 2 + 1e-6) continue;
-        if (error2 < bestError) {
-          best = [cx, cy];
-          bestError = error2;
-        }
-      }
-    }
-    return best;
-  }
-  function strokesOf(text) {
-    const scale = scaleOf(text);
-    const strokes = [];
-    let current = [];
-    let x = 0;
-    let y = 0;
-    let mode = 1;
-    let singleQuadrant = false;
-    for (const raw of String(text).split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith("%") || line.startsWith("G04") || line.startsWith("M")) continue;
-      const alone = MODE.exec(line);
-      if (alone) {
-        mode = Number(alone[1]);
-        continue;
-      }
-      const quadrant = QUADRANT.exec(line);
-      if (quadrant) {
-        singleQuadrant = quadrant[1] === "4";
-        continue;
-      }
-      const match = OP.exec(line);
-      if (!match) continue;
-      const [, g, rawX, rawY, rawI, rawJ, d] = match;
-      if (g) mode = Number(g);
-      const nx = rawX != null ? Number(rawX) * scale : x;
-      const ny = rawY != null ? Number(rawY) * scale : y;
-      if (d === "2") {
-        if (current.length > 1) strokes.push(current);
-        current = [[nx, ny]];
-      } else if (d === "1") {
-        if (!current.length) current = [[x, y]];
-        if (mode === 1 || rawI == null && rawJ == null) {
-          current.push([nx, ny]);
-        } else {
-          const i = rawI ? Number(rawI) * scale : 0;
-          const j = rawJ ? Number(rawJ) * scale : 0;
-          const center = singleQuadrant ? quadrantCenter([x, y], [nx, ny], i, j, mode === 2) : [x + i, y + j];
-          current.push(...arcPoints([x, y], [nx, ny], center, mode === 2));
-        }
-      }
-      x = nx;
-      y = ny;
-    }
-    if (current.length > 1) strokes.push(current);
-    return strokes;
-  }
-  function keyOf(point, tolerance) {
-    return `${Math.round(point[0] / tolerance)},${Math.round(point[1] / tolerance)}`;
-  }
-  function stitch(strokes, tolerance) {
-    const ends = /* @__PURE__ */ new Map();
-    strokes.forEach((stroke, index) => {
-      for (const point of [stroke[0], stroke[stroke.length - 1]]) {
-        const key = keyOf(point, tolerance);
-        if (!ends.has(key)) ends.set(key, []);
-        ends.get(key).push(index);
-      }
-    });
-    const used = new Array(strokes.length).fill(false);
-    const loops = [];
-    const closed = (chain) => chain.length > 2 && keyOf(chain[0], tolerance) === keyOf(chain[chain.length - 1], tolerance);
-    for (let index = 0; index < strokes.length; index += 1) {
-      if (used[index]) continue;
-      used[index] = true;
-      const chain = [...strokes[index]];
-      let extended = true;
-      while (extended && !closed(chain)) {
-        extended = false;
-        const tail = keyOf(chain[chain.length - 1], tolerance);
-        for (const candidate of ends.get(tail) ?? []) {
-          if (used[candidate]) continue;
-          const stroke = strokes[candidate];
-          if (keyOf(stroke[0], tolerance) === tail) {
-            chain.push(...stroke.slice(1));
-          } else if (keyOf(stroke[stroke.length - 1], tolerance) === tail) {
-            chain.push(...stroke.slice(0, -1).reverse());
-          } else {
-            continue;
-          }
-          used[candidate] = true;
-          extended = true;
-          break;
-        }
-      }
-      if (closed(chain)) loops.push(chain);
-    }
-    return loops;
-  }
-  function signedArea2(points) {
-    let total = 0;
-    for (let i = 0; i < points.length; i += 1) {
-      const [x1, y1] = points[i];
-      const [x2, y2] = points[(i + 1) % points.length];
-      total += x1 * y2 - x2 * y1;
-    }
-    return total / 2;
-  }
-  function outlineContours(text, { tolerance = OUTLINE_TOLERANCE_MM } = {}) {
-    const found = [];
-    for (const loop of stitch(strokesOf(text), tolerance)) {
-      const points = loop.slice(0, -1);
-      if (points.length < 3) continue;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      for (const [x, y] of points) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-      found.push({ points, area: Math.abs(signedArea2(points)), bounds: { minX, maxX, minY, maxY } });
-    }
-    found.sort((a, b) => b.area - a.area);
-    return found;
-  }
-  function contains(outer, inner) {
-    return outer.bounds.minX <= inner.bounds.minX && outer.bounds.maxX >= inner.bounds.maxX && outer.bounds.minY <= inner.bounds.minY && outer.bounds.maxY >= inner.bounds.maxY;
-  }
-  function pickBoard(contours, { width = null, height = null } = {}) {
-    if (!contours.length) return null;
-    if (width && height) {
-      const error2 = (contour) => Math.abs(contour.bounds.maxX - contour.bounds.minX - width) + Math.abs(contour.bounds.maxY - contour.bounds.minY - height);
-      let best = contours[0];
-      for (const contour of contours) if (error2(contour) < error2(best)) best = contour;
-      if (error2(best) <= 2) return best;
-    }
-    return contours[0];
-  }
-  function sameLoop(a, b, tolerance) {
-    return Math.abs(a.bounds.minX - b.bounds.minX) <= tolerance && Math.abs(a.bounds.maxX - b.bounds.maxX) <= tolerance && Math.abs(a.bounds.minY - b.bounds.minY) <= tolerance && Math.abs(a.bounds.maxY - b.bounds.maxY) <= tolerance && (Math.max(a.area, b.area) <= 0 || Math.min(a.area, b.area) / Math.max(a.area, b.area) >= SAME_SHAPE);
-  }
-  function boardCutouts(contours, board, { tolerance = OUTLINE_TOLERANCE_MM } = {}) {
-    const kept = [];
-    for (const contour of contours) {
-      if (contour === board || !contains(board, contour)) continue;
-      if (board.area > 0 && contour.area / board.area >= SAME_SHAPE) continue;
-      if (kept.some((other) => sameLoop(contour, other, tolerance))) continue;
-      kept.push(contour);
-    }
-    return kept;
-  }
-  function boardOutline(text, options = {}) {
-    const contours = outlineContours(text, options);
-    const board = pickBoard(contours, options);
-    if (!board) return null;
-    const wind = (points, ccw) => signedArea2(points) > 0 === ccw ? points : [...points].reverse();
-    return {
-      outer: wind(board.points, true),
-      holes: boardCutouts(contours, board, options).map((cutout) => wind(cutout.points, false)),
-      bounds: { ...board.bounds }
-    };
-  }
-  function gerberExtents(text) {
-    const scale = scaleOf(text);
-    let x = 0;
-    let y = 0;
-    let bounds = null;
-    for (const raw of String(text).split(/\r?\n/)) {
-      const match = OP.exec(raw.trim());
-      if (!match) continue;
-      if (match[2] != null) x = Number(match[2]) * scale;
-      if (match[3] != null) y = Number(match[3]) * scale;
-      bounds = bounds ? {
-        minX: Math.min(bounds.minX, x),
-        maxX: Math.max(bounds.maxX, x),
-        minY: Math.min(bounds.minY, y),
-        maxY: Math.max(bounds.maxY, y)
-      } : { minX: x, maxX: x, minY: y, maxY: y };
-    }
-    return bounds;
-  }
-
   // ../vendor/boarddd/src/geom/loops.js
   var HOLE_SAGITTA_MM = 0.01;
   var HOLE_SEGMENTS_MIN = 10;
@@ -42388,7 +42807,7 @@ void main() {
     }
     return b;
   }
-  var padBounds = (b, margin) => ({ minX: b.minX - margin, maxX: b.maxX + margin, minY: b.minY - margin, maxY: b.maxY + margin });
+  var padBounds2 = (b, margin) => ({ minX: b.minX - margin, maxX: b.maxX + margin, minY: b.minY - margin, maxY: b.maxY + margin });
   function ringPoints(cx, cy, radius, segments = segmentsFor(radius)) {
     const points = [];
     for (let i = 0; i < segments; i += 1) {
@@ -42623,42 +43042,23 @@ void main() {
   var MAX_FACE_PX = 4096;
   var DIFF_BACKGROUND = "#2d333b";
   var DIFF_STYLE2 = { unchanged: { color: [0.72, 0.64, 0.5], alpha: 0.7 } };
+  var shared = null;
+  function defaultRenderer() {
+    shared = shared || createGerberRenderer(document.createElement("canvas"), { contextAttributes: { preserveDrawingBuffer: true } });
+    return shared;
+  }
   var NEEDS = ["groupBoardLayers", "boardOutline", "parseExcellon", "renderFaceRaster", "faceRasterSize", "copyScaled"];
   function check(gerber, extra = []) {
+    gerber = gerber || gerber_exports;
     const missing = [...NEEDS, ...extra].filter((k) => typeof gerber?.[k] !== "function");
-    if (missing.length) throw new TypeError(`boarddd/board: the injected wasm-gerber-renderer is missing ${missing.join(", ")} (needs our fork's board/diff/drills/layers/outline/raster modules)`);
-  }
-  var TOOL_DEF2 = /^T(\d+)(?:[A-BD-Z][-\d.]*)*C([-\d.]+)/i;
-  var TOOL_SELECT2 = /^T(\d+)\s*$/i;
-  function withoutEmptyTools(text) {
-    const lines = String(text).split(/\r?\n/);
-    const empty = /* @__PURE__ */ new Set();
-    for (const line of lines) {
-      const m = TOOL_DEF2.exec(line.trim());
-      if (m && !(Number(m[2]) > 0)) empty.add(Number(m[1]));
-    }
-    if (!empty.size) return text;
-    const out = [];
-    let skipping = false, inBody = false;
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (line === "%" || /^M95\b/i.test(line)) inBody = true;
-      const def = TOOL_DEF2.exec(line);
-      if (def && !inBody) {
-        if (empty.has(Number(def[1]))) continue;
-        out.push(raw);
-        continue;
-      }
-      const sel = TOOL_SELECT2.exec(line) || (def && inBody ? def : null);
-      if (sel) skipping = empty.has(Number(sel[1]));
-      else if (/^(M30|M00)\b/i.test(line)) skipping = false;
-      if (!skipping) out.push(raw);
-    }
-    return out.join("\n");
+    if (missing.length) throw new TypeError(`boarddd/board: the injected gerber implementation is missing ${missing.join(", ")} (pass null for boarddd/gerber)`);
+    return gerber;
   }
   function readFabFiles(gerber, files, board = {}) {
+    gerber = gerber || gerber_exports;
+    const drop = gerber.withoutEmptyTools || withoutEmptyTools;
     const list = files.map((f) => {
-      const text = /\.(drl|xln|exc|drd|txt)$/i.test(f.name) || /^M48\b/m.test(f.text.slice(0, 400)) ? (gerber.withoutEmptyTools || withoutEmptyTools)(f.text) : f.text;
+      const text = /\.(drl|xln|exc|drd|txt)$/i.test(f.name) || /^M48\b/m.test(f.text.slice(0, 400)) ? drop(f.text) : f.text;
       return { name: f.name, source: text, content: text, plated: f.plated };
     });
     const grouped = gerber.groupBoardLayers(list);
@@ -42679,10 +43079,11 @@ void main() {
     return { grouped, outline, holes, drills, edge };
   }
   function faceBounds(outlines, pad = 0.5) {
-    return padBounds(loopBounds(...outlines.filter(Boolean).map((o) => o.board)), pad);
+    return padBounds2(loopBounds(...outlines.filter(Boolean).map((o) => o.board)), pad);
   }
   async function paintFaces(gerber, renderer, fab, { bounds = null, pxPerMm = FACE_PX_PER_MM, maxTextureSize = MAX_FACE_PX, palette: palette2 = {} } = {}) {
-    check(gerber);
+    gerber = check(gerber);
+    renderer = renderer || await defaultRenderer();
     bounds = bounds || faceBounds([fab.outline]);
     const size = gerber.faceRasterSize(bounds, { pxPerMm, maxPx: maxTextureSize, maxTextureSize });
     const out = { bounds, size, view: null };
@@ -42701,7 +43102,8 @@ void main() {
     return out;
   }
   async function paintCopperDiff(gerber, renderer, { base, head }, painted, { maxTextureSize = MAX_FACE_PX } = {}) {
-    check(gerber, ["renderLayerDiff", "holesToGerber"]);
+    gerber = check(gerber, ["renderLayerDiff", "holesToGerber"]);
+    renderer = renderer || await defaultRenderer();
     const pick2 = (fab, face) => {
       if (!fab) return null;
       const list = [fab.grouped[face]?.copper?.source, fab.edge].filter(Boolean);
@@ -42723,7 +43125,7 @@ void main() {
     return out;
   }
   async function buildGerberBoard(gerber, renderer, files, options = {}) {
-    check(gerber);
+    gerber = check(gerber);
     const fab = readFabFiles(gerber, files, options.board || {});
     if (!fab.outline) throw new Error("buildGerberBoard: no board outline (no Edge.Cuts and no board box)");
     const painted = await paintFaces(gerber, renderer, fab, options);
@@ -42752,10 +43154,10 @@ void main() {
   }
 
   // pcba3d/gerberboard.js
-  var WASM_URL = new URL("../vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm", KIPR_PCBA3D_SCRIPT_URL);
-  var OFFLINE_WASM_KEY = "vendor/wasm-gerber-renderer/wasm/wasm_gerber_processor_bg.wasm";
+  var OFFLINE_WASM_KEY = "vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm";
+  var WASM_URL = new URL(`../${OFFLINE_WASM_KEY}`, KIPR_PCBA3D_SCRIPT_URL);
   var FAB_KINDS = /* @__PURE__ */ new Set(["copper", "mask", "silk", "outline", "drill"]);
-  var GERBER = { ...board_exports, ...diff_exports, ...drills_exports, ...layers_exports, ...outline_exports, ...raster_exports };
+  var GERBER = gerber_exports;
   function basename(path) {
     return String(path).split("/").pop();
   }
@@ -42768,8 +43170,8 @@ void main() {
       contextAttributes: { preserveDrawingBuffer: true }
     });
   }
-  async function loadSideFiles(project, side, assets) {
-    const layers = (project.pcb?.layers || []).filter((l) => l[side]?.gerber && FAB_KINDS.has(l.kind) && !(l.kind === "copper" && l.side === "inner"));
+  async function loadSideFiles(project2, side, assets) {
+    const layers = (project2.pcb?.layers || []).filter((l) => l[side]?.gerber && FAB_KINDS.has(l.kind) && !(l.kind === "copper" && l.side === "inner"));
     return Promise.all(layers.map(async (l) => {
       const name = basename(l[side].gerber);
       const file = { name, text: await assets.text(l[side].gerber) };
@@ -42777,8 +43179,8 @@ void main() {
       return file;
     }));
   }
-  function boardInfo(project, side) {
-    const b = project.pcb?.board || {};
+  function boardInfo(project2, side) {
+    const b = project2.pcb?.board || {};
     return { ...b, ...b[side] || {} };
   }
   function palette(info) {
@@ -42788,19 +43190,19 @@ void main() {
     if (info.finish && !/^none$/i.test(info.finish)) p.finish = info.finish;
     return p;
   }
-  async function buildGerberBoards(project, assets, { onStatus = () => {
+  async function buildGerberBoards(project2, assets, { onStatus = () => {
   }, maxTextureSize = MAX_FACE_PX } = {}) {
-    if (!project.pcb?.layers?.length) return null;
+    if (!project2.pcb?.layers?.length) return null;
     const files = {};
     const fab = {};
     for (const side of ["base", "head"]) {
-      const wanted = project.pcba3d?.[side] || project.pcb.board?.[side] || project.status !== (side === "base" ? "added" : "removed");
-      files[side] = wanted ? await loadSideFiles(project, side, assets).catch(() => null) : null;
+      const wanted = project2.pcba3d?.[side] || project2.pcb.board?.[side] || project2.status !== (side === "base" ? "added" : "removed");
+      files[side] = wanted ? await loadSideFiles(project2, side, assets).catch(() => null) : null;
       if (!files[side]?.length) {
         files[side] = null;
         continue;
       }
-      fab[side] = readFabFiles(GERBER, files[side], boardInfo(project, side));
+      fab[side] = readFabFiles(GERBER, files[side], boardInfo(project2, side));
     }
     const present = ["base", "head"].filter((s) => fab[s]?.outline);
     if (!present.length) return null;
@@ -42809,7 +43211,7 @@ void main() {
     const sides = {};
     try {
       for (const side of present) {
-        const info = boardInfo(project, side);
+        const info = boardInfo(project2, side);
         onStatus(`Painting the ${side} board\u2026`);
         const s = await buildGerberBoard(GERBER, renderer, files[side], {
           thickness: Number(info.thickness_mm) > 0 ? Number(info.thickness_mm) : 1.6,
@@ -45570,9 +45972,9 @@ void main() {
   function note(el, text) {
     el.replaceChildren(h("div", { class: "kp3d-note" }, text));
   }
-  async function mountPcba3d(el, project, baseUrl, options = {}) {
+  async function mountPcba3d(el, project2, baseUrl, options = {}) {
     await ensureCss();
-    const pcba = project?.pcba3d;
+    const pcba = project2?.pcba3d;
     const noop = { dispose() {
     }, destroy() {
     }, focus() {
@@ -45586,12 +45988,12 @@ void main() {
       return noop;
     }
     const base = baseUrl ? new URL(baseUrl, document.baseURI) : new URL(".", document.baseURI);
-    const assets = assetLoader(base, project.slug);
+    const assets = assetLoader(base, project2.slug);
     const components = normalizeComponents(pcba.components);
     const byRef = new Map(components.map((c) => [c.ref, c]));
     const counts = countByStatus(components);
     const errors = [];
-    const board = project?.pcb?.board || null;
+    const board = project2?.pcb?.board || null;
     const root = h("div", { class: "kp3d", "data-mode": options.mode && MODES.includes(options.mode) ? options.mode : "side" });
     const modeButtons = MODES.map((m) => h("button", { type: "button", "data-mode": m, onclick: () => api.setMode(m) }, MODE_LABELS[m]));
     const viewButtons = [["top", "Top"], ["bottom", "Bottom"], ["iso", "Iso"], [null, "Fit"]].map(([v, label]) => h("button", { type: "button", title: v ? `${label} view` : "Fit the board", onclick: () => view.fit(v || "iso") }, label));
@@ -45785,7 +46187,7 @@ void main() {
       const spec = sideSpec[k];
       if (!spec || !spec.glb) {
         bars[k].value = 1;
-        showMissing(k, project?.status === (k === "base" ? "added" : "removed") ? `Not present in ${k}` : `No ${k} 3D model`);
+        showMissing(k, project2?.status === (k === "base" ? "added" : "removed") ? `Not present in ${k}` : `No ${k} 3D model`);
         return null;
       }
       try {
@@ -45823,7 +46225,7 @@ void main() {
         if (noModel) t += `, ${noModel} without a 3D model`;
         if (missing > 0) t += `, ${missing} not found`;
         if (r.loose) t += `, ${r.loose} unassigned bodies`;
-        const subs = project?.pcba3d?.models?.[k]?.substitutions;
+        const subs = project2?.pcba3d?.models?.[k]?.substitutions;
         if (Array.isArray(subs) && subs.length) t += `, ${subs.length} missing model path(s) exported with the other format (${fallbackKinds(subs)})`;
         parts.push(t);
       }
@@ -45838,7 +46240,7 @@ void main() {
       }
       status.replaceChildren(
         parts.join(" \xB7 "),
-        ...[...(project?.errors || []).filter((e) => /3d|glb|pcba/i.test(e)), ...errors].map((e) => h("div", { class: "err" }, e))
+        ...[...(project2?.errors || []).filter((e) => /3d|glb|pcba/i.test(e)), ...errors].map((e) => h("div", { class: "err" }, e))
       );
     }
     let pendingFocus = null;
@@ -45877,11 +46279,11 @@ void main() {
       view.setBoardSource(src);
     }
     async function loadFabBoard() {
-      if (!project.pcb?.layers?.length) return;
+      if (!project2.pcb?.layers?.length) return;
       boardNote.hidden = false;
       boardNote.textContent = "Painting the board from the gerbers\u2026";
       try {
-        const gb = await buildGerberBoards(project, assets, { onStatus: (t) => {
+        const gb = await buildGerberBoards(project2, assets, { onStatus: (t) => {
           boardNote.textContent = t;
         } });
         if (disposed) {
@@ -45948,7 +46350,7 @@ void main() {
 
   // pcba3d/offline_entry.js
   window.KIPR_PCBA3D = { mountPcba3d };
-  window.KIPR_GERBER = { index: wasm_gerber_renderer_exports, board: board_exports, diff: diff_exports, wasmGlue: wasm_gerber_processor_exports };
+  window.KIPR_GERBER = { gerber: gerber_exports, wasmGlue: wasm_gerber_processor_exports };
 })();
 /**
  * @license

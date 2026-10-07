@@ -31,10 +31,12 @@ export function buildBoard(options: {
 export function outlineGhost(outline: Outline, zs?: number[], options?: { color?: THREE.ColorRepresentation; opacity?: number }): THREE.Group;
 export function outlinesDiffer(a: Outline | null, b: Outline | null, tol?: number): boolean;
 
-// Gerber faces: `gerber` = our wasm-gerber-renderer fork's functions (board/diff/drills/layers/outline/raster
-// modules merged), `renderer` = its GerberRenderer. Never imported by boarddd itself.
-export type GerberApi = Record<string, (...args: any[]) => any>;
-export type GerberRenderer = any;
+// Gerber faces: `gerber` = boarddd/gerber's functions (null/undefined = boarddd/gerber itself, or inject another
+// implementation), `renderer` = a GerberRenderer (null/undefined = defaultRenderer()).
+export type GerberApi = Record<string, (...args: any[]) => any> | null | undefined;
+export type GerberRenderer = import('../gerber/index.js').GerberRenderer | null | undefined;
+/** One shared boarddd/gerber renderer on its own canvas (preserveDrawingBuffer), made on first call. */
+export function defaultRenderer(): Promise<import('../gerber/index.js').GerberRenderer>;
 export interface FabFile { name: string; text: string; plated?: boolean }
 export interface Fab {
   grouped: any;
@@ -49,7 +51,7 @@ export interface PaintedFaces {
 }
 export const FACE_PX_PER_MM: number;
 export const MAX_FACE_PX: number;
-/** An Excellon file without zero-diameter tools (and their hits), which the renderer rejects. */
+/** boarddd/gerber's withoutEmptyTools, kept here for 0.1 callers. */
 export function withoutEmptyTools(text: string): string;
 export function readFabFiles(gerber: GerberApi, files: FabFile[], board?: { size_mm?: [number, number]; origin_mm?: [number, number] }): Fab;
 export function faceBounds(outlines: (Outline | null)[], pad?: number): Bounds;

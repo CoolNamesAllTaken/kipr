@@ -7,8 +7,8 @@
 #   --browser  playwright screenshots of every mode -> tests/web-3d/out/shots/, over http and
 #              (after build_offline.mjs) from file://. Uses kipr-tools' shared headless chromium
 #              (bin/pw-env, pw-venv) when present; else set PYTHON to a python with playwright.
-# The board-from-gerbers parts need the shared renderer vendored in web/project/vendor/ (the
-# project viewer's copy); without it those tests skip and the viewer falls back to the GLB board.
+# The board-from-gerbers parts need boarddd vendored in web/vendor/boarddd (boarddd/gerber and its
+# wasm, web/vendor/sync_vendor.bash); without it the viewer falls back to the GLB board.
 set -eu
 # kipr-tools' pw-env finds itself through BASH_SOURCE, so this runs under bash even as `sh run.sh`.
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
