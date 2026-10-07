@@ -5,11 +5,14 @@ fixtures/pad_placement/golden.json holds KiCad's own numbers (pcbnew ShapePos, e
 position, FP_3DMODEL offset/rotate/scale), made by fixtures/pad_placement/make_golden.py. The footprints:
 RP2040-Zero_Castellated (SMD pads with shape offsets + a model offset), the stock R_0603_1608Metric,
 SMA_Amphenol_132289_EdgeMount (rotated pads, model offset + rotation), USB_C CNCTech (THT pads whose
-shape offset must move the copper but not the hole).
+shape offset must move the copper but not the hole), Trapezoid_Delta (trapezoid pads, rect_delta in x and y with
+both signs, rotated, two with drill offsets; golden.json keeps their corners from pcbnew GetEffectivePolygon
+because a bbox can't tell the sign of rect_delta).
 """
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -40,6 +43,22 @@ class PadPlacement(unittest.TestCase):
         self.assertEqual(len(a), len(b), msg)
         for x, y in zip(a, b):
             self.assertAlmostEqual(x, y, delta=tol, msg=f"{msg}: {list(a)} != {list(b)}")
+
+    def assertSameCorners(self, got, gold, msg, tol=TOL):
+        """The same polygon corners, whatever the start vertex and direction."""
+        got = [tuple(q) for q in got]
+        if len(got) > 1 and got[0] == got[-1]:
+            got = got[:-1]
+        self.assertEqual(len(got), len(gold), f"{msg}: {got} vs {gold}")
+        for g in gold:
+            self.assertTrue(any(abs(g[0] - q[0]) <= tol and abs(g[1] - q[1]) <= tol for q in got),
+                            f"{msg}: KiCad corner {g} not in {got}")
+
+    def trapezoids(self):
+        for name, fp, gold in footprints():
+            for p, g in zip(fp.pads, gold["pads"]):
+                if "copper_polygon" in g:
+                    yield f"{name} pad {p['number']} delta {p['delta']} angle {p['angle']}", p, g
 
     def test_golden_covers_fixtures(self):
         self.assertEqual(sorted(GOLDEN), sorted(p.stem for p in FIX.glob("*.kicad_mod")))
@@ -75,6 +94,24 @@ class PadPlacement(unittest.TestCase):
                     c = dg.centroid
                     self.assertNear([c.x, c.y], g["hole_center"], where + " hole")
 
+    def test_trapezoid_corners(self):
+        """rect_delta signs as pcbnew draws them, in x and y, both signs, with rotation and shape offsets."""
+        self.assertEqual(len(list(self.trapezoids())), 10)
+        for where, p, g in self.trapezoids():
+            gold = g["copper_polygon"]
+            # model3d.py: GLB / 3D preview copper
+            self.assertSameCorners(model3d.pad_geom(p).exterior.coords, gold, where + " model3d")
+            # fp.py: the 2D SVG path, placed the way _pad_svg's transform places it
+            d = fpmod._pad_shape_d(p)
+            local = [(float(x), float(y)) for x, y in re.findall(r"[ML](-?[\d.]+) (-?[\d.]+)", d)]
+            ox, oy = p["offset"]
+            placed = [(p["x"] + dx, p["y"] + dy) for dx, dy in (rot(ox + x, oy + y, p["angle"]) for x, y in local)]
+            self.assertSameCorners(placed, gold, where + " svg", tol=2e-4)  # SVG numbers have 4 decimals
+            # fp.py: the footprint bbox covers the corners, not just w x h
+            bb = fpmod.BBox()
+            fpmod._pad_bbox(p, bb)
+            self.assertNear([bb.x0, bb.y0, bb.x1, bb.y1], g["copper_bbox"], where + " bbox")
+
     def test_svg_moves_copper_not_hole(self):
         fp = fpmod.Footprint(parse((FIX / "RP2040-Zero_Castellated.kicad_mod").read_text()))
         svg = fpmod._pad_svg(fp.pads[0], "#c83434")
@@ -102,6 +139,8 @@ class PadPlacement(unittest.TestCase):
                     self.assertIsNone(p["hole_center"], where)
                 else:
                     self.assertNear(p["hole_center"], g["hole_center"], where + " hole")
+                if "copper_polygon" in g:
+                    self.assertSameCorners(p["copper_polygon"], g["copper_polygon"], where + " trapezoid")
             for m, g in zip(got[name]["models"], gold["models"]):
                 self.assertNear(m, g["offset"], f"{name} model origin")
 

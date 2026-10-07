@@ -27,7 +27,7 @@ from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-from .geom import arc_points
+from .geom import arc_points, trapezoid_corners
 
 BOARD_T = 1.6
 CU_T = 0.035
@@ -148,9 +148,7 @@ def pad_geom(p, grow=0.0):
         pts += [(x0 + c, y1), (x0, y1 - c)] if "bottom_left" in ch else [(x0, y1)]
         base = Polygon(pts)
     elif shape == "trapezoid":
-        dx, dy = (p["delta"] + [0, 0])[:2]
-        base = Polygon([(-w / 2 - dy / 2, -h / 2 + dx / 2), (w / 2 + dy / 2, -h / 2 - dx / 2),
-                        (w / 2 - dy / 2, h / 2 + dx / 2), (-w / 2 + dy / 2, h / 2 - dx / 2)])
+        base = Polygon(trapezoid_corners(w, h, *(p["delta"] + [0, 0])[:2]))
     else:
         base = box(-w / 2, -h / 2, w / 2, h / 2)
     parts = [base]

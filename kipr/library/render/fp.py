@@ -7,7 +7,7 @@ import re
 
 from kipr.common.sexpr import Atom, Node
 
-from .geom import BBox, arc_mid_from_center, arc_path, arc_points, f, rot, text_el, text_extent
+from .geom import BBox, arc_mid_from_center, arc_path, arc_points, f, rot, text_el, text_extent, trapezoid_corners
 
 # KiCad 10 default ("KiCad Default") PCB colour theme, approximately.
 LAYER_COLORS = {
@@ -476,9 +476,9 @@ def _graphic_bbox(g, bb: BBox):
 def _pad_bbox(p, bb: BBox):
     r = math.hypot(p["w"], p["h"]) / 2
     ox, oy = p["offset"]
-    pts = []
-    for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-        pts.append(rot(ox + sx * p["w"] / 2, oy + sy * p["h"] / 2, p["angle"]))
+    corners = (trapezoid_corners(p["w"], p["h"], *(p["delta"] + [0, 0])[:2]) if p["shape"] == "trapezoid" else
+               [(sx * p["w"] / 2, sy * p["h"] / 2) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
+    pts = [rot(ox + x, oy + y, p["angle"]) for x, y in corners]
     for prim in p["primitives"]:
         sub = BBox()
         _graphic_bbox(prim, sub)
@@ -521,10 +521,7 @@ def _pad_shape_d(p, grow: float = 0.0) -> str:
         pts += [(x0 + c, y1), (x0, y1 - c)] if "bottom_left" in ch else [(x0, y1)]
         return "M" + "L".join(f"{f(x)} {f(y)}" for x, y in pts) + "Z"
     if shape == "trapezoid":
-        dx, dy = (p["delta"] + [0, 0])[:2]
-        # KiCad: rect_delta dx widens the bottom side vs top (for dy: left vs right)
-        pts = [(-w / 2 - dy / 2, -h / 2 + dx / 2), (w / 2 + dy / 2, -h / 2 - dx / 2),
-               (w / 2 - dy / 2, h / 2 + dx / 2), (-w / 2 + dy / 2, h / 2 - dx / 2)]
+        pts = trapezoid_corners(w, h, *(p["delta"] + [0, 0])[:2])
         return "M" + "L".join(f"{f(x)} {f(y)}" for x, y in pts) + "Z"
     # rect and fallback
     return f"M{f(-w/2)} {f(-h/2)}H{f(w/2)}V{f(h/2)}H{f(-w/2)}Z"
