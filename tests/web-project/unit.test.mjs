@@ -467,8 +467,20 @@ test('impedance row tooltip: inputs, widths, notes; missing side', () => {
   const t = impedanceSideTitle('head', { structure: 'coplanar_grounded', model: 'cpwg', nets: ['/RF'], length_mm: 41.25,
     widths: [{ width: 0.26, length_mm: 40 }, { width: 0.2, length_mm: 1.25 }], coplanar_gap: 0.15,
     params: { w: 0.26, h: 0.2104, er: 4.4 }, validity: ['w/h = 9 is outside'], notes: ['coplanar with a plane below'], error: null });
-  assert.match(t, /^head: coplanar_grounded \(cpwg\), 1 net\(s\), 41\.3 mm routed/);
+  assert.match(t, /^head: coplanar_grounded \(cpwg\), 1 net\(s\), 41\.3 of 41\.3 mm controlled/);
   assert.match(t, /widths: 0\.26 mm × 40\.0 mm, 0\.2 mm × 1\.3 mm/);
   assert.match(t, /coplanar gap: 0\.15 mm\ninputs: w 0\.26, h 0\.2104, er 4\.4\n⚠ w\/h = 9 is outside\n· coplanar with a plane below$/);
   assert.equal(impedanceSideTitle('base', null), 'base: —');
+});
+
+test('impedance row tooltip: field solver, every width group, left-out stubs', () => {
+  const t = impedanceSideTitle('head', { structure: 'coplanar_grounded', model: 'cpwg', nets: ['/RF'], length_mm: 34.87,
+    routed_mm: 41.5, solver: 'field', error_pct: 0.426, Z_closedform: 51.17,
+    segments: [{ width: 0.26, gap: null, length_mm: 32, Z: 51.01, deviation_pct: 2.03, within: true },
+      { width: 0.18, gap: null, length_mm: 2.87, Z: 58.9, deviation_pct: 17.8, within: false }, { width: 0.3, error: 'x' }],
+    excluded: [{ width: 0.8, reason: 'launch', length_mm: 4.76 }], widths: [{ width: 0.26, length_mm: 40 }] });
+  assert.match(t, /34\.9 of 41\.5 mm controlled\nsolver: field \(error estimate ±0\.43 %\), closed form 51\.2 Ω/);
+  assert.match(t, /✓ 0\.26 mm × 32\.0 mm: 51\.0 Ω \(\+2\.0 %\)\n✗ 0\.18 mm × 2\.9 mm: 58\.9 Ω \(\+17\.8 %\)\n· 0\.3 mm × – mm: no Z: x/);
+  assert.match(t, /left out: 0\.8 mm × 4\.8 mm launch/);
+  assert.doesNotMatch(t, /widths:/);  // the groups replace the plain width list
 });

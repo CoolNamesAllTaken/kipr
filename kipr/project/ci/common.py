@@ -106,7 +106,9 @@ def impedance_counts(p: dict) -> dict | None:
     c = d(d(p.get("summary")).get("impedance"))
     if not c:
         return None
-    return {k: num(c.get(k)) for k in ("rows", "violations", "new_violations", "stackup_shifts", "width_changes")}
+    out = {k: num(c.get(k)) for k in ("rows", "violations", "new_violations", "stackup_shifts", "width_changes")}
+    out["length_out_mm"] = num(c.get("length_out_mm"))
+    return out
 
 
 def impedance_cell(p: dict) -> str:
@@ -125,7 +127,21 @@ def impedance_total(projects: list[dict]) -> dict | None:
     cs = [c for p in projects if (c := impedance_counts(p))]
     if not cs:
         return None
-    return {k: sum(c[k] for c in cs) for k in cs[0]}
+    out = {k: sum(c[k] or 0 for c in cs) for k in cs[0]}
+    out["length_out_mm"] = round(out["length_out_mm"], 3)
+    return out
+
+
+def impedance_solver(projects: list[dict]) -> str:
+    """How the numbers were made, for the comment: field solver, closed form, or both (per project)."""
+    s = {text(d(d(p.get("checks")).get("impedance")).get("solver") or d(d(p.get("summary")).get("impedance")).get("solver"))
+         for p in projects if impedance_counts(p)}
+    s.discard("")
+    if s == {"field"}:
+        return "boarddd field solver"
+    if "field" in s:
+        return "boarddd field solver / closed-form estimate"
+    return "closed-form estimate, not a field solve"
 
 
 def impedance_summary(projects: list[dict]) -> str:
@@ -134,12 +150,13 @@ def impedance_summary(projects: list[dict]) -> str:
     if not t or not t["rows"]:
         return ""
     parts = [f"{t['rows']} class × layer checked", f"{t['violations']} out of tolerance"
-             + (f" (🔴 {t['new_violations']} new)" if t["new_violations"] else "")]
+             + (f" (🔴 {t['new_violations']} new)" if t["new_violations"] else "")
+             + (f", {t['length_out_mm']:g} mm of track" if t["length_out_mm"] else "")]
     if t["stackup_shifts"]:
         parts.append(f"{t['stackup_shifts']} shifted by a stackup change")
     if t["width_changes"]:
         parts.append(f"{t['width_changes']} with a width/gap change")
-    return "**Impedance** (closed-form estimate, not a field solve): " + ", ".join(parts) + "."
+    return f"**Impedance** ({impedance_solver(projects)}): " + ", ".join(parts) + "."
 
 
 IMPEDANCE_FLAG_TEXT = {"new_violation": "newly out of tolerance", "violation": "out of tolerance",
@@ -161,6 +178,8 @@ def impedance_lines(p: dict, limit: int = 15) -> list[str]:
         z = (f"{zb:.1f} → {zh:.1f} Ω" if zb is not None and zh is not None and abs(zh - zb) >= 0.05
              else f"{zh:.1f} Ω" if zh is not None else f"{zb:.1f} Ω (removed)" if zb is not None else "no Z")
         dev = fnum(h.get("deviation_pct"))
+        out_mm, ctl = fnum(h.get("length_out_mm")), fnum(h.get("length_mm"))
+        worst = fnum(h.get("worst_deviation_pct"))
         w = fnum(h.get("width")) if h else fnum(b.get("width"))
         geo = f"w {w:g} mm" if w is not None else ""
         gp = fnum(h.get("gap"))
@@ -174,6 +193,8 @@ def impedance_lines(p: dict, limit: int = 15) -> list[str]:
         out.append(f"- {icon} {key} {code(text(r.get('class')), 40)} on {md_inline(text(r.get('layer')), 20)}"
                    f" ({md_inline(text(h.get('structure') or b.get('structure')), 20)}{', ' + geo if geo else ''}): {z}"
                    + (f" vs {tz:g} Ω ±{tol:g} % ({dev:+.1f} %)" if tz is not None and tol is not None and dev is not None else "")
+                   + (f"; {out_mm:g} of {ctl:g} mm out of tolerance" + (f" (worst {worst:+.1f} %)" if worst is not None and dev is not None and abs(worst - dev) >= 0.05 else "")
+                      if out_mm and ctl is not None else "")
                    + (f": {md_inline(', '.join(flags), 120)}" if flags else ""))
     if len(rows) > limit:
         out.append(f"- … and {len(rows) - limit} more impedance row(s)")

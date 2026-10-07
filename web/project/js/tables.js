@@ -244,8 +244,9 @@ function gridCard(project, g) {
   return sec;
 }
 
-// checks.impedance: closed-form Z per net class x layer, base -> head. Compact: symbols in the table, the
-// inputs (widths, stackup, model parameters, notes) in tooltips.
+// checks.impedance: Z per net class x layer (field solver or closed form), base -> head, judged by the controlled
+// length out of tolerance. Compact: symbols in the table, the inputs (width groups, left-out stubs, stackup, model
+// parameters, notes) in tooltips.
 const IMP_FLAG = {
   new_violation: ['▲', 'newly out of tolerance', 'bad'],
   violation: ['⚠', 'out of tolerance (also on base)', 'warn'],
@@ -260,11 +261,21 @@ const mmTxt = (v) => (num(v) ? String(+v.toFixed(4)) : '–');
 /** Tooltip text for one side of an impedance row. */
 export function impedanceSideTitle(label, sd) {
   if (!obj(sd)) return `${label}: —`;
-  const lines = [`${label}: ${sd.structure ?? '?'} (${sd.model ?? 'no model'}), ${arr(sd.nets).length} net(s), ${fx(sd.length_mm)} mm routed`];
-  const ws = arr(sd.widths).filter(obj);
-  if (ws.length) lines.push(`widths: ${ws.map((w) => `${mmTxt(w.width)} mm × ${fx(w.length_mm)} mm`).join(', ')}`);
-  const gs = arr(sd.gaps).filter(obj);
-  if (gs.length) lines.push(`gaps: ${gs.map((g) => `${mmTxt(g.gap)} mm × ${fx(g.length_mm)} mm`).join(', ')}`);
+  const routed = num(sd.routed_mm) ? sd.routed_mm : sd.length_mm;
+  const lines = [`${label}: ${sd.structure ?? '?'} (${sd.model ?? 'no closed-form model'}), ${arr(sd.nets).length} net(s), ${fx(sd.length_mm)} of ${fx(routed)} mm controlled`];
+  if (sd.solver) lines.push(`solver: ${sd.solver === 'field' ? `field${num(sd.error_pct) ? ` (error estimate ±${sd.error_pct.toFixed(2)} %)` : ''}` : 'closed form'}${num(sd.Z_closedform) && sd.solver === 'field' ? `, closed form ${fx(sd.Z_closedform)} Ω` : ''}`);
+  const segs = arr(sd.segments).filter(obj);
+  for (const g of segs) {
+    lines.push(`${g.within === false ? '✗' : g.within ? '✓' : '·'} ${mmTxt(g.width)}${num(g.gap) ? `/${mmTxt(g.gap)}` : ''} mm × ${fx(g.length_mm)} mm: ${num(g.Z) ? `${fx(g.Z)} Ω (${g.deviation_pct > 0 ? '+' : ''}${fx(g.deviation_pct)} %)` : `no Z${g.error ? `: ${g.error}` : ''}`}`);
+  }
+  if (!segs.length) {
+    const ws = arr(sd.widths).filter(obj);
+    if (ws.length) lines.push(`widths: ${ws.map((w) => `${mmTxt(w.width)} mm × ${fx(w.length_mm)} mm`).join(', ')}`);
+    const gs = arr(sd.gaps).filter(obj);
+    if (gs.length) lines.push(`gaps: ${gs.map((g) => `${mmTxt(g.gap)} mm × ${fx(g.length_mm)} mm`).join(', ')}`);
+  }
+  const ex = arr(sd.excluded).filter(obj);
+  if (ex.length) lines.push(`left out: ${ex.map((x) => `${mmTxt(x.width)} mm × ${fx(x.length_mm)} mm ${String(x.reason ?? '')}`).join(', ')}`);
   if (num(sd.coplanar_gap)) lines.push(`coplanar gap: ${mmTxt(sd.coplanar_gap)} mm`);
   const p = obj(sd.params);
   if (p) lines.push(`inputs: ${Object.entries(p).map(([k, v]) => `${k} ${mmTxt(v)}`).join(', ')}`);
@@ -279,8 +290,10 @@ function impedanceCard(z) {
   const rows = arr(z.rows).filter(obj);
   const c = obj(z.count) || {};
   const sec = el('section', { class: 'card impedance-check' });
-  const method = `${z.method || 'closed-form estimate'}${z.boarddd ? `, boarddd ${z.boarddd}` : ''}. About ±2 % of a field solver inside the models' validity ranges; fab tolerance is ±10 %. A review aid, not a sign-off.`;
-  sec.append(el('h3', {}, 'Impedance', ' ', el('span', { class: 'muted imp-method', title: method }, 'closed-form estimate'), ' ',
+  const field = z.solver === 'field';
+  const method = `${z.method || 'closed-form estimate'}${z.boarddd ? `, boarddd ${z.boarddd}` : ''}. ${field
+    ? 'Each Z carries the solver\'s own error estimate (hover a row).' : 'About ±2 % of a field solver inside the models\' validity ranges.'} Fab tolerance is ±10 %. Every track width (and pair gap) is evaluated and weighted by its length; launch stubs, breakouts and short pieces are left out. A review aid, not a sign-off.${z.solver_note ? `\n${z.solver_note}` : ''}`;
+  sec.append(el('h3', {}, 'Impedance', ' ', el('span', { class: 'muted imp-method', title: method }, field ? 'field solver' : 'closed-form estimate'), ' ',
     num(c.new_violations) && c.new_violations ? badge('sev', 'error', 'newly out of tolerance') : num(c.violations) && c.violations ? badge('sev', 'warning') : null, ' ',
     rows.length ? badge('delta', `${num(c.violations) ? c.violations : 0} / ${num(c.rows) ? c.rows : 0} out of tol.`) : null));
   if (!rows.length) { sec.append(el('p', { class: 'muted' }, 'No net class has an impedance target.')); return sec; }
@@ -292,6 +305,7 @@ function impedanceCard(z) {
     const geo = (x) => (x ? `${mmTxt(x.width)}${num(x.gap) ? `/${mmTxt(x.gap)}` : ''}` : '–');
     const zTxt = b && h && num(b.Z) && num(h.Z) && Math.abs(h.Z - b.Z) >= 0.05 ? `${fx(b.Z)} → ${fx(h.Z)}` : fx((h || b || {}).Z);
     const dev = h && num(h.deviation_pct) ? `${h.deviation_pct > 0 ? '+' : ''}${h.deviation_pct.toFixed(1)} %` : '–';
+    const out = h && num(h.length_out_mm) ? (h.length_out_mm > 0 ? `${fx(h.length_out_mm)} / ${fx(h.length_mm)}` : '0') : '–';
     const flags = arr(r.flags).filter((f) => IMP_FLAG[f]);
     const shift = num(r.shift_pct) ? ` (stackup alone ${r.shift_pct > 0 ? '+' : ''}${r.shift_pct.toFixed(1)} %)` : '';
     const warn = arr(sd.validity).length || (typeof sd.error === 'string' && sd.error);
@@ -304,13 +318,14 @@ function impedanceCard(z) {
       el('td', { class: 'num' }, b && h && geo(b) !== geo(h) ? `${geo(b)} → ${geo(h)}` : geo(h || b)),
       el('td', { class: 'num' }, zTxt, warn ? el('span', { class: 'imp-warn-dot', title: 'outside the model\'s validity range or no Z: see the tooltip' }, ' *') : null),
       el('td', { class: 'num' }, `${fx(t.target, 0)} ±${fx(t.tolerance_pct, 0)}%`),
-      el('td', { class: `num${h && h.within === false ? ' warn-text' : ''}` }, dev),
+      el('td', { class: 'num' }, dev),
+      el('td', { class: `num${h && h.within === false ? ' warn-text' : ''}`, title: 'controlled length out of tolerance / controlled length, mm' }, out),
       el('td', { class: 'imp-flags' }, flags.map((f) => el('span', { class: `imp imp-${IMP_FLAG[f][2]}`, title: IMP_FLAG[f][1] + (f === 'stackup_shift' ? shift : '') }, IMP_FLAG[f][0]))));
   });
   sec.append(el('div', { class: 'scroll-x' }, el('table', { class: 'grid impedance' },
-    el('thead', {}, el('tr', {}, ['', 'Class', 'Layer', 'Str.', 'w/gap mm', 'Z Ω', 'Target', 'Dev.', ''].map((x) => el('th', { scope: 'col' }, x)))),
+    el('thead', {}, el('tr', {}, ['', 'Class', 'Layer', 'Str.', 'w/gap mm', 'Z Ω', 'Target', 'Dev.', 'Out mm', ''].map((x) => el('th', { scope: 'col' }, x)))),
     el('tbody', {}, body))),
-  el('p', { class: 'small muted' }, '▲ new violation · ⚠ out of tolerance / check · ≋ stackup change · ↔ width/gap change · * outside the model\'s range. Hover a row for the inputs.'));
+  el('p', { class: 'small muted' }, 'w/gap, Z and Dev. are the longest-routed width; Out is the length (any width) out of tolerance. ▲ new violation · ⚠ out of tolerance / check · ≋ stackup change · ↔ width/gap change · * outside the model\'s range. Hover a row for every width and the inputs.'));
   return sec;
 }
 

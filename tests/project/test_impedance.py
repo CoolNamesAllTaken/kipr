@@ -34,20 +34,26 @@ def seg(x0, y0, x1, y1, w, layer, net):
     return f'  (segment (start {x0} {y0}) (end {x1} {y1}) (width {w}) (layer "{layer}") (net "{net}") (uuid "u-{net}-{x0}-{y0}-{layer}"))\n'
 
 
-def board(h=0.2104, w_rf=0.36, gap=0.15, w_pair=0.2, zone=False) -> str:
+def pad(x, y, net, w=1.5, h=1.0, layer="F.Cu"):
+    return (f'  (footprint "J:Pad" (layer "{layer}") (uuid "fp-{net}-{x}-{y}") (at {x} {y})\n'
+            f'    (pad "1" smd rect (at 0 0) (size {w} {h}) (layers "{layer}" "F.Mask") (net "{net}") (uuid "p-{net}-{x}-{y}")))\n')
+
+
+def board(h=0.2104, w_rf=0.36, gap=0.15, w_pair=0.2, zone=False, extra="") -> str:
     t = ('(kicad_pcb (version 20250114) (generator "pcbnew") (generator_version "10.0")\n'
          '  (general (thickness 1.6))\n'
          '  (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))\n'
          + STACKUP.format(h=h) + "\n")
     t += seg(10, 10, 40, 10, w_rf, "F.Cu", "/RF")
-    t += seg(40, 10, 42, 10, 0.2, "F.Cu", "/RF")  # a short neck: not the dominant width
+    t += seg(40, 10, 42, 10, 0.2, "F.Cu", "/RF")  # a neck-down onto a connector pad: a launch, left out
+    t += pad(42.5, 10, "/RF")
     t += seg(10, 20, 40, 20, w_pair, "F.Cu", "/USB_D+")
     t += seg(10, 20 + w_pair + gap, 40, 20 + w_pair + gap, w_pair, "F.Cu", "/USB_D-")
     t += seg(10, 30, 40, 30, 0.1, "In1.Cu", "/RF")  # the class also on an inner layer
     if zone:
         t += ('  (zone (net "GND") (layer "F.Cu") (uuid "z1") (connect_pads (clearance 0.2)) (min_thickness 0.25)\n'
               '    (polygon (pts (xy 0 0) (xy 60 0) (xy 60 40) (xy 0 40))))\n')
-    return t + ")\n"
+    return t + extra + ")\n"
 
 
 PRO = {"net_settings": {"classes": [
@@ -76,8 +82,11 @@ def test_head_only_rows_and_values(tmp_path):
     assert sorted(r) == [("DP_90_MS", "F.Cu"), ("SE_50_MS", "F.Cu"), ("SE_50_MS", "In1.Cu")]
     ms = r[("SE_50_MS", "F.Cu")]["head"]
     assert ms["width"] == 0.36 and ms["structure"] == "microstrip" and ms["model"] == "coated_microstrip"
-    assert ms["widths"][0] == {"width": 0.36, "length_mm": 30.0}
+    assert ms["widths"] == [{"width": 0.36, "length_mm": 30.0}, {"width": 0.2, "length_mm": 2.0}]
     assert 48 < ms["Z"] < 51 and ms["within"] is True  # 0.36 mm on 0.21 mm 7628 under mask: about 50 Ω
+    assert ms["length_mm"] == 30.0 and ms["routed_mm"] == 32.0 and ms["length_out_mm"] == 0
+    assert ms["excluded"] == [{"width": 0.2, "reason": "launch", "length_mm": 2.0}]  # the neck onto the pad
+    assert [x["width"] for x in ms["segments"]] == [0.36] and ms["segments"][0]["within"] is True
     sl = r[("SE_50_MS", "In1.Cu")]["head"]
     assert sl["structure"] == "stripline" and sl["params"]["h1"] == 0.2104 and sl["params"]["h2"] == 1.2
     assert any("inner layer" in n for n in sl["notes"])
@@ -90,7 +99,13 @@ def test_head_only_rows_and_values(tmp_path):
     assert all(x["status"] == "added" for x in z["rows"])
     c = z["count"]
     assert c["rows"] == 3 and c["new_violations"] == c["violations"] == sum(1 for x in z["rows"] if x["head"]["within"] is False)
-    assert z["method"].startswith("closed-form estimate")
+    solver = z["solver"]
+    assert z["method"] == im.METHODS[solver] and ms["solver"] == solver
+    if solver == "field":  # its own error estimate; tier 1 alongside for comparison
+        assert 0 < ms["error_pct"] < 1 and abs(ms["Z"] - ms["Z_closedform"]) < 0.03 * ms["Z"]
+        assert z["field_solves"] >= 3
+    else:
+        assert ms["error_pct"] is None and ms["Z"] == ms["Z_closedform"] and z["field_solves"] == 0
 
 
 def test_base_head_flags(tmp_path):
@@ -147,6 +162,90 @@ def test_pair_gap_needs_parallel_overlap():
     assert im.pair_gap(a, [{"a": (0, 0.35), "b": (10, 5), "length": 11, "width": 0.2}]) == {}       # not parallel
 
 
+def test_a_neck_mid_route_counts_as_length_out_of_tolerance(tmp_path):
+    """A 2 mm neck that does not end on a pad is controlled length: evaluated at its own width, and the row reports
+    the length out of tolerance instead of judging the main width alone."""
+    text = board().replace(pad(42.5, 10, "/RF"), "") + ""
+    text = text[:-2] + seg(42, 10, 52, 10, 0.36, "F.Cu", "/RF") + ")\n"   # the line carries on after the neck
+    d = tmp_path / "n"
+    d.mkdir()
+    (d / "b.kicad_pcb").write_text(text)
+    (d / "b.kicad_pro").write_text(json.dumps(PRO))
+    z = im.check({"base": None, "head": (str(d / "b.kicad_pcb"), str(d / "b.kicad_pro"), text)})
+    ms = rows(z)[("SE_50_MS", "F.Cu")]["head"]
+    assert [(x["width"], x["length_mm"], x["within"]) for x in ms["segments"]] == [(0.36, 40.0, True), (0.2, 2.0, False)]
+    assert ms["width"] == 0.36 and ms["deviation_pct"] < 3 and ms["worst_deviation_pct"] > 20
+    assert ms["length_out_mm"] == 2.0 and ms["within"] is False and ms["excluded"] == []
+    assert z["count"]["length_out_mm"] == round(sum(x["head"]["length_out_mm"] or 0 for x in z["rows"]), 3) >= 2.0
+
+
+def test_stub_rules():
+    """covered (a thin track under a fat one), launch (short, other width, ends on a pad), short (< MIN_RUN_MM)."""
+    def s(x0, x1, w, y=0.0, net="A"):
+        return {"net": net, "layer": "F.Cu", "width": w, "a": (x0, y), "b": (x1, y), "length": abs(x1 - x0)}
+    pads_ = [{"net": "A", "layers": ["F.Cu"], "box": (-1, -0.5, 0, 0.5)}]
+    main = [s(3, 10, 0.26), s(10, 20, 0.26)]
+    fat = s(0, 2.5, 0.8)            # the 0.8 mm launch off the pad (m1421 B.Cu)
+    thin = s(0.5, 2.0, 0.26)        # drawn over it
+    tiny = s(25, 25.3, 0.3)         # an isolated 0.3 mm piece
+    keep, left = im.controlled(main + [fat, thin, tiny], 0.26, pads_)
+    assert keep == main
+    assert sorted((x["width"], x["reason"]) for x in left) == [(0.26, "covered"), (0.3, "short"), (0.8, "launch")]
+    # the same fat run not on a pad, or longer than LAUNCH_MAX_MM: it counts
+    keep, _ = im.controlled([fat], 0.26, [])
+    assert keep == [fat]
+    long_fat = s(0, im.LAUNCH_MAX_MM + 1, 0.8)
+    keep, _ = im.controlled([long_fat], 0.26, pads_)
+    assert keep == [long_fat]
+    # chains: two 0.3 mm segments of one run are 0.6 mm together, not short
+    keep, _ = im.controlled([s(30, 30.3, 0.26), s(30.3, 30.6, 0.26)], 0.26, [])
+    assert len(keep) == 2
+
+
+def test_pair_breakout_and_uncoupled(tmp_path):
+    """Pair sections fanning out to their pads (gap > BREAKOUT_GAP x the main gap, short) and stretches without the
+    other net beside them are left out; the coupled part at the main gap is what counts."""
+    extra = (seg(40, 20, 41, 19, 0.2, "F.Cu", "/USB_D+")                     # D+ bends away ...
+             + seg(41, 19, 42, 19, 0.2, "F.Cu", "/USB_D+")                     # ... and runs 1 mm at a wide gap
+             + seg(40, 20.35, 42, 20.35, 0.2, "F.Cu", "/USB_D-"))
+    d = tmp_path / "p"
+    d.mkdir()
+    text = board(extra=extra)
+    (d / "b.kicad_pcb").write_text(text)
+    (d / "b.kicad_pro").write_text(json.dumps(PRO))
+    z = im.check({"base": None, "head": (str(d / "b.kicad_pcb"), str(d / "b.kicad_pro"), text)})
+    dp = rows(z)[("DP_90_MS", "F.Cu")]["head"]
+    assert [(x["gap"], x["length_mm"]) for x in dp["segments"]] == [(0.15, 30.0)]
+    assert {x["reason"] for x in dp["excluded"]} == {"breakout", "uncoupled"}
+    assert dp["length_out_mm"] == (0 if dp["segments"][0]["within"] else 30.0)  # the breakout is not judged
+
+
+def test_solver_fallback(tmp_path, monkeypatch):
+    """Without the [field] extra the check falls back to the closed-form models and says so."""
+    monkeypatch.setattr(im, "field_available", lambda: "no scipy here")
+    monkeypatch.delenv("KIPR_IMPEDANCE_SOLVER", raising=False)
+    z = im.check({"base": None, "head": side(tmp_path, "h")})
+    assert z["solver"] == "closedform" and "no scipy here" in z["solver_note"] and z["method"].startswith("closed-form")
+    assert im.pick_solver("closedform")[0] == "closedform"
+
+
+@pytest.mark.skipif(im.field_available() is not None, reason="boarddd[field] (numpy, scipy) not installed")
+def test_field_solver(tmp_path):
+    """With the field solver: differential coplanar is solved as such (tier 1 has no model), stackup shifts are
+    re-solved, and the numbers carry the solver's error estimate."""
+    pro = json.loads(json.dumps(PRO))
+    pro["net_settings"]["classes"][2]["name"] = "DP_90_CPWG"
+    pro["net_settings"]["netclass_patterns"][1]["netclass"] = "DP_90_CPWG"
+    z = im.check({"base": side(tmp_path, "b", pro=pro, zone=True), "head": side(tmp_path, "h", pro=pro, zone=True, h=0.15)},
+                 solver="field")
+    r = rows(z)
+    dp = r[("DP_90_CPWG", "F.Cu")]["head"]
+    assert z["solver"] == "field" and dp["structure"] == "coplanar_grounded" and dp["model"] is None
+    assert dp["Z_closedform"] is None and dp["Z"] and 0 < dp["error_pct"] < 1 and dp["Zcommon"]
+    assert any("field solver only" in n for n in dp["notes"])
+    assert r[("SE_50_MS", "F.Cu")]["shift_pct"] < -5 and "stackup_shift" in r[("DP_90_CPWG", "F.Cu")]["flags"]
+
+
 # --- comment, ping, report ------------------------------------------------------------------
 
 def imp_doc(tmp_path):
@@ -162,7 +261,7 @@ def test_comment_line_cell_and_details(tmp_path):
     c = z["count"]
     body = make_comment.build_comment(load_review(write(tmp_path, doc)))
     assert f"| 🔴 {c['violations']} / {c['rows']} |" in body
-    assert body.count("**Impedance** (closed-form estimate, not a field solve)") == 1
+    assert body.count("**Impedance** (" + ("boarddd field solver" if z["solver"] == "field" else "closed-form estimate, not a field solve") + ")") == 1
     assert f"{c['rows']} class × layer checked, {c['violations']} out of tolerance (🔴 {c['new_violations']} new)" in body
     assert "🔴 Z0 <code>SE_50_MS</code> on F.Cu (microstrip, w 0.2 mm):" in body and "vs 50 Ω ±10 %" in body
     ping = make_comment.ping_line(load_review(write(tmp_path, doc)), "a" * 40)
@@ -187,7 +286,7 @@ def test_impedance_text_is_escaped():
 def test_report_section(tmp_path):
     _, z = imp_doc(tmp_path)
     html = report.impedance_section(z)
-    assert "closed-form estimate" in html and "SE_50_MS" in html and "out of tolerance, new" in html
+    assert ("field solver" if z["solver"] == "field" else "closed-form estimate") in html and "SE_50_MS" in html and "out of tolerance, new" in html
     assert "stackup alone" in html and "Stackup changes: dielectric 1 thickness 0.2104 → 0.15" in html
     assert "No net class has an impedance target" in report.impedance_section({"rows": [], "count": {}})
     assert report.impedance_section(None) == ""

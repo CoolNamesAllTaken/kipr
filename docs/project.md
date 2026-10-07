@@ -124,23 +124,35 @@ symbol, on the project's connection grid); new ones also appear in the ERC delta
 
 ### Impedance check
 
-Net classes with an impedance target get a **closed-form estimate** of their impedance on every copper layer
-their tracks use, on base and head, so a review shows what a stackup, width or gap change does to controlled
-lines. Targets come from the `.kicad_pro`: a KiCad 10 tuning profile, else the class name (`SE_50_CP`,
-`DP_90_MS`, `BAL_D90_C30_CPWG`, `90ohm`…; MS/SL/CP/CPWG name the structure), read by
-[boarddd](https://github.com/CoolNamesAllTaken/boarddd)'s KiCad reader; the tolerance is the profile's, else ±10 %.
-Per class × layer kipr takes the track width with the longest routed length there, the pair gap measured between
-the pair's parallel segments (else the class's), the coplanar gap (zone clearance), and the board's stackup
-(thickness, εr, mask), and evaluates boarddd's closed-form models (Hammerstad-Jensen microstrip with mask,
-Cohn stripline, Ghione-Naldi CPWG, Kirschning-Jansen / Cohn coupled lines; see boarddd's `docs/impedance.md`).
+Net classes with an impedance target get their impedance evaluated on every copper layer their tracks use, on
+base and head, so a review shows what a stackup, width or gap change does to controlled lines. Targets come from
+the `.kicad_pro`: a KiCad 10 tuning profile, else the class name (`SE_50_CP`, `DP_90_MS`, `BAL_D90_C30_CPWG`,
+`90ohm`…; MS/SL/CP/CPWG name the structure), read by [boarddd](https://github.com/CoolNamesAllTaken/boarddd)'s
+KiCad reader; the tolerance is the profile's, else ±10 %.
+
+**Solver.** With boarddd's `[field]` extra installed (numpy, scipy; `pip install "kipr[field]"`, which the review
+workflow does by default) every cross-section goes through boarddd's tier-2 2D field solver: the real stackup
+(every layer's εr, the solder mask on any outer structure, differential coplanar too), with the solver's own error
+estimate on each number (typically ±0.3–0.9 %) and the tier-1 closed-form value alongside for comparison.
+Without it, or with `impedance-solver: closedform` / `KIPR_IMPEDANCE_SOLVER=closedform`, kipr falls back to
+boarddd's closed-form models (Hammerstad-Jensen microstrip with mask, Cohn stripline, Ghione-Naldi CPWG with mask,
+Kirschning-Jansen / Cohn coupled lines with mask; about ±2 % of a field solver inside their validity ranges, see
+boarddd's `docs/impedance.md`) and says so. The viewer, report and comment name the solver used.
+
+**Geometry.** Per class × layer kipr groups the tracks by width (and, for a pair, by the gap measured between its
+parallel segments; else the class's gap), evaluates every group and weights it by its routed length; the coplanar
+gap is the zone clearance. Left out, and listed: **launches** (a run of another width than the class's main one,
+at most 3 mm long, ending on a pad of its net: a connector launch or a neck-down into a pad), pair **breakouts**
+(sections at more than twice the class's main gap, at most 3 mm long) and **uncoupled** pair stretches, runs
+shorter than 0.5 mm, and tracks **covered** by a wider one of the same net. The row reports the **controlled length
+out of tolerance** (any width), not one width's verdict; width, Z and deviation shown are the longest-routed group's.
 
 Rows are flagged when they are **newly out of tolerance** (🔴), when a **stackup change** moved Z by 0.5 % or
 more (computed on the base geometry, so it shows what the stackup alone did), and when the **width or gap**
-changed. It never fails the run: the models are quasi-static estimates (about ±2 % of a field solver inside their
-validity ranges, and inputs outside them are listed), fabs hold ±10 %, and Er at frequency, pressed thickness and
-mask thickness usually matter more. The results are in `checks.impedance` ([contract](CONTRACT-project.md#impedance)),
-the summary (`Z out / checked`), the ERC/DRC tab of the viewer (symbols, the inputs in tooltips), the report, the
-PR comment (one line plus the flagged rows) and the ping.
+changed. It never fails the run: fabs hold ±10 %, and Er at frequency, pressed thickness and mask thickness usually
+matter more than the solver. The results are in `checks.impedance` ([contract](CONTRACT-project.md#impedance)),
+the summary (`Z out / checked`), the ERC/DRC tab of the viewer (symbols, every width group and the inputs in
+tooltips), the report, the PR comment (one line plus the flagged rows) and the ping.
 
 ### Fonts
 
@@ -369,7 +381,7 @@ Preview the comment for a local review: `kipr project ci make-comment --data rev
 | `kipr/project/pcb.py`, `sch.py` | s-expression models of boards and schematic hierarchies |
 | `kipr/project/diff_pcb.py`, `diff_sch.py`, `diff_net.py` | semantic diffs, BOM, netlist, ERC/DRC deltas |
 | `kipr/project/grid.py` | schematic connection grid check (`checks.grid`) |
-| `kipr/project/impedance.py` | controlled-impedance check (`checks.impedance`, boarddd's KiCad reader and closed-form models) |
+| `kipr/project/impedance.py` | controlled-impedance check (`checks.impedance`, boarddd's KiCad reader, field solver and closed-form models) |
 | `kipr/project/ci/` | GitHub glue (above) |
 | `kipr/project/cli.py` | `kipr project [review\|site\|report\|ci]` |
 | `kipr/project/site.py`, `report.py` | viewer copy + file:// support, no-JS HTML report |
