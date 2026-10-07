@@ -57,9 +57,9 @@ export function measureText(points, measuring) {
  * A view2d stage in `wrap` (the .stage-wrap) for a KiCad-frame box. Returns the stage plus the kipr
  * conveniences, everything in KiCad mm.
  */
-export function createKiprStage(v2, wrap, { box, origin = [0, 0], flip = false, renderer = null, readout = null, zoomLabel = null, boxes = true }) {
+export function createKiprStage(v2, wrap, { box, origin = [0, 0], flip = false, renderer = null, readout = null, zoomLabel = null, boxes = true, minRender = 0 }) {
   const f = kicadFrame(origin);
-  const stage = v2.createStage(wrap, { renderer, bounds: f.bounds(box), flip, injectCss: false, measureLabel: false, padding: 0.02, settleMs: 250 }); // re-render after the URL write (200 ms)
+  const stage = v2.createStage(wrap, { renderer, bounds: f.bounds(box), flip, injectCss: false, measureLabel: false, padding: 0.02, settleMs: 250, minRender }); // re-render after the URL write (200 ms)
   let marks = [];
   let hl = null;
   let hlSides = null; // {base, head}: per-pane highlight for things that moved

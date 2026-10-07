@@ -370,6 +370,7 @@ export function createLayoutView(project, container, ctx) {
     } else {
       stage.setMarks(changeItems.filter((c) => c.box).map((c) => ({ box: c.box })));
     }
+    if (m === 'diff') showDiffRegions();
     cmp = showCompare(stage, m, content, extra, {
       single: sides.head ? 'head' : 'base',
       labels: { base: 'base', head: 'head', diff: `diff: ${layer ? layer.id : '—'}` },
@@ -378,9 +379,17 @@ export function createLayoutView(project, container, ctx) {
     return true;
   }
 
+  // a diff's changed areas (KiCad boxes) from its first render: they don't follow the zoom, and a diff
+  // shown again keeps its tiles (no new render)
+  const diffRegions = new WeakMap();
   function onRender(e) {
-    if (destroyed || !diffShown || e.content !== diffShown || !e.info?.regions) return;
-    const regions = e.info.regions.map((q) => stage.frame.box(q));
+    if (destroyed || !e.info?.regions || diffRegions.has(e.content)) return;
+    diffRegions.set(e.content, e.info.regions.map((q) => stage.frame.box(q)));
+    if (e.content === diffShown) showDiffRegions();
+  }
+  function showDiffRegions() {
+    const regions = diffRegions.get(diffShown);
+    if (!regions) return;
     const layer = focus || pickDiffLayer(layers, view);
     legendBox.querySelector('.diff-count')?.remove();
     legendBox.append(el('span', { class: 'muted diff-count' }, `${layer.id}: ${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
@@ -394,7 +403,7 @@ export function createLayoutView(project, container, ctx) {
   // (view2d's world is the board frame, so the same region also across top <-> bottom).
   function buildStage() {
     const box = worldBox();
-    stage = createKiprStage(v2, stageWrap, { box, origin, flip: view === 'bottom', renderer: useGl ? getRenderer : null, readout, zoomLabel: zoomLbl, boxes: boxesShown() });
+    stage = createKiprStage(v2, stageWrap, { box, origin, flip: view === 'bottom', renderer: useGl ? getRenderer : null, readout, zoomLabel: zoomLbl, boxes: boxesShown(), minRender: 4 });
     stageWrap.dataset.world = boxKey(box); // KiCad mm x,y,w,h of the frame (for tests and scripts)
     stage.onMeasure((t) => { measureOut.textContent = t; });
     stage.onTransform(() => writeView());

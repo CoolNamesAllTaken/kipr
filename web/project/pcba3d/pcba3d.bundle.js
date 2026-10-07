@@ -39211,8 +39211,8 @@ void main() {
     for (let step = 0; step < width * height * 4 + 8; step += 1) {
       points.push([x, y]);
       let found = -1;
-      for (let turn = 0; turn < 8; turn += 1) {
-        const at = (heading + 6 + turn) % 8;
+      for (let turn2 = 0; turn2 < 8; turn2 += 1) {
+        const at = (heading + 6 + turn2) % 8;
         if (inside(x + AROUND[at][0], y + AROUND[at][1])) {
           found = at;
           break;
@@ -47618,6 +47618,7 @@ ${content}
     formatSlider: () => formatSlider,
     formatViewState: () => formatViewState,
     grow: () => grow,
+    holesPath: () => holesPath2,
     image: () => image,
     inTurn: () => inTurn,
     inkDiff: () => inkDiff,
@@ -47631,6 +47632,7 @@ ${content}
     layers: () => layers,
     measureText: () => measureText,
     orMask: () => orMask,
+    outlineRings: () => outlineRings,
     paintDiff: () => paintDiff,
     panBy: () => panBy,
     parseRegion: () => parseRegion,
@@ -47643,6 +47645,7 @@ ${content}
     regionOf: () => regionOf,
     regions: () => regions,
     renderContent: () => renderContent,
+    repeat: () => repeat,
     sameRegion: () => sameRegion,
     segmentShape: () => segmentShape,
     sortLayers: () => sortLayers,
@@ -47664,9 +47667,9 @@ ${content}
   function boundsSize(b) {
     return { w: Math.max(b.maxX - b.minX, 1e-9), h: Math.max(b.maxY - b.minY, 1e-9) };
   }
-  function fitBounds(bounds, pw, ph, pad = 0.02) {
+  function fitBounds(bounds, pw, ph, pad = 0.02, padPx = 0) {
     const { w, h: h2 } = boundsSize(bounds);
-    const s = Math.min(pw / w, ph / h2) * (1 - 2 * pad);
+    const s = Math.min(Math.max(1, pw - 2 * padPx) / w, Math.max(1, ph - 2 * padPx) / h2) * (1 - 2 * pad);
     return { cx: (bounds.minX + bounds.maxX) / 2, cy: (bounds.minY + bounds.maxY) / 2, s: clampScale(s) };
   }
   function clampScale(s, min = MIN_SCALE, max = MAX_SCALE) {
@@ -47894,8 +47897,11 @@ ${content}
   function face(board, { side = "top", palette: palette2 = {}, ...options } = {}) {
     return { type: "face", board, side, palette: palette2, options };
   }
-  function layers(list) {
-    return { type: "layers", layers: list };
+  function layers(list, { outline = null, clip = true, substrate = null, holes = null } = {}) {
+    return { type: "layers", layers: list, options: { outline: outlineRings(outline), clip, substrate, holes } };
+  }
+  function repeat(content, placements, rect = null) {
+    return { type: "repeat", content, placements: placements || [], rect: rect || contentRect(content) };
   }
   function diff(base, head, { style, colors, showUnchanged = true, underlay, regions: regions2 = false } = {}) {
     return { type: "diff", base, head, options: { style, colors, showUnchanged, underlay }, regions: regions2 };
@@ -47910,7 +47916,38 @@ ${content}
     return { type: "draw", draw: fn, rect };
   }
   function contentRect(c) {
+    if (c?.type === "repeat") return placedRect(c);
     return c && (c.type === "image" || c.type === "inkdiff" || c.type === "draw") ? c.rect || null : null;
+  }
+  function outlineRings(outline) {
+    if (!outline) return null;
+    const rings = Array.isArray(outline) ? outline : [outline.board, ...outline.cutouts || []];
+    const ok = rings.filter((r) => Array.isArray(r) && r.length >= 3);
+    return ok.length && ok[0] === rings[0] ? ok : null;
+  }
+  var turn = (deg) => {
+    const a = (deg || 0) * Math.PI / 180;
+    return { c: Math.cos(a), s: Math.sin(a) };
+  };
+  function placedRect(c) {
+    const r = c.rect;
+    if (!r || !c.placements.length) return null;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of c.placements) {
+      const { c: cos, s: sin } = turn(p.rotation);
+      for (const [x, y] of [[r.minX, r.minY], [r.maxX, r.minY], [r.maxX, r.maxY], [r.minX, r.maxY]]) {
+        const X = cos * x - sin * y + (p.x || 0);
+        const Y = sin * x + cos * y + (p.y || 0);
+        minX = Math.min(minX, X);
+        maxX = Math.max(maxX, X);
+        minY = Math.min(minY, Y);
+        maxY = Math.max(maxY, Y);
+      }
+    }
+    return { minX, maxX, minY, maxY };
   }
   var locks = /* @__PURE__ */ new WeakMap();
   function inTurn(renderer, work) {
@@ -47958,23 +47995,91 @@ ${content}
       return { ids };
     });
   }
-  async function renderLayers(c, renderer, job) {
-    return glFrame(renderer, job, async () => {
-      const failures = [];
-      for (const l of c.layers) {
-        if (!l || l.visible === false || l.source == null) continue;
-        if (isEmptySource(l.source, isDrill(l))) continue;
-        try {
-          const style = { color: l.color || [0.8, 0.8, 0.8], alpha: l.alpha ?? 1 };
-          if (!isDrill(l)) await renderer.renderLayer(l.source, style);
-          else if (typeof l.source !== "string") await renderer.renderLayer(l.source, { ...style, kind: "drill" });
-          else if (drillGerber(l.source)) await renderer.renderLayer(drillGerber(l.source), style);
-        } catch (e) {
-          failures.push({ name: l.name ?? null, error: String(e?.message || e) });
+  var drawable = (list) => (list || []).filter((l) => l && l.visible !== false && l.source != null && !isEmptySource(l.source, isDrill(l)));
+  async function renderLayers(c, getRenderer, job) {
+    const list = drawable(c.layers);
+    const o = c.options || {};
+    let out = { canvas: null, info: { failures: [] } };
+    if (list.length) {
+      const renderer = await getRenderer();
+      out = await glFrame(renderer, job, async () => {
+        const failures = [];
+        let edge;
+        for (const l of list) {
+          try {
+            const style = { color: l.color || [0.8, 0.8, 0.8], alpha: l.alpha ?? 1 };
+            if (l.inverted) {
+              if (edge === void 0) edge = o.outline ? await renderer.renderLayer(ringsToGerber(o.outline), { visible: false }) : null;
+              await renderer.renderInvertedLayer(l.source, edge != null ? { ...style, outlineLayerId: edge } : style);
+            } else if (!isDrill(l)) await renderer.renderLayer(l.source, style);
+            else if (typeof l.source !== "string") await renderer.renderLayer(l.source, { ...style, kind: "drill" });
+            else if (drillGerber(l.source)) await renderer.renderLayer(drillGerber(l.source), style);
+          } catch (e) {
+            failures.push({ name: l.name ?? null, error: String(e?.message || e) });
+          }
         }
+        return { failures };
+      });
+    }
+    if (!o.substrate && !o.holes?.length && !(o.outline && o.clip !== false)) {
+      return out.canvas ? out : { canvas: newCanvas(job.width, job.height), info: out.info };
+    }
+    return { canvas: finishBoard(out.canvas, o, job), info: out.info };
+  }
+  var toTile = (g, job) => g.setTransform(job.r, 0, 0, -job.r, -job.rect.minX * job.r, job.rect.maxY * job.r);
+  function ringsPath(rings) {
+    const path = new Path2D();
+    for (const ring of rings) {
+      ring.forEach(([x, y], i) => i ? path.lineTo(x, y) : path.moveTo(x, y));
+      path.closePath();
+    }
+    return path;
+  }
+  function holesPath2(holes) {
+    const path = new Path2D();
+    for (const h2 of holes || []) {
+      const r = (h2.d ?? h2.diameter ?? 0) / 2;
+      if (h2.filled || !(r > 0)) continue;
+      if (h2.x2 == null || h2.y2 == null) {
+        path.moveTo(h2.x + r, h2.y);
+        path.arc(h2.x, h2.y, r, 0, Math.PI * 2);
+      } else {
+        const a = Math.atan2(h2.y2 - h2.y, h2.x2 - h2.x);
+        path.moveTo(h2.x + r * Math.cos(a + Math.PI / 2), h2.y + r * Math.sin(a + Math.PI / 2));
+        path.arc(h2.x, h2.y, r, a + Math.PI / 2, a + 3 * Math.PI / 2);
+        path.arc(h2.x2, h2.y2, r, a - Math.PI / 2, a + Math.PI / 2);
+        path.closePath();
       }
-      return { failures };
-    });
+    }
+    return path;
+  }
+  function finishBoard(drawn, o, job) {
+    const out = newCanvas(job.width, job.height);
+    const g = out.getContext("2d");
+    const rings = o.outline;
+    const shape = rings ? ringsPath(rings) : null;
+    g.save();
+    toTile(g, job);
+    if (shape && o.clip !== false) g.clip(shape, "evenodd");
+    if (o.substrate) {
+      g.fillStyle = o.substrate;
+      if (shape) g.fill(shape, "evenodd");
+      else {
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.fillRect(0, 0, job.width, job.height);
+      }
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (drawn) g.drawImage(drawn, 0, 0);
+    g.restore();
+    if (o.holes?.length) {
+      toTile(g, job);
+      g.globalCompositeOperation = "destination-out";
+      g.fill(holesPath2(o.holes));
+      g.globalCompositeOperation = "source-over";
+      g.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    return out;
   }
   var drillCache = /* @__PURE__ */ new Map();
   function drillGerber(text) {
@@ -48073,12 +48178,36 @@ ${content}
     await c.draw(g, job);
     return { canvas: out, info: {} };
   }
+  async function renderRepeat(c, job, getRenderer) {
+    const out = newCanvas(job.width, job.height);
+    if (!c.rect || !c.placements.length) return { canvas: out, info: {} };
+    const inner = rasterRect(c.rect, job.r);
+    const drawn = await renderContent(c.content, { ...inner, r: job.r }, getRenderer);
+    const g = out.getContext("2d");
+    const { minX, maxY } = inner.rect;
+    const r = job.r;
+    for (const p of c.placements) {
+      const { c: cos, s: sin } = turn(p.rotation);
+      g.setTransform(
+        cos,
+        -sin,
+        sin,
+        cos,
+        r * (cos * minX - sin * maxY + (p.x || 0) - job.rect.minX),
+        r * (job.rect.maxY - sin * minX - cos * maxY - (p.y || 0))
+      );
+      g.drawImage(drawn.canvas, 0, 0);
+    }
+    return { canvas: out, info: drawn.info };
+  }
   async function renderContent(c, job, getRenderer) {
     switch (c?.type) {
       case "face":
         return renderFace(c, await getRenderer(), job);
       case "layers":
-        return renderLayers(c, await getRenderer(), job);
+        return renderLayers(c, getRenderer, job);
+      case "repeat":
+        return renderRepeat(c, job, getRenderer);
       case "diff":
         return renderDiff(c, await getRenderer(), job);
       case "image":
@@ -48100,6 +48229,7 @@ ${content}
 .bd2-pane{position:relative;flex:1 1 0;min-width:0;overflow:hidden;touch-action:none;user-select:none;cursor:grab}
 .bd2-pane.bd2-grabbing{cursor:grabbing}
 .bd2-pane.bd2-measuring{cursor:crosshair}
+.bd2-stage.bd2-static,.bd2-pane.bd2-static{pointer-events:none;cursor:auto}
 .bd2-slot{position:absolute;inset:0;pointer-events:none}
 .bd2-slot canvas{position:absolute;left:0;top:0;transform-origin:0 0}
 .bd2-overlay{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
@@ -48130,6 +48260,9 @@ ${content}
   function createStage(container, options = {}) {
     const opt = {
       padding: 0.02,
+      paddingPx: 0,
+      interactive: true,
+      pixelSnap: false,
       settleMs: 180,
       maxEdge: 4096,
       maxPixels: 16e6,
@@ -48153,7 +48286,7 @@ ${content}
     const listeners = /* @__PURE__ */ new Map();
     const stats = { frames: 0, renders: 0, pixels: 0 };
     let rendererPromise = null;
-    const root = el("div", "bd2-stage", container);
+    const root = el("div", `bd2-stage${opt.interactive ? "" : " bd2-static"}`, container);
     if (opt.injectCss) el("style", null, root).textContent = STAGE_CSS;
     function emit(name, payload) {
       const set = listeners.get(name);
@@ -48194,7 +48327,7 @@ ${content}
       const old = panes.flatMap((p) => p.slots);
       for (const p of panes) p.el.remove();
       panes = specs.map((spec, index) => {
-        const pane = { index, spec, side: spec.side ?? null, el: el("div", `bd2-pane${spec.className ? ` ${spec.className}` : ""}`, root) };
+        const pane = { index, spec, side: spec.side ?? null, el: el("div", `bd2-pane${opt.interactive ? "" : " bd2-static"}${spec.className ? ` ${spec.className}` : ""}`, root) };
         if (spec.side) pane.el.dataset.side = spec.side;
         if (opt.background) pane.el.style.background = opt.background;
         if (tool === "measure") pane.el.classList.add("bd2-measuring");
@@ -48239,7 +48372,7 @@ ${content}
     function fitNow() {
       if (!bounds) return;
       const { pw, ph } = size();
-      view = fitBounds(bounds, pw, ph, opt.padding);
+      view = fitBounds(bounds, pw, ph, opt.padding, opt.paddingPx);
       autoFit = true;
       requestFrame();
     }
@@ -48331,9 +48464,25 @@ ${content}
         checkIdle();
       });
     }
+    function snapRect(b, pw, ph) {
+      const d = dpr();
+      const { s, cx, cy } = view;
+      const minX = flip ? cx - (Math.ceil((pw / 2 - s * (b.minX - cx)) * d - 1e-6) / d - pw / 2) / s : cx + (Math.floor((pw / 2 + s * (b.minX - cx)) * d + 1e-6) / d - pw / 2) / s;
+      const maxY = cy + (ph / 2 - Math.floor((ph / 2 - s * (b.maxY - cy)) * d + 1e-6) / d) / s;
+      return { minX, maxX: b.maxX, minY: b.minY, maxY };
+    }
+    const atScreenRes = (r) => Math.abs(r / (view.s * dpr()) - 1) < 1e-9;
+    function onGrid(tile, pw, ph) {
+      const d = dpr();
+      const [, , , , e, f] = rasterMatrix(view, pw, ph, tile.rect, tile.r, flip);
+      const off = (v) => Math.abs(v * d - Math.round(v * d));
+      return off(e) < 1e-3 && off(f) < 1e-3;
+    }
+    const wantScale = () => Math.max(opt.minRender || 0, opt.pixelSnap ? view.s * dpr() : stepScale(view.s, dpr()));
     async function renderTile(slot, b, r, paneIndex, layerIndex, kind) {
       const gen = slot.gen;
-      const { rect, width, height } = rasterRect(b, r);
+      const { pw, ph } = size(panes[paneIndex]);
+      const { rect, width, height } = rasterRect(opt.pixelSnap && atScreenRes(r) ? snapRect(b, pw, ph) : b, r);
       const job = { rect, width, height, r };
       let out;
       try {
@@ -48365,23 +48514,24 @@ ${content}
     const offBy = (have, want) => have < want * 0.87 || have > want * 2.5;
     function plan() {
       const jobs = [];
-      const want = stepScale(view.s, dpr());
+      const want = wantScale();
       for (const pane of panes) {
         const { pw, ph } = size(pane);
         const visible = visibleBounds(view, pw, ph);
+        const offGrid = (t) => opt.pixelSnap && atScreenRes(t.r) && !onGrid(t, pw, ph);
         for (const [li, slot] of pane.slots.entries()) {
           if (slot.dead || slot.failed) continue;
           const area3 = contentRect(slot.content) || bounds;
           if (!area3) continue;
           const rmax = budgetScale(area3.maxX - area3.minX, area3.maxY - area3.minY, opt);
           const baseR = Math.min(want, rmax);
-          if (!slot.base || offBy(slot.base.r, baseR)) jobs.push({ slot, area: area3, r: baseR, pane: pane.index, layer: li, kind: "base" });
+          if (!slot.base || offBy(slot.base.r, baseR) || offGrid(slot.base)) jobs.push({ slot, area: area3, r: baseR, pane: pane.index, layer: li, kind: "base" });
           if (want <= rmax * 1.15) continue;
           const now = intersect2(visible, area3);
           const zone = intersect2(grow(visible, 0.25), area3);
           if (!now || !zone) continue;
           const detailR = Math.min(want, budgetScale(zone.maxX - zone.minX, zone.maxY - zone.minY, opt));
-          if (!slot.detail || !contains2(slot.detail.rect, now) || offBy(slot.detail.r, detailR)) jobs.push({ slot, area: zone, r: detailR, pane: pane.index, layer: li, kind: "detail" });
+          if (!slot.detail || !contains2(slot.detail.rect, now) || offBy(slot.detail.r, detailR) || offGrid(slot.detail)) jobs.push({ slot, area: zone, r: detailR, pane: pane.index, layer: li, kind: "detail" });
         }
       }
       return jobs;
@@ -48399,7 +48549,7 @@ ${content}
       } finally {
         jobsLeft = 0;
       }
-      const want = stepScale(view.s, dpr());
+      const want = wantScale();
       for (const pane of panes) {
         for (const slot of pane.slots) {
           const area3 = contentRect(slot.content) || bounds;
@@ -48442,6 +48592,7 @@ ${content}
       if (tool !== "measure") setMeasure([]);
     }
     function attach(pane) {
+      if (!opt.interactive) return;
       const p = pane.el;
       const pointers = /* @__PURE__ */ new Map();
       let pinch = 0;
@@ -48560,6 +48711,7 @@ ${content}
         flip = !!f;
         requestFrame();
         for (const o of overlays) o.dirty = true;
+        if (opt.pixelSnap) settle();
       },
       fit() {
         fitNow();

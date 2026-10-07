@@ -21,7 +21,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$here/../.." && pwd)
-BOARDDD_REF=v0.3.1
+BOARDDD_REF=v0.3.3
 BOARDDD_SUBPATHS=geom,board,footprint,models,scene,gerber,view2d
 THREE_VERSION=0.185.1
 OCCT_VERSION=0.0.23

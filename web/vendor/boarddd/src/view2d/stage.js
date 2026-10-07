@@ -26,6 +26,7 @@ export const STAGE_CSS = `
 .bd2-pane{position:relative;flex:1 1 0;min-width:0;overflow:hidden;touch-action:none;user-select:none;cursor:grab}
 .bd2-pane.bd2-grabbing{cursor:grabbing}
 .bd2-pane.bd2-measuring{cursor:crosshair}
+.bd2-stage.bd2-static,.bd2-pane.bd2-static{pointer-events:none;cursor:auto}
 .bd2-slot{position:absolute;inset:0;pointer-events:none}
 .bd2-slot canvas{position:absolute;left:0;top:0;transform-origin:0 0}
 .bd2-overlay{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
@@ -61,7 +62,7 @@ export function measureText(m) {
 
 export function createStage(container, options = {}) {
   const opt = {
-    padding: 0.02, settleMs: 180, maxEdge: 4096, maxPixels: 16e6, minScale: MIN_SCALE, maxScale: MAX_SCALE,
+    padding: 0.02, paddingPx: 0, interactive: true, pixelSnap: false, settleMs: 180, maxEdge: 4096, maxPixels: 16e6, minScale: MIN_SCALE, maxScale: MAX_SCALE,
     background: null, measureLabel: true, injectCss: true, ...options,
   };
   let bounds = opt.bounds || null;
@@ -78,7 +79,7 @@ export function createStage(container, options = {}) {
   const stats = { frames: 0, renders: 0, pixels: 0 };
   let rendererPromise = null;
 
-  const root = el('div', 'bd2-stage', container);
+  const root = el('div', `bd2-stage${opt.interactive ? '' : ' bd2-static'}`, container);
   if (opt.injectCss) el('style', null, root).textContent = STAGE_CSS; // off under a strict CSP: ship STAGE_CSS in a stylesheet
 
   function emit(name, payload) {
@@ -128,7 +129,7 @@ export function createStage(container, options = {}) {
     const old = panes.flatMap((p) => p.slots);
     for (const p of panes) p.el.remove();
     panes = specs.map((spec, index) => {
-      const pane = { index, spec, side: spec.side ?? null, el: el('div', `bd2-pane${spec.className ? ` ${spec.className}` : ''}`, root) };
+      const pane = { index, spec, side: spec.side ?? null, el: el('div', `bd2-pane${opt.interactive ? '' : ' bd2-static'}${spec.className ? ` ${spec.className}` : ''}`, root) };
       if (spec.side) pane.el.dataset.side = spec.side;
       if (opt.background) pane.el.style.background = opt.background;
       if (tool === 'measure') pane.el.classList.add('bd2-measuring');
@@ -168,7 +169,7 @@ export function createStage(container, options = {}) {
   function fitNow() {
     if (!bounds) return;
     const { pw, ph } = size();
-    view = fitBounds(bounds, pw, ph, opt.padding);
+    view = fitBounds(bounds, pw, ph, opt.padding, opt.paddingPx);
     autoFit = true;
     requestFrame();
   }
@@ -255,9 +256,39 @@ export function createStage(container, options = {}) {
     work = work.then(sharpenNow).catch((e) => emit('error', { error: e })).finally(() => { busy--; checkIdle(); });
   }
 
+  /*
+   * pixelSnap: a tile drawn at the screen's own resolution starts on a device pixel, so at rest
+   * every tile pixel is one screen pixel (no resampling: the picture is what the renderer drew).
+   * The rect grows outwards to the grid; mirrored, its left edge is its maxX side on screen.
+   */
+  function snapRect(b, pw, ph) {
+    const d = dpr();
+    const { s, cx, cy } = view;
+    const minX = flip
+      ? cx - (Math.ceil((pw / 2 - s * (b.minX - cx)) * d - 1e-6) / d - pw / 2) / s
+      : cx + (Math.floor((pw / 2 + s * (b.minX - cx)) * d + 1e-6) / d - pw / 2) / s;
+    const maxY = cy + (ph / 2 - Math.floor((ph / 2 - s * (b.maxY - cy)) * d + 1e-6) / d) / s;
+    return { minX, maxX: b.maxX, minY: b.minY, maxY };
+  }
+
+  const atScreenRes = (r) => Math.abs(r / (view.s * dpr()) - 1) < 1e-9;
+
+  /** Whether a tile drawn at screen resolution still sits on the device pixel grid. */
+  function onGrid(tile, pw, ph) {
+    const d = dpr();
+    const [, , , , e, f] = rasterMatrix(view, pw, ph, tile.rect, tile.r, flip);
+    const off = (v) => Math.abs(v * d - Math.round(v * d));
+    return off(e) < 1e-3 && off(f) < 1e-3;
+  }
+
+  /** The resolution a view wants: sqrt(2) steps, or with pixelSnap the screen's own. */
+  // render resolution for the view on show; minRender: a floor (px/mm), still within the tile budget
+  const wantScale = () => Math.max(opt.minRender || 0, opt.pixelSnap ? view.s * dpr() : stepScale(view.s, dpr()));
+
   async function renderTile(slot, b, r, paneIndex, layerIndex, kind) {
     const gen = slot.gen;
-    const { rect, width, height } = rasterRect(b, r);
+    const { pw, ph } = size(panes[paneIndex]);
+    const { rect, width, height } = rasterRect(opt.pixelSnap && atScreenRes(r) ? snapRect(b, pw, ph) : b, r);
     const job = { rect, width, height, r };
     let out;
     try {
@@ -292,23 +323,25 @@ export function createStage(container, options = {}) {
   /** The tiles the view on show needs: [{ slot, area, r, pane, layer, kind }] (base or detail). */
   function plan() {
     const jobs = [];
-    const want = stepScale(view.s, dpr());
+    const want = wantScale();
     for (const pane of panes) {
       const { pw, ph } = size(pane);
       const visible = visibleBounds(view, pw, ph);
+      // a tile at screen resolution that a fractional pan or a flip moved off the pixel grid
+      const offGrid = (t) => opt.pixelSnap && atScreenRes(t.r) && !onGrid(t, pw, ph);
       for (const [li, slot] of pane.slots.entries()) {
         if (slot.dead || slot.failed) continue;
         const area = contentRect(slot.content) || bounds;
         if (!area) continue;
         const rmax = budgetScale(area.maxX - area.minX, area.maxY - area.minY, opt);
         const baseR = Math.min(want, rmax);
-        if (!slot.base || offBy(slot.base.r, baseR)) jobs.push({ slot, area, r: baseR, pane: pane.index, layer: li, kind: 'base' });
+        if (!slot.base || offBy(slot.base.r, baseR) || offGrid(slot.base)) jobs.push({ slot, area, r: baseR, pane: pane.index, layer: li, kind: 'base' });
         if (want <= rmax * 1.15) continue;
         const now = intersect(visible, area);
         const zone = intersect(grow(visible, 0.25), area);
         if (!now || !zone) continue;
         const detailR = Math.min(want, budgetScale(zone.maxX - zone.minX, zone.maxY - zone.minY, opt));
-        if (!slot.detail || !contains(slot.detail.rect, now) || offBy(slot.detail.r, detailR)) jobs.push({ slot, area: zone, r: detailR, pane: pane.index, layer: li, kind: 'detail' });
+        if (!slot.detail || !contains(slot.detail.rect, now) || offBy(slot.detail.r, detailR) || offGrid(slot.detail)) jobs.push({ slot, area: zone, r: detailR, pane: pane.index, layer: li, kind: 'detail' });
       }
     }
     return jobs;
@@ -325,7 +358,7 @@ export function createStage(container, options = {}) {
       jobsLeft = 0;
     }
     // zoomed back out within the whole-bounds budget: the detail tiles go
-    const want = stepScale(view.s, dpr());
+    const want = wantScale();
     for (const pane of panes) {
       for (const slot of pane.slots) {
         const area = contentRect(slot.content) || bounds;
@@ -375,6 +408,7 @@ export function createStage(container, options = {}) {
 
   // --- pointer: drag pans, wheel / pinch zoom, a press that did not move is a click, dblclick fits
   function attach(pane) {
+    if (!opt.interactive) return; // a picture: pointer events go to what is under the stage
     const p = pane.el;
     const pointers = new Map();
     let pinch = 0;
@@ -473,6 +507,7 @@ export function createStage(container, options = {}) {
       flip = !!f;
       requestFrame();
       for (const o of overlays) o.dirty = true;
+      if (opt.pixelSnap) settle();
     },
     fit() { fitNow(); settle(); },
     /** Zoom to a world box; small boxes get at least `minMm` of context. */

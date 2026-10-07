@@ -4,7 +4,7 @@
 
 export { createStage, svgEl, measureText, STAGE_CSS } from './stage.js';
 export { createCompare, defaultDiff, COMPARE_MODES } from './compare.js';
-export { face, layers, diff, image, inkdiff, draw, renderContent, decodeImage, isEmptySource, contentRect, inTurn } from './content.js';
+export { face, layers, repeat, diff, image, inkdiff, draw, renderContent, outlineRings, holesPath, decodeImage, isEmptySource, contentRect, inTurn } from './content.js';
 export { layerStack, layerColor, layerRank, sortLayers, defaultVisible, faceBoard, LAYER_ALPHA } from './layers.js';
 export { createHitIndex, segmentShape, rectShape, circleShape, polygonShape } from './hit.js';
 export { formatRegion, parseRegion, sameRegion, formatSlider, parseSlider, formatViewState, parseViewState } from './viewstate.js';

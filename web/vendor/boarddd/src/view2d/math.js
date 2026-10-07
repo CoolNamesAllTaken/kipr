@@ -18,10 +18,13 @@ export function boundsSize(b) {
   return { w: Math.max(b.maxX - b.minX, 1e-9), h: Math.max(b.maxY - b.minY, 1e-9) };
 }
 
-/** The view that shows `bounds` in a pw x ph pane with `pad` (fraction of the pane) on every side. */
-export function fitBounds(bounds, pw, ph, pad = 0.02) {
+/**
+ * The view that shows `bounds` in a pw x ph pane with `pad` (fraction of the pane) and `padPx`
+ * (CSS px) on every side.
+ */
+export function fitBounds(bounds, pw, ph, pad = 0.02, padPx = 0) {
   const { w, h } = boundsSize(bounds);
-  const s = Math.min(pw / w, ph / h) * (1 - 2 * pad);
+  const s = Math.min(Math.max(1, pw - 2 * padPx) / w, Math.max(1, ph - 2 * padPx) / h) * (1 - 2 * pad);
   return { cx: (bounds.minX + bounds.maxX) / 2, cy: (bounds.minY + bounds.maxY) / 2, s: clampScale(s) };
 }
 

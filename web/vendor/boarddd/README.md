@@ -1,11 +1,11 @@
-# boarddd 0.3.1, vendored at 12212fa
+# boarddd 0.3.3, vendored at 2ee3344
 
-MIT (see LICENSE). https://github.com/CoolNamesAllTaken/boarddd, tag `v0.3.1`, commit `12212fa9dfa736531fc326704dcf3166ba39626c`.
+MIT (see LICENSE). https://github.com/CoolNamesAllTaken/boarddd, tag `v0.3.3`, commit `2ee3344257b046eda8a76614a12d346e030555c3`.
 
 **This directory is generated. Do not edit it.** Change boarddd upstream, tag it, and re-run
 (from the root of this repository, `<boarddd>` being a boarddd checkout):
 
-    node <boarddd>/scripts/vendor.mjs --out web/vendor/boarddd --ref v0.3.1 --subpaths geom,board,footprint,models,scene,gerber,view2d --three-dir web/vendor/three --three 0.185.1 --occt-dir web/vendor/occt-import-js --occt 0.0.23
+    node <boarddd>/scripts/vendor.mjs --out web/vendor/boarddd --ref v0.3.3 --subpaths geom,board,footprint,models,scene,gerber,view2d --three-dir web/vendor/three --three 0.185.1 --occt-dir web/vendor/occt-import-js --occt 0.0.23
 
 Taken: `src/geom`, `src/board`, `src/footprint`, `src/models`, `src/scene`, `src/gerber`, `src/view2d` (sources, `.d.ts` typings and assets), `third_party/wasm-gerber-renderer`
 (what those import, with its own LICENSE), and boarddd's LICENSE.

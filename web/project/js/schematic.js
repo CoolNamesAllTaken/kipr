@@ -8,6 +8,10 @@ import { boxesShown, toggleBoxes } from './boxes.js';
 import { showCompare, compareSliders, setCompareSliders, preferredMode, setPreferredMode } from './compare.js';
 import { sameSize, stepItem, sheetNote } from './viewstate.js';
 
+// Sheets and their ink diff are rendered at least this sharp (px/mm): the diff's changed areas are found
+// at this resolution, and a zoom-in starts from a readable picture.
+const SHEET_R = 6;
+
 const MODES = [['side', 'Side by side'], ['diff', 'Diff'], ['onion', 'Onion skin'], ['swipe', 'Swipe']];
 
 export function sheetList(project) {
@@ -189,20 +193,24 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
     cmp?.destroy();
     clear(extra); clear(legendBox);
     stageWrap.className = `stage-wrap paper${m === 'side' ? ' split' : ''}`;
-    if (m === 'diff') legendBox.append(...legend());
+    if (m === 'diff') { legendBox.append(...legend()); showDiffRegions(); }
     cmp = showCompare(stage, m, m === 'diff' ? { diff: content.diff } : { base: content.base, head: content.head }, extra,
       { single: hasHead ? 'head' : 'base', onSlide: () => writeView() });
   }
 
+  let regions = null; // the diff's changed areas from its first render (they don't follow the zoom)
   function onRender(e) {
-    if (destroyed || e.content !== content?.diff || !e.info?.regions) return;
-    const regions = e.info.regions.map((q) => stage.frame.box(q));
-    legendBox.querySelector('.diff-count')?.remove();
-    if (mode === 'diff') legendBox.append(el('span', { class: 'muted diff-count' }, `${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
+    if (destroyed || e.content !== content?.diff || !e.info?.regions || regions) return;
+    regions = e.info.regions.map((q) => stage.frame.box(q));
     if (!contractChanges.length && regions.length) {
       changes.set(regions.map((q, i) => ({ title: `ink change ${i + 1}`, detail: `${q.w.toFixed(1)} × ${q.h.toFixed(1)} mm`, kind: 'visual', box: q })));
       stage.setMarks(regions.map((q) => ({ box: q })));
     }
+    showDiffRegions();
+  }
+  function showDiffRegions() {
+    legendBox.querySelector('.diff-count')?.remove();
+    if (regions && mode === 'diff') legendBox.append(el('span', { class: 'muted diff-count' }, `${regions.length} changed area${regions.length === 1 ? '' : 's'}`));
   }
 
   // view2d and the sheets' viewBoxes first (they define the world), then build the stage
@@ -216,7 +224,7 @@ function createSheetView(project, sheet, mainBox, changeBox, ctx, params, bothSi
       vbs = { base: b, head: h };
       srcs = { base: sb, head: sh };
       clear(stageWrap);
-      stage = createKiprStage(v2, stageWrap, { box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown() });
+      stage = createKiprStage(v2, stageWrap, { box: worldBox(), readout, zoomLabel: zoomLbl, boxes: boxesShown(), minRender: SHEET_R });
       stage.onTransform(() => writeView());
       stage.stage.on('render', onRender);
       stage.setMarks(contractChanges.filter((c) => c.box).map((c) => ({ box: c.box })));

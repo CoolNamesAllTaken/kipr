@@ -11,9 +11,11 @@ import { addBoardLayers } from '../gerber/board.js';
 import { renderLayerDiff, analyzeLayerDiff } from '../gerber/diff.js';
 import { holesToGerber, parseExcellon } from '../gerber/drills.js';
 import { hasGeometry } from '../gerber/layers.js';
+import { ringsToGerber } from '../gerber/outline.js';
 import { boardPalette } from '../gerber/palette.js';
 import { fitView, frameView } from '../gerber/view.js';
 import { inkDiff, DIFF_COLORS } from './inkdiff.js';
+import { rasterRect } from './math.js';
 
 /** A realistic board face: substrate, copper, finish, mask, silk, see-through holes (addBoardLayers). */
 export function face(board, { side = 'top', palette = {}, ...options } = {}) {
@@ -21,11 +23,32 @@ export function face(board, { side = 'top', palette = {}, ...options } = {}) {
 }
 
 /**
- * A stack of single-colour layers ({ source, color: [r, g, b] 0..1, alpha, kind?, name? }) in
- * paint order; a layerStack() works as is (invisible entries are skipped). One entry: a single-layer view.
+ * A stack of single-colour layers ({ source, color: [r, g, b] 0..1, alpha, kind?, name?, inverted? })
+ * in paint order; a layerStack() works as is (invisible entries are skipped). One entry: a single-layer view.
+ *
+ * Options make it a board drawn from those layers (the flat views of an app that colours layers
+ * itself, e.g. by its own palette):
+ * - `outline`: the board's rings in world mm, `[board, ...cutouts]` or `{ board, cutouts }`. An
+ *   `inverted: true` layer (a solder mask: the file marks the openings) then fills exactly the
+ *   board, not only as far as the layers drawn before it reach; and the layers are clipped to it
+ *   (even-odd, so a cutout is a hole), unless `clip: false`.
+ * - `substrate`: a CSS colour painted inside the outline under the layers (laminate shows wherever
+ *   the mask is pulled back over no copper); without an outline, under the whole content.
+ * - `holes`: drills ({ x, y, d | diameter, x2?, y2?, filled? }) cut out of the drawing, so what shows
+ *   through them is whatever is under the stage. A slot is a stadium; a filled hole is not cut.
  */
-export function layers(list) {
-  return { type: 'layers', layers: list };
+export function layers(list, { outline = null, clip = true, substrate = null, holes = null } = {}) {
+  return { type: 'layers', layers: list, options: { outline: outlineRings(outline), clip, substrate, holes } };
+}
+
+/**
+ * Content drawn once and placed at several spots: the copies of a board in a panel. Each placement
+ * { x, y, rotation } turns the content by `rotation` degrees (counter-clockwise) about the world
+ * origin, then moves it by (x, y). `rect` is the world area of the content to place (required unless
+ * the content has its own, e.g. an image).
+ */
+export function repeat(content, placements, rect = null) {
+  return { type: 'repeat', content, placements: placements || [], rect: rect || contentRect(content) };
 }
 
 /** The GPU layer diff (boarddd/gerber renderLayerDiff) of one layer: each side a source, several, or null. */
@@ -57,12 +80,44 @@ export function draw(fn, rect = null) {
 
 /** The world rect a content covers on its own, or null when it spans the stage bounds. */
 export function contentRect(c) {
+  if (c?.type === 'repeat') return placedRect(c);
   return c && (c.type === 'image' || c.type === 'inkdiff' || c.type === 'draw') ? c.rect || null : null;
 }
 
 /** Whether a content needs the gerber renderer. */
 export function needsRenderer(c) {
-  return !!c && (c.type === 'face' || c.type === 'layers' || c.type === 'diff');
+  if (c?.type === 'layers') return drawable(c.layers).length > 0;
+  if (c?.type === 'repeat') return needsRenderer(c.content);
+  return !!c && (c.type === 'face' || c.type === 'diff');
+}
+
+/** Rings as [[x, y], ...][] (board first), from either form; null when there is no usable board ring. */
+export function outlineRings(outline) {
+  if (!outline) return null;
+  const rings = Array.isArray(outline) ? outline : [outline.board, ...(outline.cutouts || [])];
+  const ok = rings.filter((r) => Array.isArray(r) && r.length >= 3);
+  return ok.length && ok[0] === rings[0] ? ok : null;
+}
+
+const turn = (deg) => {
+  const a = ((deg || 0) * Math.PI) / 180;
+  return { c: Math.cos(a), s: Math.sin(a) };
+};
+
+/** The world box a repeat covers: its rect carried to every placement. */
+function placedRect(c) {
+  const r = c.rect;
+  if (!r || !c.placements.length) return null;
+  let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+  for (const p of c.placements) {
+    const { c: cos, s: sin } = turn(p.rotation);
+    for (const [x, y] of [[r.minX, r.minY], [r.maxX, r.minY], [r.maxX, r.maxY], [r.minX, r.maxY]]) {
+      const X = cos * x - sin * y + (p.x || 0);
+      const Y = sin * x + cos * y + (p.y || 0);
+      minX = Math.min(minX, X); maxX = Math.max(maxX, X); minY = Math.min(minY, Y); maxY = Math.max(maxY, Y);
+    }
+  }
+  return { minX, maxX, minY, maxY };
 }
 
 // --- frame lock: one frame per renderer at a time, across every stage on the page
@@ -117,24 +172,98 @@ async function renderFace(c, renderer, job) {
   });
 }
 
-async function renderLayers(c, renderer, job) {
-  return glFrame(renderer, job, async () => {
-    const failures = [];
-    for (const l of c.layers) {
-      if (!l || l.visible === false || l.source == null) continue;
-      if (isEmptySource(l.source, isDrill(l))) continue; // e.g. an NPTH file of a board without unplated holes
-      try {
-        // without a frame background the renderer erases drill fills; as a layer they are painted
-        const style = { color: l.color || [0.8, 0.8, 0.8], alpha: l.alpha ?? 1 };
-        if (!isDrill(l)) await renderer.renderLayer(l.source, style);
-        else if (typeof l.source !== 'string') await renderer.renderLayer(l.source, { ...style, kind: 'drill' });
-        else if (drillGerber(l.source)) await renderer.renderLayer(drillGerber(l.source), style);
-      } catch (e) {
-        failures.push({ name: l.name ?? null, error: String(e?.message || e) });
+const drawable = (list) => (list || []).filter((l) => l && l.visible !== false && l.source != null && !isEmptySource(l.source, isDrill(l)));
+
+async function renderLayers(c, getRenderer, job) {
+  const list = drawable(c.layers); // e.g. an NPTH file of a board without unplated holes draws nothing
+  const o = c.options || {};
+  let out = { canvas: null, info: { failures: [] } };
+  if (list.length) {
+    const renderer = await getRenderer();
+    out = await glFrame(renderer, job, async () => {
+      const failures = [];
+      let edge;
+      for (const l of list) {
+        try {
+          // without a frame background the renderer erases drill fills; as a layer they are painted
+          const style = { color: l.color || [0.8, 0.8, 0.8], alpha: l.alpha ?? 1 };
+          if (l.inverted) {
+            // filled to the outline: hand the renderer the rings as a hidden hairline layer
+            if (edge === undefined) edge = o.outline ? await renderer.renderLayer(ringsToGerber(o.outline), { visible: false }) : null;
+            await renderer.renderInvertedLayer(l.source, edge != null ? { ...style, outlineLayerId: edge } : style);
+          } else if (!isDrill(l)) await renderer.renderLayer(l.source, style);
+          else if (typeof l.source !== 'string') await renderer.renderLayer(l.source, { ...style, kind: 'drill' });
+          else if (drillGerber(l.source)) await renderer.renderLayer(drillGerber(l.source), style);
+        } catch (e) {
+          failures.push({ name: l.name ?? null, error: String(e?.message || e) });
+        }
       }
+      return { failures };
+    });
+  }
+  if (!o.substrate && !o.holes?.length && !(o.outline && o.clip !== false)) {
+    return out.canvas ? out : { canvas: newCanvas(job.width, job.height), info: out.info };
+  }
+  return { canvas: finishBoard(out.canvas, o, job), info: out.info };
+}
+
+/** World mm -> tile px on a 2D context (y up). */
+const toTile = (g, job) => g.setTransform(job.r, 0, 0, -job.r, -job.rect.minX * job.r, job.rect.maxY * job.r);
+
+function ringsPath(rings) {
+  const path = new Path2D();
+  for (const ring of rings) {
+    ring.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
+    path.closePath();
+  }
+  return path;
+}
+
+/** Round holes and stadium slots (world mm) as one path; filled holes are left out. */
+export function holesPath(holes) {
+  const path = new Path2D();
+  for (const h of holes || []) {
+    const r = (h.d ?? h.diameter ?? 0) / 2;
+    if (h.filled || !(r > 0)) continue;
+    if (h.x2 == null || h.y2 == null) {
+      path.moveTo(h.x + r, h.y);
+      path.arc(h.x, h.y, r, 0, Math.PI * 2);
+    } else {
+      const a = Math.atan2(h.y2 - h.y, h.x2 - h.x);
+      path.moveTo(h.x + r * Math.cos(a + Math.PI / 2), h.y + r * Math.sin(a + Math.PI / 2));
+      path.arc(h.x, h.y, r, a + Math.PI / 2, a + (3 * Math.PI) / 2);
+      path.arc(h.x2, h.y2, r, a - Math.PI / 2, a + Math.PI / 2);
+      path.closePath();
     }
-    return { failures };
-  });
+  }
+  return path;
+}
+
+/** The layers' pixels on the substrate, clipped to the outline, holes cut through. */
+function finishBoard(drawn, o, job) {
+  const out = newCanvas(job.width, job.height);
+  const g = out.getContext('2d');
+  const rings = o.outline;
+  const shape = rings ? ringsPath(rings) : null;
+  g.save();
+  toTile(g, job);
+  if (shape && o.clip !== false) g.clip(shape, 'evenodd');
+  if (o.substrate) {
+    g.fillStyle = o.substrate;
+    if (shape) g.fill(shape, 'evenodd');
+    else { g.setTransform(1, 0, 0, 1, 0, 0); g.fillRect(0, 0, job.width, job.height); }
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  if (drawn) g.drawImage(drawn, 0, 0);
+  g.restore();
+  if (o.holes?.length) {
+    toTile(g, job);
+    g.globalCompositeOperation = 'destination-out';
+    g.fill(holesPath(o.holes));
+    g.globalCompositeOperation = 'source-over';
+    g.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  return out;
 }
 
 const drillCache = new Map();
@@ -241,6 +370,25 @@ async function renderDraw(c, job) {
   return { canvas: out, info: {} };
 }
 
+async function renderRepeat(c, job, getRenderer) {
+  const out = newCanvas(job.width, job.height);
+  if (!c.rect || !c.placements.length) return { canvas: out, info: {} };
+  const inner = rasterRect(c.rect, job.r);
+  const drawn = await renderContent(c.content, { ...inner, r: job.r }, getRenderer);
+  const g = out.getContext('2d');
+  const { minX, maxY } = inner.rect;
+  const r = job.r;
+  for (const p of c.placements) {
+    const { c: cos, s: sin } = turn(p.rotation);
+    // inner tile px (u, v) -> world (turned, then moved) -> this tile's px
+    g.setTransform(cos, -sin, sin, cos,
+      r * (cos * minX - sin * maxY + (p.x || 0) - job.rect.minX),
+      r * (job.rect.maxY - sin * minX - cos * maxY - (p.y || 0)));
+    g.drawImage(drawn.canvas, 0, 0);
+  }
+  return { canvas: out, info: drawn.info };
+}
+
 /**
  * Rasterise content `c` over job.rect (world) at job.r px/mm into job.width x job.height pixels.
  * `getRenderer` is called only for gerber content. Returns { canvas, info }.
@@ -248,7 +396,8 @@ async function renderDraw(c, job) {
 export async function renderContent(c, job, getRenderer) {
   switch (c?.type) {
     case 'face': return renderFace(c, await getRenderer(), job);
-    case 'layers': return renderLayers(c, await getRenderer(), job);
+    case 'layers': return renderLayers(c, getRenderer, job);
+    case 'repeat': return renderRepeat(c, job, getRenderer);
     case 'diff': return renderDiff(c, await getRenderer(), job);
     case 'image': return renderImage(c, job);
     case 'inkdiff': return renderInk(c, job);
