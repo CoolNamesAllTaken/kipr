@@ -9,7 +9,7 @@ import unittest
 
 from shapely.geometry import LineString, Point, Polygon
 
-from kipr.library.render import fp as fpmod
+from boarddd.render import footprint as fpmod
 from kipr.library.render import model3d
 
 

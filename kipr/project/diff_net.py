@@ -7,7 +7,7 @@ import math
 import re
 from collections import defaultdict
 
-from kipr.common.sexpr import parse
+from boarddd.io.kicad.sexpr import parse
 
 # --- netlist ---------------------------------------------------------------------------
 

@@ -32,7 +32,7 @@ import re
 import subprocess
 
 from kipr.common import kicad_cli
-from kipr.common.sexpr import Atom, Node, dumps, parse
+from boarddd.io.kicad.sexpr import Atom, Node, dumps, parse
 
 # ---------------------------------------------------------------------------
 # normalisations
@@ -408,7 +408,7 @@ def _same_canonical(x: Node, y: Node) -> tuple[bool, list[str]]:
 
 
 def _upgraded_lib(upgrader: Upgrader, text: str) -> tuple[Node | None, dict, str]:
-    from .sym import parse_library
+    from boarddd.render.symbol import parse_library
     up_text, err = upgrader.symbol_library(text)
     if not up_text:
         return None, {}, err
@@ -551,7 +551,7 @@ def footprint_facts(root: Node) -> dict:
     """What a footprint draws and means, from kipr's own parser (reads KiCad 5-10 alike)."""
     import json
 
-    from .fp import Footprint
+    from boarddd.render.footprint import Footprint
     m = Footprint(root)
     props = {k: v for k, v in m.properties.items() if not (k in FP_OPTIONAL_PROPS and v == "")}
     texts = []

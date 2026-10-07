@@ -22,12 +22,12 @@ import time
 import traceback
 
 from kipr.common import git as gitmod
-from kipr.common.sexpr import dumps, parse
+from boarddd.io.kicad.sexpr import dumps, parse
 
 from .. import layout as layoutmod
-from . import fp as fpmod
+from boarddd.render import footprint as fpmod
 from . import reencode
-from . import sym as symmod
+from boarddd.render import symbol as symmod
 
 MODEL_EXTS = (".step", ".stp", ".wrl", ".STEP", ".STP", ".WRL")
 URL_RE = re.compile(r"https?://[^\s\"'<>)]+")
@@ -484,7 +484,7 @@ class Renderer:
             entry["properties"][side] = props
             entry["stats"][side] = m.stats()
         # shared view box
-        from .geom import BBox
+        from boarddd.render.geom import BBox
         bb = BBox()
         for m in fps.values():
             bb.add_box(fpmod.footprint_bbox(m))

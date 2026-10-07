@@ -18,7 +18,7 @@ dependencies = [
     "zstandard>=0.22",
     # project review: board model, KiCad stackup/net-class readers and impedance (checks.impedance).
     # Pinned to a boarddd tag; keep in step with project-review.yml's boarddd-ref default.
-    "boarddd @ git+https://github.com/CoolNamesAllTaken/boarddd@v0.4.0#subdirectory=python",
+    "boarddd @ git+https://github.com/CoolNamesAllTaken/boarddd@v0.4.1#subdirectory=python",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +26,7 @@ dependencies = [
 3d = ["trimesh>=4.0", "shapely>=2.0", "mapbox_earcut>=1.0", "cascadio>=0.1"]
 # project review: checks.impedance with boarddd's tier-2 field solver (numpy, scipy: about 145 MB installed);
 # without it the check falls back to the closed-form models
-field = ["boarddd[field] @ git+https://github.com/CoolNamesAllTaken/boarddd@v0.4.0#subdirectory=python"]
+field = ["boarddd[field] @ git+https://github.com/CoolNamesAllTaken/boarddd@v0.4.1#subdirectory=python"]
 test = ["pytest>=7", "pytest-timeout>=2.1", "playwright>=1.45"]
 
 [project.scripts]

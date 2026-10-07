@@ -20,9 +20,9 @@ import math
 import os
 from collections import defaultdict
 
-from kipr.common.sexpr import parse
+from boarddd.io.kicad.sexpr import parse
 
-from .pcb import _fp_transform, _pad_box, item_layers, net_of, pt
+from boarddd.io.kicad.pcb import _fp_transform, _pad_box, item_layers, net_of, pt
 
 DEFAULT_TOLERANCE_PCT = 10.0
 SHIFT_PCT = 0.5  # a stackup change that moves Z by less than this is not reported

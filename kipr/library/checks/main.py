@@ -25,7 +25,7 @@ import re
 import sys
 
 from kipr.common import kicad_cli as kicad_cli_mod
-from kipr.common import sexpr
+from boarddd.io.kicad import sexpr
 
 from .. import layout as layoutmod
 from . import kicad_checks as kc

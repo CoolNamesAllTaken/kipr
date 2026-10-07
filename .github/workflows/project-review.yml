@@ -36,7 +36,7 @@ on:
       boarddd-ref:
         description: boarddd git ref (tag/sha) for the impedance check and KiCad readers; empty = the ref kipr pins in its pyproject.toml
         type: string
-        default: v0.4.0
+        default: v0.4.1
       impedance-solver:
         description: "checks.impedance solver: auto (boarddd's field solver; installs numpy + scipy, about 145 MB) or closedform (tier-1 models only, nothing extra installed)"
         type: string

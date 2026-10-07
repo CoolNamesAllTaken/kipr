@@ -1,4 +1,4 @@
-"""Semantic diff of two parsed boards (see `pcb.load`)."""
+"""Semantic diff of two parsed boards (see `boarddd.io.kicad.pcb.load`)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 from collections import Counter, defaultdict
 
 from . import classify, geom
-from .pcb import Board, Footprint, Zone
+from boarddd.io.kicad.pcb import PcbFile as Board, PcbFootprint as Footprint, Zone
 
 MOVE_EPS = 0.001  # mm
 ROT_EPS = 0.01  # degrees
