@@ -36,9 +36,11 @@ export function face(board, { side = 'top', palette = {}, ...options } = {}) {
  *   the mask is pulled back over no copper); without an outline, under the whole content.
  * - `holes`: drills ({ x, y, d | diameter, x2?, y2?, filled? }) cut out of the drawing, so what shows
  *   through them is whatever is under the stage. A slot is a stadium; a filled hole is not cut.
+ * - `rect`: the world area the layers are rasterised over (default: the stage bounds), e.g. drawings
+ *   about the board -- a plotted drawing sheet -- that reach far past it.
  */
-export function layers(list, { outline = null, clip = true, substrate = null, holes = null } = {}) {
-  return { type: 'layers', layers: list, options: { outline: outlineRings(outline), clip, substrate, holes } };
+export function layers(list, { outline = null, clip = true, substrate = null, holes = null, rect = null } = {}) {
+  return { type: 'layers', layers: list, options: { outline: outlineRings(outline), clip, substrate, holes }, rect };
 }
 
 /**
@@ -81,7 +83,7 @@ export function draw(fn, rect = null) {
 /** The world rect a content covers on its own, or null when it spans the stage bounds. */
 export function contentRect(c) {
   if (c?.type === 'repeat') return placedRect(c);
-  return c && (c.type === 'image' || c.type === 'inkdiff' || c.type === 'draw') ? c.rect || null : null;
+  return c && (c.type === 'image' || c.type === 'inkdiff' || c.type === 'draw' || c.type === 'layers') ? c.rect || null : null;
 }
 
 /** Whether a content needs the gerber renderer. */

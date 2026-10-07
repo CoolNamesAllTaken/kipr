@@ -6,21 +6,23 @@
 // outline and holes in it, so rerouting and outline changes can be seen in 3D.
 //
 // The board itself is boarddd/board (web/vendor/boarddd: readFabFiles, buildGerberBoard,
-// paintCopperDiff, outlineGhost), drawn by boarddd/gerber from the same vendored copy. What stays
-// here is kipr's: which of the contract's layers make the board, the stackup's colours and
-// thickness, and the file:// WASM pack.
+// paintCopperDiff, outlineGhost, buildPaste), drawn by boarddd/gerber from the same vendored copy.
+// What stays here is kipr's: which of the contract's layers make the board, the stackup's colours
+// and thickness, and the file:// WASM pack. Options: filled and capped holes up to a drill size
+// (boarddd fillFab) and the solder paste as solids, built on demand.
 
 import * as gerber from '../vendor/boarddd/src/gerber/index.js';
 import * as wasmGlue from '../vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor.js';
 import {
-  readFabFiles, faceBounds, buildGerberBoard, paintCopperDiff, canvasTexture, outlineGhost, outlinesDiffer, MAX_FACE_PX,
+  readFabFiles, faceBounds, buildGerberBoard, paintCopperDiff, buildPaste, canvasTexture, outlineGhost, outlinesDiffer, MAX_FACE_PX,
 } from '../vendor/boarddd/src/board/index.js';
+import { drillSizes } from '../vendor/boarddd/src/geom/index.js';
 
 // The vendored wasm, relative to web/project/; also its key in the file:// pack offline/pcba3d-vendor.js
 // (kipr/project/site.py PCBA3D_WASM).
 export const OFFLINE_WASM_KEY = 'vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm';
 const WASM_URL = new URL(`../${OFFLINE_WASM_KEY}`, import.meta.url);
-export const FAB_KINDS = new Set(['copper', 'mask', 'silk', 'outline', 'drill']);   // the layers a board is built from
+export const FAB_KINDS = new Set(['copper', 'mask', 'silk', 'paste', 'outline', 'drill']);   // the layers a board is built from
 // boarddd/board takes the gerber implementation explicitly: the same module, so the bundle has one copy.
 const GERBER = gerber;
 
@@ -69,13 +71,16 @@ function palette(info) {
  *   project  Project (reads pcb.layers, pcb.board and its base/head)
  *   assets   assetLoader (assets.js)
  *   onStatus (text) progress messages
+ *   fillUpTo mm: fill and cap plated round holes up to this drill diameter (null: all open)
  * Resolves to null when the project has no fab outputs, else
- *   {bounds, sides: {base, head}, outlineChanged, ghost: THREE.Group | null,
- *    diffTextures(): Promise<{top, bottom}>, dispose()}
+ *   {bounds, sides: {base, head}, outlineChanged, ghost: THREE.Group | null, fillUpTo,
+ *    drillSizes: [{diameter, count, vias}] (both sides' plated round holes, per side the larger count),
+ *    diffTextures(): Promise<{top, bottom}>, paste(): Promise<boolean> (adds each side's paste solids
+ *    to its group as side.paste; false when no side has paste), dispose()}
  * where a side is boarddd's buildGerberBoard() result ({group, body, barrels, outline, materials,
  * textures, holes, thickness, fab, painted, ...}) plus `approximate`.
  */
-export async function buildGerberBoards(project, assets, { onStatus = () => {}, maxTextureSize = MAX_FACE_PX } = {}) {
+export async function buildGerberBoards(project, assets, { onStatus = () => {}, maxTextureSize = MAX_FACE_PX, fillUpTo = null } = {}) {
   if (!project.pcb?.layers?.length) return null;
   const files = {};
   const fab = {};
@@ -98,7 +103,7 @@ export async function buildGerberBoards(project, assets, { onStatus = () => {}, 
       onStatus(`Painting the ${side} board…`);
       const s = await buildGerberBoard(GERBER, renderer, files[side], {
         thickness: Number(info.thickness_mm) > 0 ? Number(info.thickness_mm) : 1.6,
-        board: info, palette: palette(info), bounds, maxTextureSize, name: `gerber-${side}`,
+        board: info, palette: palette(info), bounds, maxTextureSize, name: `gerber-${side}`, fillUpTo,
       });
       s.body.userData.boardKind = 'substrate';
       s.approximate = !!s.outline.approximate;
@@ -115,25 +120,60 @@ export async function buildGerberBoards(project, assets, { onStatus = () => {}, 
   const ghost = outlineChanged ? outlineGhost(sides.base.outline, [sides.base.thickness + 0.03, -0.03]) : null;
   if (ghost) ghost.name = 'base-outline-ghost';
 
+  // The renderer draws one frame at a time: the on-demand jobs below take turns.
+  let queue = Promise.resolve();
+  const exclusive = (job) => {
+    const run = queue.then(job, job);
+    queue = run.catch(() => {});
+    return run;
+  };
+
   // Copper diff pictures, on demand (only the overlay modes use them).
   const owned = [];
   let diffPromise = null;
   const diffTextures = () => {
-    diffPromise ??= (async () => {
+    diffPromise ??= exclusive(async () => {
       onStatus('Diffing the copper…');
       const painted = (sides.head || sides.base).painted;
       const c = await paintCopperDiff(GERBER, renderer, { base: fab.base || null, head: fab.head || null }, painted, { maxTextureSize });
       const out = { top: canvasTexture(c.top), bottom: canvasTexture(c.bottom) };
       owned.push(out.top, out.bottom);
       return out;
-    })();
+    });
     return diffPromise;
   };
 
+  // Paste solids, on demand (traced from a raster of each face's paste layer).
+  let pastePromise = null;
+  const paste = () => {
+    pastePromise ??= exclusive(async () => {
+      let any = false;
+      for (const s of Object.values(sides)) {
+        if (!s.fab.grouped.top?.paste && !s.fab.grouped.bottom?.paste) continue;
+        onStatus('Tracing the solder paste…');
+        s.paste = await buildPaste(GERBER, renderer, s.fab, s.painted, { thickness: s.thickness, name: `${s.group.name}-paste` });
+        s.group.add(s.paste.group);
+        any = any || !!(s.paste.meshes.top || s.paste.meshes.bottom);
+      }
+      return any;
+    });
+    return pastePromise;
+  };
+
+  // The sizes there are to fill: per size, the larger of the two sides' counts.
+  const sizes = new Map();
+  for (const s of Object.values(sides)) {
+    for (const d of drillSizes(s.fab.holes)) {
+      const had = sizes.get(d.diameter);
+      if (!had || had.count < d.count) sizes.set(d.diameter, d);
+    }
+  }
+
   return {
-    bounds, sides, outlineChanged, ghost, diffTextures,
+    bounds, sides, outlineChanged, ghost, diffTextures, paste, fillUpTo: Number(fillUpTo) > 0 ? Number(fillUpTo) : null,
+    drillSizes: [...sizes.values()].sort((a, b) => a.diameter - b.diameter),
     dispose() {
-      for (const s of Object.values(sides)) s.dispose();
+      for (const s of Object.values(sides)) { s.paste?.dispose(); s.dispose(); }
       ghost?.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
       for (const t of owned) t.dispose();
       renderer.dispose?.();

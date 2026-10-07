@@ -7,7 +7,8 @@
 //   http://localhost:8000/web/project/pcba3d/demo.html?out=../../../tests/web-3d/out/mock/&project=demo
 //
 // Query: out (OUT dir URL, relative to this page), project (slug), mode (side|overlay|highlight),
-// focus (a ref), theme (light|dark), explode (0..1), fab=0 (keep the GLB's own board).
+// focus (a ref), theme (light|dark), explode (0..1), fab=0 (keep the GLB's own board),
+// paste=1|0 (paste solids), fill=<mm> (filled and capped holes up to this drill); unset: remembered.
 
 import { mountPcba3d } from './index.js';
 
@@ -50,6 +51,8 @@ async function show(slug) {
     headLabel: `Head · ${review.head?.short || 'head'}`,
     mode: params.get('mode') || 'side',
     fabBoard: params.get('fab') !== '0',
+    ...(params.has('paste') ? { paste: params.get('paste') === '1' } : {}),
+    ...(params.has('fill') ? { fillUpTo: params.get('fill') } : {}),
   });
   window.kipr3d = handle;           // for tests and the console
   await handle.ready;

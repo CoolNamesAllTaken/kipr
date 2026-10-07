@@ -91,6 +91,11 @@ viewer, report and PR comment ("105 parts: 3D model format .wrl -> .step") and a
 3D Changes view. Fields that appear or disappear empty (KiCad upgrades add `Sim.Library ""` and
 the like) are not reported at all.
 
+The 3D view's board from the gerbers has two options in its toolbar, remembered per browser: solder
+paste as solids (off by default) and filled and capped holes (VIPPO): every plated hole, via or pad,
+up to a chosen drill size has no opening and the pad copper over both ends. Details in
+[web/project/pcba3d/README.md](../web/project/pcba3d/README.md).
+
 ### Schematic grid check
 
 Symbol pins should sit on a 100 mil grid in the libraries, and everything that connects in a

@@ -53,3 +53,37 @@ export function usableHoles(holes, outline, budget = HOLE_BUDGET) {
 
 /** A kept hole's loop at its radius grown by `grow` (plating: negative; barrel bite: positive). */
 export const holeLoop = (hole, grow = 0) => loopAt(hole.ends, hole.radius + grow);
+
+/** Paste deposit height, mm: a 0.12 mm (about 5 mil) stencil. */
+export const PASTE_THICKNESS = 0.12;
+
+const fillable = (hole) => hole.plated !== false && (hole.x2 == null || hole.y2 == null
+  || (hole.x2 === hole.x && hole.y2 === hole.y));
+
+/**
+ * Holes with every plated round hole of drill diameter <= `upTo` mm marked `filled: true` (filled and
+ * capped, VIPPO-style: no opening, plating over both ends). Vias and plated pad holes alike; unplated
+ * holes and slots stay open. `upTo` null or <= 0 leaves the holes as given. Returns a new array.
+ */
+export function fillHoles(holes, upTo) {
+  const limit = Number(upTo);
+  if (!(limit > 0)) return (holes || []).slice();
+  return (holes || []).map((hole) => (fillable(hole) && Number(hole.diameter ?? hole.d) <= limit + 1e-6 ? { ...hole, filled: true } : hole));
+}
+
+/**
+ * The plated round drill sizes of a board, smallest first: `[{diameter, count, vias}]` (`vias`: holes
+ * the drill file marks as vias). The sizes `fillHoles` can fill; diameters rounded to the micron.
+ */
+export function drillSizes(holes) {
+  const sizes = new Map();
+  for (const hole of holes || []) {
+    const diameter = Math.round(Number(hole.diameter ?? hole.d) * 1000) / 1000;
+    if (!(diameter > 0) || !fillable(hole)) continue;
+    const s = sizes.get(diameter) || { diameter, count: 0, vias: 0 };
+    s.count += 1;
+    if (hole.via) s.vias += 1;
+    sizes.set(diameter, s);
+  }
+  return [...sizes.values()].sort((a, b) => a.diameter - b.diameter);
+}

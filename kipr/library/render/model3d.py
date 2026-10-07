@@ -163,9 +163,16 @@ def pad_geom(p, grow=0.0):
     return _place(affinity.translate(unary_union(parts), ox, oy), p)
 
 
-def drill_geom(p):
+def filled(p, fill_up_to) -> bool:
+    """A plated round pad hole of drill diameter <= fill_up_to mm: filled and capped (boarddd's padFilled)."""
     d = p["drill"]
-    if not d:
+    return bool(fill_up_to) and fill_up_to > 0 and p["type"] == "thru_hole" and bool(d) \
+        and abs(d["w"] - d["h"]) < 1e-9 and d["w"] <= fill_up_to + 1e-6
+
+
+def drill_geom(p, fill_up_to=None):
+    d = p["drill"]
+    if not d or filled(p, fill_up_to):
         return None
     # the hole is at the pad position; (drill (offset)) moves the copper (pad_geom)
     w, h = d["w"], d["h"]
@@ -219,13 +226,15 @@ def load_step(path: str, lin_tol: float, ang_tol: float):
 # main entry
 # ---------------------------------------------------------------------------
 
-def build_glb(fp, model_files, out_path: str, max_bytes: float = 5e6, include_models=True) -> list[str]:
-    """Write ``out_path`` (GLB). ``model_files`` = [(local STEP path, model dict)]. Returns warnings."""
+def build_glb(fp, model_files, out_path: str, max_bytes: float = 5e6, include_models=True,
+              fill_up_to: float | None = None) -> list[str]:
+    """Write ``out_path`` (GLB). ``model_files`` = [(local STEP path, model dict)]. Returns warnings.
+    ``fill_up_to`` (mm): plated round pad holes up to this drill are filled and capped (no hole, no barrel)."""
     warnings: list[str] = []
     lin = 0.02  # mm chordal deviation
     ang = 0.5
     for attempt in range(4):
-        scene, w = _build_scene(fp, model_files, lin, ang, include_models)
+        scene, w = _build_scene(fp, model_files, lin, ang, include_models, fill_up_to)
         data = scene.export(file_type="glb")
         if len(data) <= max_bytes or attempt == 3:
             break
@@ -241,7 +250,7 @@ def build_glb(fp, model_files, out_path: str, max_bytes: float = 5e6, include_mo
     return warnings
 
 
-def _build_scene(fp, model_files, lin, ang, include_models):
+def _build_scene(fp, model_files, lin, ang, include_models, fill_up_to=None):
     warnings = []
     scene = trimesh.Scene()
     root = "kicad_zup"
@@ -255,7 +264,7 @@ def _build_scene(fp, model_files, lin, ang, include_models):
         scene.add_geometry(mesh, node_name=node, geom_name=node, parent_node_name=parent)
 
     pads = fp.pads
-    drills = [g for g in (drill_geom(p) for p in pads) if g is not None]
+    drills = [g for g in (drill_geom(p, fill_up_to) for p in pads) if g is not None]
     drill_union = unary_union(drills) if drills else None
 
     # board outline: courtyard bbox (fallback: everything) + margin
@@ -281,7 +290,7 @@ def _build_scene(fp, model_files, lin, ang, include_models):
             if p["type"] == "np_thru_hole" and p["drill"] and max(p["w"], p["h"]) <= p["drill"]["w"] + 1e-6:
                 continue
             g = pad_geom(p)
-            dg = drill_geom(p)
+            dg = drill_geom(p, fill_up_to)
             if dg is not None:
                 g = g.difference(dg)
             geoms.append(g)
@@ -296,7 +305,7 @@ def _build_scene(fp, model_files, lin, ang, include_models):
     # plated barrels
     barrels = []
     for p in pads:
-        if p["type"] != "thru_hole" or not p["drill"]:
+        if p["type"] != "thru_hole" or not p["drill"] or filled(p, fill_up_to):
             continue
         dg = drill_geom(p)
         ring = dg.buffer(0.025).difference(dg)
@@ -424,6 +433,7 @@ def _zbuffer(T, C, d, up, size, ss=2, bg=(238, 240, 244)):
 
 def render_preview(glb_path: str, png_path: str, size: int = 900, hide=()) -> None:
     """2x2 sheet of shaded orthographic views (iso / top / front / right) using a numpy z-buffer.
+    ``hide``: leave out nodes whose name contains any of these (e.g. ``(".Paste",)``).
 
     The GLB is glTF Y-up (board top = +Y, KiCad front edge = +Z). No OpenGL required.
     """

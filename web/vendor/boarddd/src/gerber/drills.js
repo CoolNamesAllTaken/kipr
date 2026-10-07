@@ -13,7 +13,8 @@
  *
  * A hole is `{ x, y, diameter, plated, x2?, y2? }` in file units converted to
  * millimeters; `x2`/`y2` are the far end of a routed slot (`null` for a round
- * hole). Anything else on the object (e.g. `filled`) is carried through.
+ * hole). `via` is true for a hole whose tool KiCad marks as a via
+ * (`ViaDrill`). Anything else on the object (e.g. `filled`) is carried through.
  *
  * Everything except `drillShape()` (which creates SVG elements) and
  * `applyHoleMask()` (which sets element styles) is DOM-free.
@@ -132,7 +133,9 @@ export function parseExcellon(text, options = {}) {
 
   const diameters = new Map();
   const plating = new Map();
+  const viaTools = new Set();
   let pendingPlated = null;
+  let pendingVia = false;
   let current = null;
   let inBody = false;
   let routDown = false;
@@ -166,14 +169,16 @@ export function parseExcellon(text, options = {}) {
       skipped += 1;
       return;
     }
-    holes.push({
+    const hole = {
       x,
       y,
       diameter,
       plated: plating.get(current) ?? defaultPlated,
       x2,
       y2,
-    });
+    };
+    if (viaTools.has(current)) hole.via = true;
+    holes.push(hole);
   };
 
   for (const raw of lines) {
@@ -182,7 +187,10 @@ export function parseExcellon(text, options = {}) {
 
     if (line.startsWith(";")) {
       const found = APER_FUNCTION.exec(line);
-      if (found) pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
+      if (found) {
+        pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
+        pendingVia = /ViaDrill/i.test(line);
+      }
       const format = KICAD_FORMAT.exec(line);
       if (format) {
         integerDigits = Number(format[1]);
@@ -236,7 +244,9 @@ export function parseExcellon(text, options = {}) {
       const tool = Number(definition[1]);
       diameters.set(tool, Number(definition[2]) * scale());
       plating.set(tool, pendingPlated ?? defaultPlated);
+      if (pendingVia) viaTools.add(tool);
       pendingPlated = null;
+      pendingVia = false;
       continue;
     }
     if (definition && inBody) {
@@ -521,5 +531,40 @@ export function holesToGerber(holes) {
     }
   }
   lines.push("M02*");
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Holes as an Excellon drill file (metric, decimal, KiCad's dialect): one tool per diameter and plating,
+ * round holes as hits, slots as rout moves. `parseExcellon()` reads it back to the same holes; the
+ * renderer draws it as openings like any drill file (e.g. a board's holes minus the filled ones).
+ */
+export function holesToExcellon(holes) {
+  const tools = new Map();
+  for (const hole of holes || []) {
+    const diameter = Number(hole.diameter ?? hole.d);
+    if (!(diameter > 0)) continue;
+    const key = `${diameter.toFixed(3)}|${hole.plated === false ? "N" : "P"}`;
+    if (!tools.has(key)) tools.set(key, { diameter, plated: hole.plated !== false, holes: [] });
+    tools.get(key).holes.push(hole);
+  }
+  const n = (value) => Number(value).toFixed(4);   // always with a decimal point: no implied-decimal reading
+  const lines = ["M48", "; FORMAT={-:-/ absolute / metric / decimal}", "FMAT,2", "METRIC"];
+  let t = 0;
+  for (const tool of tools.values()) {
+    t += 1;
+    tool.code = t;
+    lines.push(`; #@! TA.AperFunction,${tool.plated ? "Plated,PTH" : "NonPlated,NPTH"},ComponentDrill`, `T${t}C${tool.diameter.toFixed(3)}`);
+  }
+  lines.push("%", "G90", "G05");
+  for (const tool of tools.values()) {
+    lines.push(`T${tool.code}`);
+    for (const hole of tool.holes) {
+      const slot = hole.x2 != null && hole.y2 != null && (hole.x2 !== hole.x || hole.y2 !== hole.y);
+      if (slot) lines.push(`G00X${n(hole.x)}Y${n(hole.y)}`, "M15", `G01X${n(hole.x2)}Y${n(hole.y2)}`, "M16", "G05");
+      else lines.push(`X${n(hole.x)}Y${n(hole.y)}`);
+    }
+  }
+  lines.push("M30");
   return lines.join("\n") + "\n";
 }

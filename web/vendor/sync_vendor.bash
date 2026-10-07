@@ -21,7 +21,8 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$here/../.." && pwd)
-BOARDDD_REF=v0.3.3
+# A boarddd commit (CoolNamesAllTaken/boarddd PR, branch t0303) until its release tag: repin then.
+BOARDDD_REF=c0339dc25ae27c5423ef59a650f8847f7e5a7f53
 BOARDDD_SUBPATHS=geom,board,footprint,models,scene,gerber,view2d
 THREE_VERSION=0.185.1
 OCCT_VERSION=0.0.23

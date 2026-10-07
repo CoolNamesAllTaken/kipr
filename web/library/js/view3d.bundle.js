@@ -25,7 +25,8 @@ var KIPR_VIEW3D = (() => {
     MODEL_LOADERS: () => MODEL_LOADERS,
     PALETTE: () => PALETTE,
     create3DViewer: () => create3DViewer,
-    modelLoaderFor: () => modelLoaderFor
+    modelLoaderFor: () => modelLoaderFor,
+    padDrillSizes: () => padDrillSizes
   });
 
   // ../vendor/three/three.core.js
@@ -32682,6 +32683,9 @@ void main() {
     ];
   }
 
+  // ../vendor/boarddd/src/geom/holes.js
+  var PASTE_THICKNESS = 0.12;
+
   // ../vendor/boarddd/src/geom/pads.js
   function padOffset(pad) {
     const o = pad.offset ?? pad.drill?.offset;
@@ -32862,6 +32866,7 @@ void main() {
     mask: 1923892,
     fr4: COLORS2.fr4,
     copper: 15317300,
+    paste: 10921651,
     silk: 16053486,
     fab: 11120053,
     courtyard: 16732120
@@ -32941,6 +32946,14 @@ void main() {
     g.translate(0, 0, z);
     return g;
   }
+  function padPasteSides(pad) {
+    const L = pad.layers || [];
+    return { top: L.some((l) => /^(F|\*)\.Paste$/.test(l)), bottom: L.some((l) => /^(B|\*)\.Paste$/.test(l)) };
+  }
+  function padFilled(pad, upTo) {
+    const d = padDrill(pad);
+    return Number(upTo) > 0 && pad.type === "thru_hole" && !!d && !d.oval && d.w <= Number(upTo) + 1e-6;
+  }
   function buildFootprint(fp, options = {}) {
     const thickness = options.thickness ?? BOARD_THICKNESS;
     const colors = { ...FOOTPRINT_COLORS, ...options.colors || {} };
@@ -32948,7 +32961,7 @@ void main() {
     const group = new Group();
     group.name = `footprint-${fp.name || ""}`;
     const disposables = [];
-    const meshes = { board: null, copper: [], barrels: [], silk: [], fab: [], courtyard: [] };
+    const meshes = { board: null, copper: [], barrels: [], paste: [], silk: [], fab: [], courtyard: [] };
     const add = (geometry, material, kind, name) => {
       if (!geometry) return null;
       const m = new Mesh(geometry, material);
@@ -32964,7 +32977,7 @@ void main() {
     for (const c of outline.cutouts || []) shape.holes.push(new Path(v2(clockwise(c))));
     const drills = [];
     for (const pad of fp.pads) {
-      const loop = padDrillLoop(pad);
+      const loop = padFilled(pad, options.fillUpTo) ? null : padDrillLoop(pad);
       if (!loop) continue;
       const inside = loop.every(([x, y]) => {
         const c = clearance(outline.board, x, y);
@@ -32989,7 +33002,7 @@ void main() {
       if (!padHasCopper(pad)) continue;
       const sides = padCopperSides(pad);
       const loops = padCopperLoops(pad, 8);
-      const hole = drills.find((d) => d.pad === pad)?.loop || padDrillLoop(pad);
+      const hole = drills.find((d) => d.pad === pad)?.loop || (padFilled(pad, options.fillUpTo) ? null : padDrillLoop(pad));
       const shapes = loops.map((l, i) => {
         const s = new Shape(v2(counterClockwise(l)));
         if (hole && i === 0) s.holes.push(new Path(v2(clockwise(hole))));
@@ -33000,6 +33013,22 @@ void main() {
       if (sides.top) add(plate.clone().translate(0, 0, thickness), padMat, "copper", label);
       if (sides.bottom) add(plate.clone().translate(0, 0, -COPPER_THICKNESS), padMat, "copper", label);
       plate.dispose();
+    }
+    const pasteMat = new MeshStandardMaterial({ color: colors.paste, metalness: 0.35, roughness: 0.75, ...COPPER_OFFSET });
+    for (const pad of options.paste ? fp.pads : []) {
+      const sides = padPasteSides(pad);
+      if (!sides.top && !sides.bottom) continue;
+      const hole = drills.find((d) => d.pad === pad)?.loop;
+      const shapes = padCopperLoops(pad, 8).map((l, i) => {
+        const s = new Shape(v2(counterClockwise(l)));
+        if (hole && i === 0) s.holes.push(new Path(v2(clockwise(hole))));
+        return s;
+      });
+      const deposit = new ExtrudeGeometry(shapes, { depth: PASTE_THICKNESS, bevelEnabled: false, curveSegments: 1 });
+      const label = `paste-${pad.number}`;
+      if (sides.top) add(deposit.clone().translate(0, 0, thickness + COPPER_THICKNESS), pasteMat, "paste", label);
+      if (sides.bottom) add(deposit.clone().translate(0, 0, -COPPER_THICKNESS - PASTE_THICKNESS), pasteMat, "paste", label);
+      deposit.dispose();
     }
     for (const { pad, loop } of drills) {
       if (pad.type !== "thru_hole") continue;
@@ -33048,7 +33077,7 @@ void main() {
         mesh.renderOrder = 2;
       }
     }
-    const materials = [faceMats.top, faceMats.bottom, wallMat, padMat, barrelMat, ...Object.values(gfxMats)];
+    const materials = [faceMats.top, faceMats.bottom, wallMat, padMat, barrelMat, pasteMat, ...Object.values(gfxMats)];
     return {
       group,
       outline,
@@ -33383,11 +33412,12 @@ void main() {
   var GROUPS = [
     { name: "board", label: "Board" },
     { name: "pads", label: "Pads" },
+    { name: "paste", label: "Paste", defaultOff: true },
     { name: "silk", label: "Silk" },
     { name: "fab", label: "Fab/Courtyard", defaultOff: true },
     { name: "model", label: "3D model" }
   ];
-  var GROUP_OF = { board: "board", copper: "pads", barrels: "pads", silk: "silk", fab: "fab", courtyard: "fab", model: "model" };
+  var GROUP_OF = { board: "board", copper: "pads", barrels: "pads", paste: "paste", silk: "silk", fab: "fab", courtyard: "fab", model: "model" };
   var OVERLAY_COLORS = { head: 2278399, base: 16727450 };
   var SEE_THROUGH = ["pads", "model"];
   var PALETTE = {
@@ -33501,21 +33531,36 @@ void main() {
     const [x0, y0, x1, y1] = geom.bbox;
     return { board: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => kicadToBoard(...q)), cutouts: [] };
   }
-  async function buildBoard(geom, layers) {
+  async function facesFor(geom, layers) {
     const [x0, y0, x1, y1] = geom.bbox;
     const w = x1 - x0, h = y1 - y0;
     const ppm = Math.min(PX_PER_MM, MAX_TEXTURE_PX / Math.max(w, h));
     const W = Math.max(2, Math.round(w * ppm)), H = Math.max(2, Math.round(h * ppm));
-    const { faces, decals } = await paintFaces(layers, W, H);
+    return paintFaces(layers, W, H);
+  }
+  function buildBoard(geom, { faces, decals }, fillUpTo = null) {
+    const [x0, y0, x1, y1] = geom.bbox;
     return buildFootprint({ name: "", pads: geom.pads || [], graphics: [], models: [] }, {
       outline: outlineOf(geom),
       uvBounds: { minX: x0, maxX: x1, minY: -y1, maxY: -y0 },
       faces,
-      decals
+      decals,
+      paste: true,
+      fillUpTo
     });
   }
+  function padDrillSizes(pads) {
+    const sizes = /* @__PURE__ */ new Map();
+    for (const pad of pads || []) {
+      const d = padDrill(pad);
+      if (pad.type !== "thru_hole" || !d || d.oval) continue;
+      const diameter = Math.round(d.w * 1e3) / 1e3;
+      sizes.set(diameter, (sizes.get(diameter) || 0) + 1);
+    }
+    return [...sizes].sort((a, b) => a[0] - b[0]).map(([diameter, count]) => ({ diameter, count }));
+  }
   async function create3DViewer(container, { dark = false, onStatus = () => {
-  } } = {}) {
+  }, fillUpTo = null } = {}) {
     const viewer = createViewer(container, {
       controls: "orbit",
       theme: dark ? "dark" : "light",
@@ -33523,6 +33568,7 @@ void main() {
     });
     const sides = { head: null, base: null };
     const visible = Object.fromEntries(GROUPS.map((g) => [g.name, !g.defaultOff]));
+    let fill = Number(fillUpTo) > 0 ? Number(fillUpTo) : null;
     const present = /* @__PURE__ */ new Set();
     let mode = "head";
     let lastView = "iso";
@@ -33532,11 +33578,14 @@ void main() {
       const group = new Group();
       group.name = `footprint-${side}`;
       let built = null;
+      let pictures = null;
       if (spec.geom?.bbox) {
-        built = await buildBoard(spec.geom, spec.layers);
+        pictures = await facesFor(spec.geom, spec.layers);
+        built = buildBoard(spec.geom, pictures, fill);
         group.add(built.group);
         present.add("board");
         if (built.meshes.copper.length) present.add("pads");
+        if (built.meshes.paste.length) present.add("paste");
         if (built.meshes.silk.length) present.add("silk");
         if (built.meshes.fab.length) present.add("fab");
       } else {
@@ -33565,7 +33614,7 @@ void main() {
       group.traverse((o) => {
         if (o.isMesh) o.userData.orig = o.material;
       });
-      return { group, built };
+      return { group, built, geom: spec.geom, pictures };
     }
     function forEachTagged(fn) {
       for (const [side, s] of Object.entries(sides)) {
@@ -33640,6 +33689,30 @@ void main() {
       },
       setGroupVisible(name, on) {
         visible[name] = on;
+        apply();
+      },
+      /** Plated round pad drill sizes over both sides (per size the larger count). */
+      drillSizes() {
+        const best = /* @__PURE__ */ new Map();
+        for (const s of Object.values(sides)) {
+          for (const d of padDrillSizes(s?.geom?.pads)) if ((best.get(d.diameter)?.count || 0) < d.count) best.set(d.diameter, d);
+        }
+        return [...best.values()].sort((a, b) => a.diameter - b.diameter);
+      },
+      /** Fill and cap plated round pad holes up to `upTo` mm drill (null: all open): the boards are rebuilt. */
+      setFill(upTo) {
+        fill = Number(upTo) > 0 ? Number(upTo) : null;
+        for (const s of Object.values(sides)) {
+          if (!s?.built) continue;
+          s.group.remove(s.built.group);
+          s.built.group.traverse((o) => o.userData.overlayMat?.dispose());
+          s.built.dispose();
+          s.built = buildBoard(s.geom, s.pictures, fill);
+          s.built.group.traverse((o) => {
+            if (o.isMesh) o.userData.orig = o.material;
+          });
+          s.group.add(s.built.group);
+        }
         apply();
       },
       groups: () => GROUPS.filter((g) => present.has(g.name)).map((g) => ({ name: g.name, label: g.label, visible: visible[g.name] })),

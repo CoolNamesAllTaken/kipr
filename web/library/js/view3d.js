@@ -8,6 +8,7 @@
 //     await v.load({ head: SideSpec|null, base: SideSpec|null })
 //     v.setMode('head'|'base'|'side'|'overlay'); v.setGroupVisible(name, bool); v.setView('top'|'bottom'|'side'|'iso'|'reset')
 //     v.groups() -> [{name, label, visible}];  v.destroy()
+//     v.drillSizes() -> [{diameter, count}];  await v.setFill(mm | null)   (filled + capped plated pad holes)
 // SideSpec = { geom: <geom.json object>|null, layers: {"F.Cu": url, ...}|null,
 //              models: [{ url, label, offset:[x,y,z], rotate:[x,y,z], scale:[x,y,z] }] }
 // Model files are loaded by extension through MODEL_LOADERS (STEP via boarddd/models + occt-import-js).
@@ -15,19 +16,20 @@ import * as THREE from '../vendor/three/three.module.js';
 import { createViewer } from '../vendor/boarddd/src/scene/index.js';
 import { buildFootprint, footprintModelMatrix } from '../vendor/boarddd/src/footprint/index.js';
 import { readStep, stepToObject } from '../vendor/boarddd/src/models/index.js';
-import { BOARD_THICKNESS, kicadToBoard } from '../vendor/boarddd/src/geom/index.js';
+import { BOARD_THICKNESS, kicadToBoard, padDrill } from '../vendor/boarddd/src/geom/index.js';
 import { OFFLINE, imageSrc, fetchBytes } from './util.js';
 import { stepOptions } from './occt.js';
 
 export const GROUPS = [
   { name: 'board', label: 'Board' },
   { name: 'pads', label: 'Pads' },
+  { name: 'paste', label: 'Paste', defaultOff: true },
   { name: 'silk', label: 'Silk' },
   { name: 'fab', label: 'Fab/Courtyard', defaultOff: true },
   { name: 'model', label: '3D model' },
 ];
 // boarddd's mesh groups -> the toggles above
-const GROUP_OF = { board: 'board', copper: 'pads', barrels: 'pads', silk: 'silk', fab: 'fab', courtyard: 'fab', model: 'model' };
+const GROUP_OF = { board: 'board', copper: 'pads', barrels: 'pads', paste: 'paste', silk: 'silk', fab: 'fab', courtyard: 'fab', model: 'model' };
 const OVERLAY_COLORS = { head: 0x22c3ff, base: 0xff3d9a };
 const SEE_THROUGH = ['pads', 'model'];   // what overlay draws for both sides
 
@@ -144,25 +146,44 @@ function outlineOf(geom) {
   return { board: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((q) => kicadToBoard(...q)), cutouts: [] };
 }
 
-/** The footprint on its board (boarddd/footprint) with faces and decals from the layer renders. */
-async function buildBoard(geom, layers) {
+/** Face pictures for a footprint's bbox (painted once per side, reused when the board is rebuilt). */
+async function facesFor(geom, layers) {
   const [x0, y0, x1, y1] = geom.bbox;
   const w = x1 - x0, h = y1 - y0;
   const ppm = Math.min(PX_PER_MM, MAX_TEXTURE_PX / Math.max(w, h));
   const W = Math.max(2, Math.round(w * ppm)), H = Math.max(2, Math.round(h * ppm));
-  const { faces, decals } = await paintFaces(layers, W, H);
+  return paintFaces(layers, W, H);
+}
+
+/** The footprint on its board (boarddd/footprint) with faces and decals from the layer renders. */
+function buildBoard(geom, { faces, decals }, fillUpTo = null) {
+  const [x0, y0, x1, y1] = geom.bbox;
   // boarddd draws no copper for an NPTH pad without an annular ring (pad size <= drill), as before
   return buildFootprint({ name: '', pads: geom.pads || [], graphics: [], models: [] }, {
     outline: outlineOf(geom), uvBounds: { minX: x0, maxX: x1, minY: -y1, maxY: -y0 }, faces, decals,
+    paste: true, fillUpTo,
   });
 }
 
-export async function create3DViewer(container, { dark = false, onStatus = () => {} } = {}) {
+/** Plated round pad drill sizes of the pads, smallest first: [{diameter, count}] (what fillUpTo can fill). */
+export function padDrillSizes(pads) {
+  const sizes = new Map();
+  for (const pad of pads || []) {
+    const d = padDrill(pad);
+    if (pad.type !== 'thru_hole' || !d || d.oval) continue;
+    const diameter = Math.round(d.w * 1000) / 1000;
+    sizes.set(diameter, (sizes.get(diameter) || 0) + 1);
+  }
+  return [...sizes].sort((a, b) => a[0] - b[0]).map(([diameter, count]) => ({ diameter, count }));
+}
+
+export async function create3DViewer(container, { dark = false, onStatus = () => {}, fillUpTo = null } = {}) {
   const viewer = createViewer(container, {
     controls: 'orbit', theme: dark ? 'dark' : 'light', preserveDrawingBuffer: true,
   });
   const sides = { head: null, base: null };   // {group, built}
   const visible = Object.fromEntries(GROUPS.map((g) => [g.name, !g.defaultOff]));
+  let fill = Number(fillUpTo) > 0 ? Number(fillUpTo) : null;
   const present = new Set();
   let mode = 'head';
   let lastView = 'iso';
@@ -173,11 +194,14 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
     const group = new THREE.Group();
     group.name = `footprint-${side}`;
     let built = null;
+    let pictures = null;
     if (spec.geom?.bbox) {
-      built = await buildBoard(spec.geom, spec.layers);
+      pictures = await facesFor(spec.geom, spec.layers);
+      built = buildBoard(spec.geom, pictures, fill);
       group.add(built.group);
       present.add('board');
       if (built.meshes.copper.length) present.add('pads');
+      if (built.meshes.paste.length) present.add('paste');
       if (built.meshes.silk.length) present.add('silk');
       if (built.meshes.fab.length) present.add('fab');
     } else {
@@ -202,7 +226,7 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
     const ok = results.filter((r) => r.status === 'fulfilled').length;
     onStatus({ side, done: true, text: models.length ? `${ok}/${models.length} 3D model(s) loaded` : 'no 3D model file for this side', errors: failed });
     group.traverse((o) => { if (o.isMesh) o.userData.orig = o.material; });
-    return { group, built };
+    return { group, built, geom: spec.geom, pictures };
   }
 
   function forEachTagged(fn) {
@@ -271,6 +295,28 @@ export async function create3DViewer(container, { dark = false, onStatus = () =>
       if (reframe) setView(lastView);
     },
     setGroupVisible(name, on) { visible[name] = on; apply(); },
+    /** Plated round pad drill sizes over both sides (per size the larger count). */
+    drillSizes() {
+      const best = new Map();
+      for (const s of Object.values(sides)) {
+        for (const d of padDrillSizes(s?.geom?.pads)) if ((best.get(d.diameter)?.count || 0) < d.count) best.set(d.diameter, d);
+      }
+      return [...best.values()].sort((a, b) => a.diameter - b.diameter);
+    },
+    /** Fill and cap plated round pad holes up to `upTo` mm drill (null: all open): the boards are rebuilt. */
+    setFill(upTo) {
+      fill = Number(upTo) > 0 ? Number(upTo) : null;
+      for (const s of Object.values(sides)) {
+        if (!s?.built) continue;
+        s.group.remove(s.built.group);
+        s.built.group.traverse((o) => o.userData.overlayMat?.dispose());
+        s.built.dispose();
+        s.built = buildBoard(s.geom, s.pictures, fill);
+        s.built.group.traverse((o) => { if (o.isMesh) o.userData.orig = o.material; });
+        s.group.add(s.built.group);
+      }
+      apply();
+    },
     groups: () => GROUPS.filter((g) => present.has(g.name)).map((g) => ({ name: g.name, label: g.label, visible: visible[g.name] })),
     setView,
     /** For tests: board-frame bounding boxes of each group per side (board bottom face at z = 0). */

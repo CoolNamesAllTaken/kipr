@@ -63,4 +63,19 @@ export function paintCopperDiff(gerber: GerberApi, renderer: GerberRenderer, pai
 export function buildGerberBoard(gerber: GerberApi, renderer: GerberRenderer, files: FabFile[], options?: {
   thickness?: number; board?: { size_mm?: [number, number]; origin_mm?: [number, number] }; palette?: { mask?: string; silk?: string; finish?: string };
   bounds?: Bounds | null; pxPerMm?: number; maxTextureSize?: number; budget?: number; name?: string;
+  /** Fill and cap plated round holes up to this drill diameter, mm (fillFab). */
+  fillUpTo?: number | null;
 }): Promise<BoardSolid & { fab: Fab; painted: PaintedFaces; textures: { top: THREE.Texture; bottom: THREE.Texture } }>;
+/** `fab` with plated round holes up to `upTo` mm drill filled and capped: out of the solid and the painted drills. */
+export function fillFab(gerber: GerberApi, fab: Fab, upTo: number | null | undefined): Fab;
+export interface PasteSolids {
+  group: THREE.Group;
+  /** userData.group = 'paste' */
+  meshes: { top: THREE.Mesh | null; bottom: THREE.Mesh | null };
+  material: THREE.MeshStandardMaterial;
+  dispose(): void;
+}
+/** Each face's paste Gerber traced from a raster in `painted`'s frame and extruded off that face. */
+export function buildPaste(gerber: GerberApi, renderer: GerberRenderer, fab: Fab, painted: PaintedFaces, options?: {
+  thickness?: number; height?: number; color?: THREE.ColorRepresentation; name?: string;
+}): Promise<PasteSolids>;

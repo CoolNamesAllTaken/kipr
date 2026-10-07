@@ -52,6 +52,9 @@ Useful options of the end-to-end run (see `kipr library --help`):
 - `--no-reencode-check`, `--kicad-cli PATH`: see [Re-encoded by KiCad vs. edited](#re-encoded-by-kicad-vs-edited).
 - `--fetch-stock-models [--stock-models-dir DIR]`: download `${KICADn_3DMODEL_DIR}` models from
   kicad-packages3D at the tag pinned in `kipr/library/render/stock_models_tag.txt`.
+- `--3d-hide-paste`: leave the solder paste out of the 3D preview PNGs (the GLB keeps it).
+  `--3d-fill-holes MM`: GLB and preview with plated round pad holes up to that drill filled and capped
+  (VIPPO). The browser 3D view has both as toggles.
 - `--no-3d`, `--no-preview`, `--png-size`, `--repo-name owner/repo` (default
   `$GITHUB_REPOSITORY`, else the github.com `origin` remote), `--report FILE`, `--skip STAGE`.
 
