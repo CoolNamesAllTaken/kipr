@@ -139,12 +139,17 @@ def shoot(a, manifest, base):
                     page.wait_for_timeout(500)
                     shot(f"{slug}--3d-view-{v}")
                 if page.locator("#g3-paste").count():
-                    page.check("#g3-paste")
-                    page.wait_for_timeout(400)
-                    if not page.evaluate("() => Object.values(window.__cr3d.debugBoxes()).some((g) => g.paste)"):
-                        problems.append(f"{slug}: paste toggled on but no paste geometry")
+                    # paste is on by default (fresh browser profile)
+                    shown = "() => { let n = 0; window.__cr3d.viewer.content.traverse((o) => { if (o.userData.group === 'paste' && o.visible) n++; }); return n; }"
+                    if not page.is_checked("#g3-paste") or not page.evaluate(shown):
+                        problems.append(f"{slug}: paste not shown by default")
                     shot(f"{slug}--3d-paste")
                     page.uncheck("#g3-paste")
+                    page.wait_for_timeout(300)
+                    if page.evaluate(shown):
+                        problems.append(f"{slug}: paste still shown after turning it off")
+                    shot(f"{slug}--3d-no-paste")
+                    page.check("#g3-paste")
                 if page.locator("#g3-fill").count():
                     barrels = "() => { let n = 0; window.__cr3d.viewer.content.traverse((o) => { if (o.userData.group === 'barrels') n++; }); return n; }"
                     before = page.evaluate(barrels)

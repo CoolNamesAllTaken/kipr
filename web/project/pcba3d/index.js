@@ -126,7 +126,7 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   }, label));
   const sourceSeg = h('div', { class: 'kp3d-seg kp3d-board-source', role: 'group', 'aria-label': 'Board source', hidden: true }, sourceButtons);
   // Fab board options: paste solids, and plated holes up to a drill size filled and capped (VIPPO).
-  let pasteOn = options.paste ?? readPref('paste') === '1';
+  let pasteOn = options.paste ?? readPref('paste') !== '0';   // on unless turned off
   let fillUpTo = options.fillUpTo !== undefined ? mm(options.fillUpTo) : mm(readPref('fill'));
   const pasteButton = h('button', {
     type: 'button', class: 'kp3d-iconbtn', 'data-toggle': 'paste', 'aria-pressed': String(pasteOn), 'aria-label': 'Solder paste',

@@ -46924,7 +46924,7 @@ ${content}
       this.sides = { base: null, head: null };
       this.statusOf = /* @__PURE__ */ new Map();
       this.mode = "side";
-      this.show = { components: true, board: true, silk: true, markers: true, paste: false };
+      this.show = { components: true, board: true, silk: true, markers: true, paste: true };
       this.emphasis = null;
       this.explode = 0;
       this.selected = null;
@@ -47489,7 +47489,7 @@ ${content}
       onclick: () => setBoardSource(src)
     }, label));
     const sourceSeg = h("div", { class: "kp3d-seg kp3d-board-source", role: "group", "aria-label": "Board source", hidden: true }, sourceButtons);
-    let pasteOn = options.paste ?? readPref("paste") === "1";
+    let pasteOn = options.paste ?? readPref("paste") !== "0";
     let fillUpTo = options.fillUpTo !== void 0 ? mm(options.fillUpTo) : mm(readPref("fill"));
     const pasteButton = h("button", {
       type: "button",

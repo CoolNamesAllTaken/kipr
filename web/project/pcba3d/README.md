@@ -85,7 +85,7 @@ failure, which is reported in the status line.
 - **Outline changes**: when the base outline differs from the head's, it is drawn as a red edge
   on both faces in the overlaid modes. The copper diff also shows the outline's removed and
   added strokes.
-- **Solder paste** (toolbar icon, off by default): each face's paste Gerber is rasterised in the
+- **Solder paste** (toolbar icon, on by default): each face's paste Gerber is rasterised in the
   face frame, traced back to outlines and extruded 0.12 mm (boarddd `buildPaste`). Built on first use.
 - **Filled and capped holes** (toolbar select: off or a drill size, counts in the tooltips): every
   plated round hole up to that drill, vias and pad holes alike, is left out of the solid and of the

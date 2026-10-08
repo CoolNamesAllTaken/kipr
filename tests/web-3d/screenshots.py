@@ -40,7 +40,8 @@ CASES = {
     "copper-diff": {"mode": "overlay", "view": "Top", "toggle": ["components", "markers"]},
     "glb-board": {"mode": "side", "toggle_board": "glb"},
     # fab board options (boards from gerbers only; skipped on the mocks)
-    "paste": {"mode": "side", "view": "Iso", "paste": "1", "fill": "0", "fab": "needed",
+    # paste: no paste= in the URL and a fresh browser profile, so this is the default (on)
+    "paste": {"mode": "side", "view": "Iso", "fill": "0", "fab": "needed",
               "check": "Object.values(kipr3d.view.gerber.sides).every((s) => s.paste && s.paste.group.visible)"},
     "filled": {"mode": "side", "view": "Top", "paste": "0", "fill": "0.6", "fab": "needed",
                "check": "kipr3d.view.gerber.fillUpTo === 0.6 && Object.values(kipr3d.view.gerber.sides).every((s) => s.fab.holes.some((h) => h.filled) && !s.paste)"},

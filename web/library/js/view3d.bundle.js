@@ -33412,7 +33412,7 @@ void main() {
   var GROUPS = [
     { name: "board", label: "Board" },
     { name: "pads", label: "Pads" },
-    { name: "paste", label: "Paste", defaultOff: true },
+    { name: "paste", label: "Paste" },
     { name: "silk", label: "Silk" },
     { name: "fab", label: "Fab/Courtyard", defaultOff: true },
     { name: "model", label: "3D model" }

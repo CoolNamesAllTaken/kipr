@@ -187,7 +187,7 @@ export function createPanel3D(item, container) {
       await v.load({ head, base });
       if (destroyed) return;
       stage.querySelector('.loading')?.remove();
-      if (!groupPref.has('paste') && readPref('paste') === '1') groupPref.set('paste', true);
+      if (!groupPref.has('paste') && readPref('paste') !== null) groupPref.set('paste', readPref('paste') === '1');
       for (const [g, on] of groupPref) v.setGroupVisible(g, on);
       renderGroups();
       setMode(mode);
