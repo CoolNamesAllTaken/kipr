@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter, defaultdict
 
 from . import classify, geom
@@ -56,27 +57,60 @@ def lib_name(lib_id: str) -> tuple[str, str]:
 
 
 def match(base_items, head_items, keys):
-    """Pair items across revisions by successive key functions. Returns (pairs, only_base, only_head)."""
+    """Pair items across revisions by successive key functions. Returns (pairs, only_base, only_head).
+    Several items with one key (the copies of a part in a panel) pair up nearest first."""
     rb, rh = list(base_items), list(head_items)
     pairs = []
     for key in keys:
-        idx = defaultdict(list)
+        ib, ih = defaultdict(list), defaultdict(list)
         for h in rh:
             k = key(h)
             if k:
-                idx[k].append(h)
-        left = []
+                ih[k].append(h)
         for b in rb:
             k = key(b)
-            cands = idx.get(k) if k else None
-            if cands:
-                h = cands.pop(0)
-                pairs.append((b, h))
-            else:
-                left.append(b)
-        used = {id(h) for _, h in pairs}
-        rb, rh = left, [h for h in rh if id(h) not in used]
+            if k and k in ih:
+                ib[k].append(b)
+        for k, bs in ib.items():
+            pairs.extend(_pair_nearest(bs, ih[k]))
+        used = {id(x) for p in pairs for x in p}
+        rb, rh = [b for b in rb if id(b) not in used], [h for h in rh if id(h) not in used]
     return pairs, rb, rh
+
+
+def _pair_nearest(bs, hs):
+    if len(bs) == 1 and len(hs) == 1 or not hasattr(bs[0], "x"):
+        return list(zip(bs, hs))
+    dist = sorted((math.hypot(b.x - h.x, b.y - h.y), i, j) for i, b in enumerate(bs) for j, h in enumerate(hs))
+    out, ub, uh = [], set(), set()
+    for _d, i, j in dist:
+        if i not in ub and j not in uh:
+            ub.add(i)
+            uh.add(j)
+            out.append((bs[i], hs[j]))
+    return out
+
+
+COPY_NET = re.compile(r"^Board_(\d+)-")  # KiKit's default net renaming, "Board_{n}-{orig}"
+
+
+def copy_labels(board: Board) -> dict[int, str]:
+    """{id(footprint): "R7·2"} for footprints whose reference repeats on the board (the copies of a
+    board in a panel): the copy number from KiKit's `Board_<n>-` net prefix of its pads, else its
+    rank among the copies (top to bottom, left to right)."""
+    by_ref = defaultdict(list)
+    for f in board.footprints:
+        if f.ref and not f.ref.startswith(("REF", "#")):
+            by_ref[f.ref].append(f)
+    out = {}
+    for ref, fs in by_ref.items():
+        if len(fs) < 2:
+            continue
+        rank = {id(f): i for i, f in enumerate(sorted(fs, key=lambda f: (round(f.y, 1), round(f.x, 1))))}
+        for f in fs:
+            ns = Counter(m.group(1) for n in (f.pad_nets or {}).values() if n for m in [COPY_NET.match(n)] if m)
+            out[id(f)] = f"{ref}·{ns.most_common(1)[0][0] if ns else rank[id(f)]}"
+    return out
 
 
 def copper_span(layers: list[str], copper: list[str]) -> list[str]:
@@ -167,17 +201,19 @@ def diff_footprints(base: Board, head: Board):
     pairs, removed, added = match(base.footprints, head.footprints, [
         lambda f: f.uuid, lambda f: f.ref if f.ref and not f.ref.startswith(("REF", "#")) else None,
         lambda f: (f.lib_id, f.x, f.y)])
+    labels = {**copy_labels(base), **copy_labels(head)}  # keys are object ids: no clashes
+    name = lambda f: labels.get(id(f), f.ref)  # noqa: E731
     changes, components = [], []
     for f in removed:
-        changes.append(_change("footprint", "removed", sorted(f.layers), f.box, layer=cu(f), ref=f.ref,
+        changes.append(_change("footprint", "removed", sorted(f.layers), f.box, layer=cu(f), ref=name(f),
                                detail=f"{f.lib_id} {f.value}", holes=sorted(f.holes) or None,
                                base_bbox_mm=geom.to_xywh(f.box)))
-        components.append(component("removed", f, None, []))
+        components.append(component("removed", f, None, [], name(f)))
     for f in added:
-        changes.append(_change("footprint", "added", sorted(f.layers), f.box, layer=cu(f), ref=f.ref,
+        changes.append(_change("footprint", "added", sorted(f.layers), f.box, layer=cu(f), ref=name(f),
                                detail=f"{f.lib_id} {f.value}", holes=sorted(f.holes) or None,
                                head_bbox_mm=geom.to_xywh(f.box)))
-        components.append(component("added", None, f, []))
+        components.append(component("added", None, f, [], name(f)))
     for b, h in pairs:
         whats, details = fp_whats(b, h)
         comp_what = [w for w in ("position", "rotation", "footprint", "value", "model", "side", "dnp", "pads",
@@ -185,7 +221,7 @@ def diff_footprints(base: Board, head: Board):
                      if {"position": "moved", "rotation": "rotated", "side": "flipped"}.get(w, w) in whats]
         minor = classify.is_minor(whats)
         if not whats:
-            components.append(component("unchanged", b, h, []))
+            components.append(component("unchanged", b, h, [], name(h)))
             continue
         geo = any(w in FP_GEOMETRIC for w in whats)
         layers = sorted(b.layers | h.layers) if geo else []
@@ -193,7 +229,7 @@ def diff_footprints(base: Board, head: Board):
             layers = sorted(ly for ly in (b.layers | h.layers) if ly.endswith(("Fab", "SilkS")))
         holes = sorted(b.holes | h.holes) if geo and (b.holes or h.holes) else None
         changes.append(_change("footprint", whats[0], layers, geom.union(b.box, h.box), layer=cu(h),
-                               ref=h.ref or b.ref,
+                               ref=name(h) if h.ref else name(b),
                                whats=whats, detail="; ".join(details), holes=holes, minor=minor or None,
                                base_bbox_mm=geom.to_xywh(b.box), head_bbox_mm=geom.to_xywh(h.box)))
         # a different part (value, footprint, part number, pads, ...) is the bigger news than where
@@ -207,7 +243,7 @@ def diff_footprints(base: Board, head: Board):
             st = "rotated"
         else:
             st = "changed"  # minor only (marked below)
-        c = component(st, b, h, comp_what or whats)
+        c = component(st, b, h, comp_what or whats, name(h) if h.ref else name(b))
         if minor:
             c["minor"] = True
         components.append(c)
@@ -241,8 +277,12 @@ def fp_side(f: Footprint | None):
             "bbox_mm": geom.to_xywh(f.box), "uuid": f.uuid}
 
 
-def component(status, b: Footprint | None, h: Footprint | None, what):
-    return {"ref": (h or b).ref, "status": status, "base": fp_side(b), "head": fp_side(h), "what": list(what)}
+def component(status, b: Footprint | None, h: Footprint | None, what, ref: str | None = None):
+    """`ref`: a copy label ("R7·2", see copy_labels); the footprint's own reference is then `designator`."""
+    c = {"ref": ref or (h or b).ref, "status": status, "base": fp_side(b), "head": fp_side(h), "what": list(what)}
+    if c["ref"] != (h or b).ref:
+        c["designator"] = (h or b).ref
+    return c
 
 
 def _counter_diff(base_items, head_items):
@@ -404,7 +444,7 @@ def significance(c: dict) -> tuple[int, str | None]:
         if whats <= PROPERTY_WHATS | MINOR_WHATS:
             return 8, "properties"
         return 4, None  # graphics, 3D model
-    if kind in ("board", "outline"):
+    if kind in ("board", "outline", "fiducial", "tooling", "mousebites"):  # the last three: panels
         return 1, None
     if kind == "zone":
         return 5 if whats == {"fill"} else 3, None
@@ -420,6 +460,11 @@ def diff_boards(base: Board, head: Board):
     reference or net. Collapsible buckets carry a `group`."""
     fp_changes, components = diff_footprints(base, head)
     changes = fp_changes + diff_items(base, head) + diff_zones(base, head) + diff_setup(base, head)
+    return sort_changes(changes), components
+
+
+def sort_changes(changes: list[dict]) -> list[dict]:
+    """Order changes by significance (see `diff_boards`) and set their `group`."""
     for c in changes:
         rank, group = significance(c)
         if group:
@@ -428,7 +473,7 @@ def diff_boards(base: Board, head: Board):
     changes.sort(key=lambda c: (c["_rank"], c["kind"], natural_key(c.get("ref") or c.get("net") or ""), c.get("layer") or ""))
     for c in changes:
         del c["_rank"]
-    return changes, components
+    return changes
 
 
 def touched_layers(changes) -> set[str]:

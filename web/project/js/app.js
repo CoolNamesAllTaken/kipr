@@ -1,6 +1,6 @@
 // kipr project review viewer: app shell. Loads project-review.json (docs/CONTRACT-project.md) from the
 // same directory; project list -> per-project tabs, deep-linkable through the URL hash (route.js).
-import { el, clear, append, fetchJson, commitUrl, blobUrl, shortSha, badge, arr, obj, SLUG_RE } from './util.js';
+import { el, svgEl, clear, append, fetchJson, commitUrl, blobUrl, shortSha, badge, arr, obj, SLUG_RE } from './util.js';
 import { parseHash, formatHash, TABS } from './route.js';
 import { initTheme, toggleTheme, themeButton } from './theme.js';
 import { createSchematicView } from './schematic.js';
@@ -90,7 +90,7 @@ function renderSidebar() {
 
 function matches(p, q) {
   if (!q) return true;
-  const hay = `${p.name} ${p.slug} ${p.path} ${p.status}`.toLowerCase();
+  const hay = `${p.name} ${p.slug} ${p.path} ${p.status} ${p.kind || ''}`.toLowerCase();
   return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
 }
 
@@ -111,9 +111,51 @@ export function summaryChips(summary) {
     ['ERC', n(obj(s.erc)?.new), 'new ERC violations'],
     ['DRC', n(obj(s.drc)?.new), 'new DRC violations'],
     ['grid', n(obj(s.grid)?.count), 'schematic items off the connection grid (warnings)'],
+    ['panel', panelCount(s.panel), panelText(s.panel)],
     ['Z', n(obj(s.impedance)?.violations), `of ${n(obj(s.impedance)?.rows)} controlled-impedance class × layer out of tolerance (${obj(s.impedance)?.solver === 'field' ? 'field solver' : 'closed-form estimate'}${n(obj(s.impedance)?.new_violations) ? `, ${n(obj(s.impedance)?.new_violations)} new` : ''})`],
   ];
   return chips.filter(([, v]) => v > 0);
+}
+
+const PANEL_WORDS = { fiducial: ['fiducial', 'fiducials'], tooling: ['tooling hole', 'tooling holes'], mousebites: ['mousebite group', 'mousebite groups'], tabs: ['tab/cut change', 'tab/cut changes'], frame: ['frame change', 'frame changes'] };
+
+function panelCount(ps) {
+  return Object.values(obj(ps) || {}).reduce((a, v) => a + (typeof v === 'number' && Number.isFinite(v) ? v : 0), 0);
+}
+
+/** "changed: 2 fiducials, 1 mousebite group" (summary.panel). */
+function panelText(ps) {
+  const parts = Object.entries(obj(ps) || {}).filter(([k, v]) => PANEL_WORDS[k] && typeof v === 'number' && v > 0)
+    .map(([k, v]) => `${v} ${PANEL_WORDS[k][v === 1 ? 0 : 1]}`);
+  return `panel changes: ${parts.join(', ')}`;
+}
+
+/** Small icon for a project that is a panel (2×2 boards) or a board without a schematic, else null. */
+export function kindIcon(p) {
+  const kind = obj(p)?.kind;
+  if (kind !== 'panel' && kind !== 'board') return null;
+  const shapes = kind === 'panel'
+    ? [svgEl('rect', { x: 1, y: 1, width: 14, height: 14, rx: 1.5 }), ...[[3, 3], [9, 3], [3, 9], [9, 9]].map(([x, y]) => svgEl('rect', { x, y, width: 4, height: 4, rx: 0.5 }))]
+    : [svgEl('rect', { x: 1, y: 3, width: 14, height: 10, rx: 1.5 }), svgEl('circle', { cx: 4, cy: 6, r: 1 })];
+  return el('span', { class: `kind-icon kind-${kind}`, title: kindTitle(p), role: 'img', 'aria-label': kind },
+    svgEl('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' }, shapes));
+}
+
+/** Tooltip of the kind icon: "Panel: 4 × pic_programmer · KiKit markers, repeated references". */
+export function kindTitle(p) {
+  if (p.kind === 'board') return 'Board without a schematic';
+  const pn = obj(p.panel) || {};
+  const src = arr(pn.sources).filter(obj).map((s) => `${s.copies || '?'} × ${String(s.path || '').split('/').pop().replace(/\.kicad_pcb$/, '')}`);
+  const why = { kikit: 'KiKit markers', copies: 'repeated references', name: '"panel" in its name' };
+  const sig = arr(pn.signals).map((s) => why[s]).filter(Boolean);
+  return ['Panel', src.length ? `: ${src.join(', ')}` : pn.copies ? `: ${pn.copies} copies` : '', sig.length ? ` · ${sig.join(', ')}` : ''].join('');
+}
+
+/** Panels and lone boards have no schematic: no Schematic, BOM or Netlist tab. */
+export function tabsOf(p) {
+  const noSch = p?.kind === 'panel' || p?.kind === 'board';
+  return TABS.filter(([t]) => !noSch || !['schematic', 'bom', 'netlist'].includes(t))
+    .map(([t, label]) => [t, noSch && t === 'checks' ? 'DRC' : label]);
 }
 
 function chipEls(summary) {
@@ -130,7 +172,7 @@ function renderList() {
     ul.append(el('li', {}, el('a', {
       href: tabHash(p.slug, state.route.tab), class: `item-link${active ? ' active' : ''}`, 'aria-current': active ? 'page' : null,
     },
-    el('span', { class: 'item-name', title: String(p.path || p.name || p.slug) }, String(p.name || p.slug)),
+    el('span', { class: 'item-name', title: String(p.path || p.name || p.slug) }, kindIcon(p), String(p.name || p.slug)),
     el('span', { class: 'item-meta' }, badge('status', p.status), chipEls(p.summary)))));
   }
   list.append(ul);
@@ -169,7 +211,7 @@ function defaultTab(p) {
 function route() {
   const r = parseHash(location.hash);
   const p = r.slug ? state.projects.find((x) => x.slug === r.slug) : null;
-  if (p && !r.tab) r.tab = defaultTab(p);
+  if (p && (!r.tab || !tabsOf(p).some(([t]) => t === r.tab))) r.tab = defaultTab(p);
   // The item (layer, sheet) is not part of the key: back / forward or a link to another layer or sheet of
   // the view on show goes to its onParams(params, item), which keeps the compare mode, zoom etc.
   const key = p ? `${p.slug}|${r.tab}` : null;
@@ -215,7 +257,7 @@ function renderOverview(unknownSlug) {
     const c = obj(s.components) || {};
     const errs = arr(p.errors).length;
     return el('tr', {},
-      el('td', {}, el('a', { href: formatHash({ slug: p.slug }) }, String(p.name || p.slug)), el('div', { class: 'small muted path' }, String(p.path || ''))),
+      el('td', {}, kindIcon(p), el('a', { href: formatHash({ slug: p.slug }) }, String(p.name || p.slug)), el('div', { class: 'small muted path' }, String(p.path || ''))),
       el('td', {}, badge('status', p.status)),
       [s.sheets_changed, s.layers_changed, c.added, c.removed, c.moved, c.changed, s.nets_changed, obj(s.erc)?.new, obj(s.drc)?.new, obj(s.grid)?.count].map((v) => el('td', { class: 'num' }, n(v))),
       el('td', { class: 'num', title: `controlled-impedance class × layer out of tolerance / checked (${obj(s.impedance)?.solver === 'field' ? 'field solver' : 'closed-form estimate'})` }, obj(s.impedance) ? `${n(s.impedance.violations)} / ${n(s.impedance.rows)}` : ''),
@@ -242,15 +284,18 @@ export function fontWarning(holder) {
 function renderProject(p, r) {
   const main = clear($('#main'));
   main.scrollTop = 0;
-  const tabLabel = TABS.find(([t]) => t === r.tab)?.[1] || '';
+  const tabs = tabsOf(p);
+  const tabLabel = tabs.find(([t]) => t === r.tab)?.[1] || '';
   document.title = `${p.name || p.slug} · ${tabLabel} · Project review`;
   const r0 = obj(state.review) || {};
   const src = blobUrl(r0.repo, obj(p.status === 'removed' ? r0.base : r0.head)?.sha, typeof p.path === 'string' ? p.path : '');
   main.append(el('div', { class: 'item-title' },
-    el('h1', {}, String(p.name || p.slug)), badge('status', p.status),
+    el('h1', {}, kindIcon(p), String(p.name || p.slug)), badge('status', p.status),
     el('span', { class: 'muted path' }, src ? el('a', { href: src }, String(p.path)) : String(p.path || '')),
     el('span', { class: 'chips' }, chipEls(p.summary)),
     el('button', { class: 'btn small', title: 'Copy a link to this view', onclick: (e) => copyLink(e.currentTarget) }, 'Copy link')));
+  const pl = panelLine(p, r0);
+  if (pl) main.append(pl);
   const errors = arr(p.errors).filter((x) => typeof x === 'string');
   if (errors.length) {
     main.append(el('details', { class: 'notice' }, el('summary', {}, `${errors.length} export problem${errors.length > 1 ? 's' : ''}`), el('ul', {}, errors.map((e) => el('li', {}, e)))));
@@ -258,16 +303,39 @@ function renderProject(p, r) {
   const fontNote = fontWarning(p);
   if (fontNote) main.append(fontNote);
   const tabBar = el('div', { class: 'tabs', role: 'tablist' });
-  TABS.forEach(([t, label], i) => {
+  tabs.forEach(([t, label]) => {
     const count = tabCount(p, t);
     tabBar.append(el('a', {
-      class: 'tab', role: 'tab', href: t === r.tab ? formatHash(r) : tabHash(p.slug, t), 'aria-selected': String(t === r.tab), title: `${label} (${i + 1})`,
+      class: 'tab', role: 'tab', href: t === r.tab ? formatHash(r) : tabHash(p.slug, t), 'aria-selected': String(t === r.tab), title: `${label} (${TABS.findIndex(([x]) => x === t) + 1})`,
     }, label, count ? el('span', { class: 'tab-count' }, String(count)) : null));
   });
   const box = el('div', { class: `view-box tab-${r.tab}` });
   main.append(tabBar, box);
   const make = VIEWS[r.tab];
   state.view = make(p, box, { route: r, setRoute });
+}
+
+/** "▦ 4 × pic_programmer · kikit.json · 8 fiducials, 4 tooling holes, 112 mousebites": what a panel holds. */
+function panelLine(p, review) {
+  if (p.kind !== 'panel') return null;
+  const pn = obj(p.panel) || {};
+  const sha = obj(p.status === 'removed' ? review.base : review.head)?.sha;
+  const fileLink = (path, text) => {
+    const u = blobUrl(review.repo, sha, path);
+    return u ? el('a', { href: u, title: path }, text) : el('span', { title: path }, text);
+  };
+  const srcs = arr(pn.sources).filter((s) => obj(s) && typeof s.path === 'string').map((s) => {
+    const dir = s.path.includes('/') ? s.path.slice(0, s.path.lastIndexOf('/')) : '';
+    const stem = s.path.split('/').pop().replace(/\.kicad_pcb$/, '');
+    const other = state.projects.find((x) => x.path === dir && x.name === stem);
+    return el('span', {}, `${s.copies || '?'} × `, other ? el('a', { href: formatHash({ slug: other.slug }), title: `${s.path} (also in this review)` }, stem) : fileLink(s.path, stem));
+  });
+  const n = (v) => (typeof v === 'number' && v > 0 ? v : 0);
+  const feats = [['fiducials', 'fiducial'], ['tooling', 'tooling hole'], ['mousebites', 'mousebite']]
+    .filter(([k]) => n(pn[k])).map(([k, w]) => `${pn[k]} ${w}${pn[k] === 1 ? '' : 's'}`).join(', ');
+  const parts = [srcs.length ? srcs : pn.copies ? `${pn.copies} copies` : 'panel',
+    typeof pn.config === 'string' ? fileLink(pn.config, pn.config.split('/').pop()) : null, feats || null].filter(Boolean);
+  return el('p', { class: 'panel-line muted', title: kindTitle(p) }, kindIcon(p), parts.flatMap((x, i) => (i ? [' · ', x] : [x])));
 }
 
 /** Badge number on a tab: changed sheets / layers / BOM rows / nets / new violations. */
@@ -332,7 +400,8 @@ function onKey(e) {
   if (state.view?.onKey?.(e)) { e.preventDefault(); return; }
   if (e.key === 't') { toggleTheme(); return; }
   if (/^[1-6]$/.test(e.key) && state.project) {
-    location.hash = tabHash(state.project.slug, TABS[+e.key - 1][0]);
+    const t = TABS[+e.key - 1][0];
+    if (tabsOf(state.project).some(([x]) => x === t)) location.hash = tabHash(state.project.slug, t);
     return;
   }
   if (e.key === 'j' || e.key === 'k') {

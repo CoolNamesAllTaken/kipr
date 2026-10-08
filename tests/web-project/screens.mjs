@@ -41,6 +41,9 @@ const MOCK_VIEWS = [
   ['pcba3d', `${P}/pcba3d`],
   ['added-layout', '#/p/sensor_breakout/layout?view=top&mode=single'],
   ['removed-sch', '#/p/old_adapter/schematic'],
+  ['panel-layout', '#/p/demo_panel/layout?view=top&mode=side'],
+  ['panel-change', '#/p/demo_panel/layout?view=top&mode=side&c=1'],
+  ['panel-checks', '#/p/demo_panel/checks'],
   ['unknown', '#/p/nope'],
 ];
 
@@ -62,7 +65,8 @@ function autoViews(review) {
       if ((p.pcb.changes || []).length) v.push([`${p.slug}-pcb-change`, `${h}/layout?view=top&mode=side&c=0`]);
     }
     if (hasPcba3d && (p.pcba3d?.base?.glb || p.pcba3d?.head?.glb)) v.push([`${p.slug}-pcba3d`, `${h}/pcba3d`]);
-    v.push([`${p.slug}-bom`, `${h}/bom`], [`${p.slug}-netlist`, `${h}/netlist`], [`${p.slug}-checks`, `${h}/checks`]);
+    if (p.schematic) v.push([`${p.slug}-bom`, `${h}/bom`], [`${p.slug}-netlist`, `${h}/netlist`]);
+    v.push([`${p.slug}-checks`, `${h}/checks`]);
   }
   return v;
 }
@@ -112,7 +116,7 @@ for (const theme of THEMES) {
         await page.waitForTimeout(500);
       }
       const file = path.join(a.shots, `${name}.${theme}.${sizeName}.png`);
-      await page.screenshot({ path: file, fullPage: sizeName === 'narrow' });
+      await page.screenshot({ path: file, fullPage: sizeName === 'narrow', timeout: 180000 }); // a panel's 3D scene renders slowly in SwiftShader
       shots.push(file);
     }
     if (!isMock) { await ctx.close(); continue; }
@@ -124,6 +128,17 @@ for (const theme of THEMES) {
       if (n !== 1) problems.push(`${tag} ${hash}: ${n} font warnings, expected 1`);
     }
     if (await page.locator('.badge.sev-font-dependent').count() !== 1) problems.push(`${tag}: no font-dependent badge on the DRC row`);
+    // a panel: icon in the list and overview, no schematic tabs (a schematic link lands on the layout), source link
+    await page.goto(base + '#/');
+    await settle(page);
+    if (await page.locator('#project-list .kind-panel').count() !== 1 || await page.locator('table.overview .kind-panel').count() !== 1) problems.push(`${tag}: no panel icon in the list / overview`);
+    await page.goto(base + '#/p/demo_panel/schematic');
+    await settle(page);
+    const tabs = await page.locator('.tabs .tab').allTextContents();
+    if (tabs.some((x) => /Schematic|BOM|Netlist/.test(x)) || !page.url().includes('/layout')) problems.push(`${tag}: panel tabs ${tabs.join(',')} at ${page.url()}`);
+    if (await page.locator('.panel-line a[href="#/p/demo_board"]').count() !== 1) problems.push(`${tag}: panel line has no link to its source board`);
+    const notices = page.locator('.notice:visible');
+    if (await notices.count()) problems.push(`${tag}: panel shows a notice (${await notices.first().textContent()})`);
     // interactions: next change, help overlay, measure tool
     await page.goto(base + `${P}/schematic/root?mode=side`);
     await settle(page);

@@ -18,7 +18,7 @@ import { matchesQuery, statusCounts, sheetSpotHash, gridGroups, impedanceSideTit
 import { faceOf, pickDiffLayer, parseAt } from '../../web/project/js/layout.js';
 import { pickSheet } from '../../web/project/js/schematic.js';
 import { describeChange } from '../../web/project/js/changes.js';
-import { summaryChips, tabCount, projectsOf } from '../../web/project/js/app.js';
+import { summaryChips, tabCount, projectsOf, tabsOf, kindTitle } from '../../web/project/js/app.js';
 
 // --- route ---------------------------------------------------------------------------------------
 
@@ -224,6 +224,22 @@ test('app: summary chips, tab counts, project list hygiene', () => {
   const list = projectsOf({ projects: [{ slug: 'b', status: 'added' }, { slug: 'a', status: 'modified' }, { slug: 'a' }, { slug: '../x' }, { slug: '<img>' }, null, 'x'] });
   assert.deepEqual(list.map((x) => x.slug), ['a', 'b']);
   assert.deepEqual(projectsOf(null), []);
+});
+
+test('app: panels and boards without a schematic', () => {
+  const panel = { kind: 'panel', panel: { signals: ['kikit', 'copies'], copies: 4, sources: [{ path: 'boards/a/a.kicad_pcb', copies: 4 }] },
+    summary: { layers_changed: 3, panel: { fiducial: 2, mousebites: 1, bogus: 'x' } } };
+  assert.deepEqual(tabsOf(panel).map(([t]) => t), ['layout', 'pcba3d', 'checks']);
+  assert.equal(tabsOf(panel).at(-1)[1], 'DRC');
+  assert.deepEqual(tabsOf({ kind: 'board' }).map(([t]) => t), ['layout', 'pcba3d', 'checks']);
+  assert.equal(tabsOf({ kind: 'project' }).length, TABS.length);
+  assert.equal(tabsOf({}).length, TABS.length); // older reviews: no kind
+  assert.equal(kindTitle(panel), 'Panel: 4 × a · KiKit markers, repeated references');
+  assert.equal(kindTitle({ kind: 'panel', panel: null }), 'Panel');
+  assert.equal(kindTitle({ kind: 'board' }), 'Board without a schematic');
+  const chips = summaryChips(panel.summary);
+  assert.deepEqual(chips.map(([k, v]) => `${k}${v}`), ['pcb3', 'panel3']);
+  assert.equal(chips[1][2], 'panel changes: 2 fiducials, 1 mousebite group');
 });
 
 test('grid findings: per-sheet groups and links to the spot on the sheet', () => {

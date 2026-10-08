@@ -199,9 +199,12 @@ function boardBox(box, offset, flip = true) {
  * Map candidate nodes to components.
  *
  * nodes:      [{name, x, y, cx, cy}] board frame (mm, y up): origin and box middle.
- * components: [{ref, x, y, assembly?, box?}] KiCad mm (y down). An `assembly` (a module that
+ * components: [{ref, name?, x, y, assembly?, box?}] KiCad mm (y down). An `assembly` (a module that
  *             arrives as many anonymous solids) with a `box` [x0, y0, x1, y1] claims every
  *             unclaimed node whose middle is inside it, after everything else (gentoo claimModule).
+ *             `name`: the designator the model's node names carry when it isn't `ref`, e.g. the copies
+ *             of a board in a panel ("R7·0", "R7·1": all exported as "R7"); a node with a name several
+ *             components share goes to the nearest of them once the offset is known.
  * opts:       tol; fallbackOffset (used when nothing fits one);
  *             frame 'kicad' (default) or 'board': components (and module boxes) already in the nodes'
  *               frame, no y flip -- e.g. placements measured in the model's own coordinates;
@@ -218,6 +221,14 @@ export function mapNodesToRefs(nodes, components, {
   const flip = frame !== 'board';
   const toFrame = (c) => (flip ? toBoardFrame(c) : { x: Number(c.x) || 0, y: Number(c.y) || 0 });
   const refs = new Set(components.map((c) => c.ref));
+  const named = new Map(); // name -> components that export under it (other than their ref)
+  for (const c of components) {
+    if (c.name && c.name !== c.ref && !refs.has(c.name)) {
+      if (!named.has(c.name)) named.set(c.name, []);
+      named.get(c.name).push(c);
+    }
+  }
+  const names = new Set(named.keys());
   const byRef = new Map();
   const claimed = new Set();
   const claim = (ref, i) => {
@@ -226,14 +237,19 @@ export function mapNodesToRefs(nodes, components, {
     claimed.add(i);
   };
 
-  // 1. Names.
+  // 1. Names. A shared name waits for the offset (step 2b).
+  const shared = [];
   if (useNames) {
     nodes.forEach((n, i) => {
       const ref = refFromName(n.name, refs);
       if (ref) claim(ref, i);
+      else if (names.size) {
+        const nm = refFromName(n.name, names);
+        if (nm) shared.push({ i, nm });
+      }
     });
   }
-  const byName = byRef.size;
+  let byName = byRef.size;
 
   // 2. The translation between the frames: from the named nodes, else a Hough vote.
   let offset = given ? { x: given.x, y: given.y } : null;
@@ -248,7 +264,7 @@ export function mapNodesToRefs(nodes, components, {
     }
     offset = { x: median(dx), y: median(dy) };
   }
-  const loose = components.filter((c) => !byRef.has(c.ref) && !(c.assembly && c.box));
+  let loose = components.filter((c) => !byRef.has(c.ref) && !(c.assembly && c.box));
   const modules = components.filter((c) => !byRef.has(c.ref) && c.assembly && c.box);
   const restNodes = () => nodes.map((n, i) => ({ n, i })).filter(({ i }) => !claimed.has(i));
   if (!offset && loose.length) {
@@ -260,6 +276,20 @@ export function mapNodesToRefs(nodes, components, {
     }
   }
   if (!offset) offset = fallbackOffset || { x: 0, y: 0 };
+
+  // 2b. Shared names: each node to the nearest component of its name, if clearly nearest.
+  if (shared.length) {
+    const before = byRef.size;
+    for (const { i, nm } of shared) {
+      const ds = named.get(nm).map((c) => {
+        const a = toFrame(c);
+        return { ref: c.ref, d: distanceTo(nodes[i], { x: a.x + offset.x, y: a.y + offset.y }) };
+      }).sort((p, q) => p.d - q.d);
+      if (ds.length === 1 || ds[0].d < ds[1].d / 2) claim(ds[0].ref, i);
+    }
+    byName += byRef.size - before;
+    loose = loose.filter((c) => !byRef.has(c.ref));
+  }
 
   // 3. Positions, for what the names did not find.
   let byPosition = 0, ambiguous = [], unmatched = [];

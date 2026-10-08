@@ -35682,6 +35682,14 @@ void main() {
     const flip = frame !== "board";
     const toFrame = (c) => flip ? toBoardFrame(c) : { x: Number(c.x) || 0, y: Number(c.y) || 0 };
     const refs = new Set(components.map((c) => c.ref));
+    const named = /* @__PURE__ */ new Map();
+    for (const c of components) {
+      if (c.name && c.name !== c.ref && !refs.has(c.name)) {
+        if (!named.has(c.name)) named.set(c.name, []);
+        named.get(c.name).push(c);
+      }
+    }
+    const names = new Set(named.keys());
     const byRef = /* @__PURE__ */ new Map();
     const claimed = /* @__PURE__ */ new Set();
     const claim = (ref, i) => {
@@ -35689,13 +35697,18 @@ void main() {
       byRef.get(ref).push(i);
       claimed.add(i);
     };
+    const shared2 = [];
     if (useNames) {
       nodes.forEach((n, i) => {
         const ref = refFromName(n.name, refs);
         if (ref) claim(ref, i);
+        else if (names.size) {
+          const nm = refFromName(n.name, names);
+          if (nm) shared2.push({ i, nm });
+        }
       });
     }
-    const byName = byRef.size;
+    let byName = byRef.size;
     let offset = given ? { x: given.x, y: given.y } : null;
     if (!offset && byName) {
       const dx = [], dy = [];
@@ -35709,7 +35722,7 @@ void main() {
       }
       offset = { x: median(dx), y: median(dy) };
     }
-    const loose = components.filter((c) => !byRef.has(c.ref) && !(c.assembly && c.box));
+    let loose = components.filter((c) => !byRef.has(c.ref) && !(c.assembly && c.box));
     const modules = components.filter((c) => !byRef.has(c.ref) && c.assembly && c.box);
     const restNodes = () => nodes.map((n, i) => ({ n, i })).filter(({ i }) => !claimed.has(i));
     if (!offset && loose.length) {
@@ -35720,6 +35733,18 @@ void main() {
       }
     }
     if (!offset) offset = fallbackOffset || { x: 0, y: 0 };
+    if (shared2.length) {
+      const before = byRef.size;
+      for (const { i, nm } of shared2) {
+        const ds = named.get(nm).map((c) => {
+          const a = toFrame(c);
+          return { ref: c.ref, d: distanceTo(nodes[i], { x: a.x + offset.x, y: a.y + offset.y }) };
+        }).sort((p, q) => p.d - q.d);
+        if (ds.length === 1 || ds[0].d < ds[1].d / 2) claim(ds[0].ref, i);
+      }
+      byName += byRef.size - before;
+      loose = loose.filter((c) => !byRef.has(c.ref));
+    }
     let byPosition = 0, ambiguous = [], unmatched = [];
     if (loose.length) {
       const rest = restNodes();
@@ -35911,7 +35936,7 @@ void main() {
     root.add(inner);
     const orientation = orientModel(inner, { up, units, boardSizeMm: boardSize });
     root.updateMatrixWorld(true);
-    const refs = new Set(components.map((c) => c.ref));
+    const refs = new Set(components.flatMap((c) => c.name ? [c.ref, c.name] : [c.ref]));
     const allSize = worldBox(inner).getSize(new Vector3());
     const boardArea = boardSize?.[0] && boardSize?.[1] ? boardSize[0] * boardSize[1] : Math.max(allSize.x * allSize.y, 1e-6);
     const take = (o) => merge ? mergeObject(o) : o;
@@ -36288,7 +36313,7 @@ void main() {
   }
   function prepareSide(model, components, sideName, board = null, frame = null) {
     const mine = components.filter((c) => c[sideName]);
-    const placements = mine.map((c) => ({ ref: c.ref, x: c[sideName].x, y: c[sideName].y, side: c[sideName].side }));
+    const placements = mine.map((c) => ({ ref: c.ref, name: typeof c.designator === "string" ? c.designator : void 0, x: c[sideName].x, y: c[sideName].y, side: c[sideName].side }));
     const side = prepareModel(model, placements, {
       boardSize: board?.size_mm || null,
       boardOrigin: board?.origin_mm || null,
@@ -47897,8 +47922,8 @@ ${content}
   function face(board, { side = "top", palette: palette2 = {}, ...options } = {}) {
     return { type: "face", board, side, palette: palette2, options };
   }
-  function layers(list, { outline = null, clip = true, substrate = null, holes = null } = {}) {
-    return { type: "layers", layers: list, options: { outline: outlineRings(outline), clip, substrate, holes } };
+  function layers(list, { outline = null, clip = true, substrate = null, holes = null, rect = null } = {}) {
+    return { type: "layers", layers: list, options: { outline: outlineRings(outline), clip, substrate, holes }, rect };
   }
   function repeat(content, placements, rect = null) {
     return { type: "repeat", content, placements: placements || [], rect: rect || contentRect(content) };
@@ -47917,7 +47942,7 @@ ${content}
   }
   function contentRect(c) {
     if (c?.type === "repeat") return placedRect(c);
-    return c && (c.type === "image" || c.type === "inkdiff" || c.type === "draw") ? c.rect || null : null;
+    return c && (c.type === "image" || c.type === "inkdiff" || c.type === "draw" || c.type === "layers") ? c.rect || null : null;
   }
   function outlineRings(outline) {
     if (!outline) return null;

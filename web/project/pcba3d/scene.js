@@ -29,7 +29,8 @@ export function parseGlb(buffer) {
  */
 export function prepareSide(model, components, sideName, board = null, frame = null) {
   const mine = components.filter((c) => c[sideName]);
-  const placements = mine.map((c) => ({ ref: c.ref, x: c[sideName].x, y: c[sideName].y, side: c[sideName].side }));
+  // a panel's copies ("R7·2") export under their designator ("R7"): boarddd matches those names to the nearest copy
+  const placements = mine.map((c) => ({ ref: c.ref, name: typeof c.designator === 'string' ? c.designator : undefined, x: c[sideName].x, y: c[sideName].y, side: c[sideName].side }));
   const side = prepareModel(model, placements, {
     boardSize: board?.size_mm || null,
     boardOrigin: board?.origin_mm || null,
