@@ -249,7 +249,7 @@ class ProjectReview:
         b, h = self.sides["base"], self.sides["head"]
         if b.schem is None and h.schem is None:
             return None
-        sheets = diff_sch.diff_schematics(b.schem, h.schem)
+        sheets = diff_sch.diff_schematics(b.schem, h.schem, self.sch_netlists()[0])
         svg_maps = {}
         for s in (b, h):
             r = s.results.get("sch_svg")
@@ -274,6 +274,7 @@ class ProjectReview:
                     sh["status"] = "modified"
                     sh["changes"].append({"kind": "other", "what": "modified", "bbox_mm": None,
                                           "detail": "rendered page differs (e.g. page count or text variables in the title block)"})
+                    sh.update(diff_sch.sheet_counts(sh["changes"]))
         return {"sheets": sheets}
 
     def pcb_section(self, changes):
@@ -457,20 +458,27 @@ class ProjectReview:
             res["csv"][s.name] = self.copy(f, self.rel("bom", f"{s.name}.csv")) if f else None
         return res
 
+    def sch_netlists(self):
+        """({side: {net: pins}}, {side: copied file}) from kicad-cli's schematic netlists (parsed once)."""
+        if getattr(self, "_sch_nets", None) is None:
+            nets, files = {}, {}
+            for s in self.sides.values():
+                f = self.result_file(s, "netlist", "netlist.net")
+                if f:
+                    files[s.name] = self.copy(f, self.rel("netlist", f"{s.name}.net"))
+                    try:
+                        with open(f, encoding="utf-8", errors="replace") as fh:
+                            nets[s.name] = diff_net.parse_kicad_netlist(fh.read())
+                    except Exception as e:  # noqa: BLE001
+                        self.err(f"cannot parse {s.name} netlist: {e}")
+            self._sch_nets = (nets, files)
+        return self._sch_nets
+
     def netlist(self):
         b, h = self.sides["base"], self.sides["head"]
         if not (b.sch or h.sch):
             return None  # a board without a schematic (a panel): its nets are the copies' nets
-        nets, files = {}, {}
-        for s in (b, h):
-            f = self.result_file(s, "netlist", "netlist.net")
-            if f:
-                files[s.name] = self.copy(f, self.rel("netlist", f"{s.name}.net"))
-                try:
-                    with open(f, encoding="utf-8", errors="replace") as fh:
-                        nets[s.name] = diff_net.parse_kicad_netlist(fh.read())
-                except Exception as e:  # noqa: BLE001
-                    self.err(f"cannot parse {s.name} netlist: {e}")
+        nets, files = (dict(x) for x in self.sch_netlists())
         exists = {s.name: s.root is not None for s in (b, h)}
         source = "schematic"
         if not all(n in nets or not exists[n] for n in SIDES) or not nets:
@@ -628,7 +636,11 @@ class ProjectReview:
                 if r["status"] in comp_count:
                     comp_count[r["status"]] += 1
         doc["summary"] = {
-            "sheets_changed": sum(1 for s in (schematic or {}).get("sheets", []) if s["status"] != "unchanged"),
+            # smart: sheets whose only changes move things (sheets_moved) are not counted as changed
+            "sheets_changed": sum(1 for s in (schematic or {}).get("sheets", [])
+                                  if s["status"] != "unchanged" and not s.get("moved_only")),
+            "sheets_moved": sum(1 for s in (schematic or {}).get("sheets", []) if s.get("moved_only")),
+            "sch_moved": sum(s["counts"]["moved"] for s in (schematic or {}).get("sheets", [])),
             "layers_changed": sum(1 for ly in (pcbs or {}).get("layers", []) if ly["status"] != "unchanged"),
             "components": comp_count,
             "nets_changed": len((net or {}).get("changes", [])),

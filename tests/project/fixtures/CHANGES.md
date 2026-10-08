@@ -26,11 +26,12 @@ same path. Tracks keep their UUIDs when edited. KiCad 10 files carry net *names*
 | 9 | changed connection | **J1 pin 9**: sch no-connect flag at (43.18, 99.06) replaced by a GND power symbol; pcb pad 9 net | `unconnected-(J1-P9-Pad9)` | `GND` |
 | 10 | changed silkscreen text | `gr_text` on F.Silkscreen at (143.0, 136.5), uuid `c6b4ad11-d2a8-4fd6-bd23-e8f850b42993` | `REV A` | `REV B` |
 | 11 | fixed ERC issue | **U4 pin 4** (S/S): no-connect flag at (171.45, 143.51) restored | 1 ERC error `pin_not_connected` "Symbol U4 Pin 4 [S/S, Passive, Line]" | 0 ERC violations |
+| 11b | moved block (smart schematic diff) | **pic_sockets**: P2, P3, their power symbols, labels, junctions, no-connect flags and wires shifted −12.7 mm in x (the horizontal wires feeding the block from the left get shorter); same connections, netlist unchanged. Real change nearby: **P2** value (sch + pcb) | P2/P3 at x 218.44, P2 `SUPP28` | x 205.74, P2 `ZIF28`: P2 `value` (highlighted), the rest `move_only` |
 
 Netlist changes (pic_programmer): nets 111 → 110. `GND` + {C10.2, J1.9}; `VCC` + {C10.1};
 net `unconnected-(J1-P9-Pad9)` removed. No other net membership changes.
 
-BOM: C9 footprint changed; C10 added; R7 value changed. (P103 is `exclude_from_bom`, so it
+BOM: C9 footprint changed; C10 added; R7 and P2 values changed. (P103 is `exclude_from_bom`, so it
 does not appear in the BOM on either side.)
 Position file: C10 added, P103 removed, C9 footprint, D9 moved, D12 moved+rotated, R7 value.
 

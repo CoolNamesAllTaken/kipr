@@ -708,12 +708,14 @@ class Renderer:
                     files.append((local, mdl))
             p = os.path.join(d, f"{side}.glb")
             try:
-                warns = self.model3d.build_glb(m, files, p, max_bytes=self.args.glb_max_mb * 1024 * 1024)
+                warns = self.model3d.build_glb(m, files, p, max_bytes=self.args.glb_max_mb * 1024 * 1024,
+                                               fill_up_to=getattr(self.args, "fill_holes", None))
                 it.warnings.extend(f"3d ({side}): {w}" for w in warns)
                 entry["glb"][side] = rel(p)
                 if not self.args.no_preview:
                     pp = os.path.join(d, f"{side}_3d.png")
-                    self.model3d.render_preview(p, pp, size=900)
+                    hide = (".Paste",) if getattr(self.args, "preview_hide_paste", False) else ()
+                    self.model3d.render_preview(p, pp, size=900, hide=hide)
                     entry.setdefault("preview_3d", {"head": None, "base": None})[side] = rel(pp)
             except Exception as e:
                 it.warnings.append(f"3d ({side}): GLB export failed: {e}")
@@ -836,6 +838,10 @@ def add_arguments(ap):
     ap.add_argument("--stock-max-file-mb", type=float, default=25.0)
     ap.add_argument("--stock-max-total-mb", type=float, default=300.0)
     ap.add_argument("--no-preview", action="store_true", help="skip the software-rendered 3D preview PNGs")
+    ap.add_argument("--3d-hide-paste", dest="preview_hide_paste", action="store_true",
+                    help="leave the solder paste out of the 3D preview PNGs (the GLB keeps it)")
+    ap.add_argument("--3d-fill-holes", dest="fill_holes", type=float, default=None, metavar="MM",
+                    help="GLB and 3D preview: plated round pad holes up to this drill (mm) filled and capped")
     ap.add_argument("--png-size", type=int, default=1600, help="longest PNG side in px (default 1600)")
     ap.add_argument("--glb-max-mb", type=float, default=5.0, help="re-tessellate coarser above this size")
     ap.add_argument("--use-kicad-cli", action="store_true",

@@ -21,8 +21,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$here/../.." && pwd)
-# boarddd PR #36 (branch t0299, panel copies match by name): switch to its release tag once tagged
-BOARDDD_REF=93ebaf4d78d564dfab264873e1ef69072fc7cc96
+BOARDDD_REF=v0.7.0
 BOARDDD_SUBPATHS=geom,board,footprint,models,scene,gerber,view2d
 THREE_VERSION=0.185.1
 OCCT_VERSION=0.0.23

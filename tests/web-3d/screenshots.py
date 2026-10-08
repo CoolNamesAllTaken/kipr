@@ -39,6 +39,14 @@ CASES = {
     "cycle": {"mode": "overlay", "cycle": True},
     "copper-diff": {"mode": "overlay", "view": "Top", "toggle": ["components", "markers"]},
     "glb-board": {"mode": "side", "toggle_board": "glb"},
+    # fab board options (boards from gerbers only; skipped on the mocks)
+    # paste: no paste= in the URL and a fresh browser profile, so this is the default (on)
+    "paste": {"mode": "side", "view": "Iso", "fill": "0", "fab": "needed",
+              "check": "Object.values(kipr3d.view.gerber.sides).every((s) => s.paste && s.paste.group.visible)"},
+    "filled": {"mode": "side", "view": "Top", "paste": "0", "fill": "0.6", "fab": "needed",
+               "check": "kipr3d.view.gerber.fillUpTo === 0.6 && Object.values(kipr3d.view.gerber.sides).every((s) => s.fab.holes.some((h) => h.filled) && !s.paste)"},
+    "fab-ui": {"mode": "side", "paste": "0", "fill": "0", "fab": "needed", "ui": True,
+               "check": "kipr3d.view.gerber.fillUpTo > 0 && kipr3d.view.show.paste && document.querySelector('button[data-toggle=paste]').getAttribute('aria-pressed') === 'true'"},
 }
 
 
@@ -110,8 +118,10 @@ def main():
             page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
             problems = []
             page.on("pageerror", lambda e: problems.append(f"pageerror: {e}"))
+            # (Chromium's "GPU stall due to ReadPixels" is a performance note: the paste is traced from
+            # pixels read back on purpose.)
             page.on("console", lambda m: problems.append(f"console.{m.type}: {m.text}")
-                    if m.type == "error" or "WebGL" in m.text else None)
+                    if m.type == "error" or ("WebGL" in m.text and "GPU stall due to ReadPixels" not in m.text) else None)
             aborted = []
             # A big GLB read through a stream while the main thread parses can be reported as
             # net::ERR_ABORTED when the page closes, although every byte arrived; the viewer's own
@@ -123,6 +133,9 @@ def main():
             toggle = spec.pop("toggle", None)
             cycle = spec.pop("cycle", False)
             board_source = spec.pop("toggle_board", None)
+            check = spec.pop("check", None)
+            ui = spec.pop("ui", False)
+            needs_fab = spec.pop("fab", None) == "needed"
             if spec.get("focus") == "@first-change":
                 spec["focus"] = first_change(slug)
             query = {"out": out_rel, "project": slug, **spec}
@@ -149,6 +162,20 @@ def main():
                     print(f"{name:14s} skipped: this project has no board from gerbers to switch from")
                     page.close()
                     continue
+            if needs_fab and not page.evaluate("!!(window.kipr3d && kipr3d.view.gerber)"):
+                print(f"{name:14s} skipped: this project has no board from gerbers")
+                page.close()
+                continue
+            if ui:
+                # The toolbar: paste on, then the smallest fill size; the fab board is rebuilt.
+                page.click("button[data-toggle=paste]")
+                page.wait_for_function("!document.querySelector('button[data-toggle=paste]').disabled", timeout=120000)
+                page.select_option(".kp3d-fill select", index=1)
+                page.wait_for_function("/filled and capped/.test(document.querySelector('.kp3d-status').innerText)"
+                                       " && !document.querySelector('.kp3d-fill select').disabled", timeout=120000)
+                problems.extend(f"viewer: {e}" for e in page.evaluate("kipr3d.errors"))
+            if check and not page.evaluate(check):
+                problems.append(f"check failed: {check}")
             if cycle:
                 # Mount/dispose through every project twice (what the shell does on tab changes):
                 # nothing may throw and WebGL contexts must not pile up.

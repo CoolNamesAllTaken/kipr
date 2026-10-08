@@ -11,6 +11,8 @@ export type Hole = {
   y2: number | null;
   /** Filled-and-capped: no opening; skipped by `projectHoles()`. */
   filled?: boolean;
+  /** The drill file marks the tool as a via (KiCad `ViaDrill`). */
+  via?: boolean;
   [key: string]: unknown;
 };
 
@@ -74,3 +76,5 @@ export declare function cutHoles(
   projected: ProjectedHole<unknown>[],
 ): void;
 export declare function holesToGerber(holes: HoleLike[]): string;
+/** Holes as a metric decimal Excellon file (KiCad's dialect): tools per diameter and plating, slots as rout moves. */
+export declare function holesToExcellon(holes: HoleLike[]): string;

@@ -290,6 +290,43 @@ test('boxes: default shown, toggle remembered, deep link wins without being reme
   }
 });
 
+// --- smart schematic diff (smart.js) ------------------------------------------------------------------
+
+test('smart: default on, remembered, smart=0 deep link; counts and changed sheets follow the mode', async () => {
+  const { smartOn, toggleSmart, smartFromParams, smartParam, resetSmart, sheetCounts, sheetsChanged, onlyMoved } = await import('../../web/project/js/smart.js');
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+  try {
+    resetSmart();
+    assert.equal(smartOn(), true);
+    assert.equal(smartParam(), null);
+    toggleSmart();
+    assert.equal(smartOn(), false);
+    assert.equal(smartParam(), '0');
+    assert.equal(store.get('kipr.schSmart'), '0');
+    resetSmart();
+    assert.equal(smartFromParams({ smart: '1' }), true);
+    assert.equal(store.get('kipr.schSmart'), '0', 'a link does not change the remembered choice');
+  } finally {
+    delete globalThis.localStorage;
+    resetSmart();
+  }
+  const sheet = { changes: [{ what: 'moved', move_only: true }, { what: 'rerouted', move_only: true }, { what: 'value' }, { what: 'modified', minor: true }, null] };
+  assert.deepEqual(sheetCounts(sheet, true), { changed: 1, minor: 1, moved: 2 });
+  assert.deepEqual(sheetCounts(sheet, false), { changed: 3, minor: 1, moved: 0 });
+  assert.deepEqual(sheetCounts({}, true), { changed: 0, minor: 0, moved: 0 });
+  assert.equal(sheetsChanged({ sheets_changed: 2, sheets_moved: 1 }, true), 2);
+  assert.equal(sheetsChanged({ sheets_changed: 2, sheets_moved: 1 }, false), 3);
+  assert.equal(sheetsChanged({ sheets_changed: 2 }, false), 2);
+  // ink diff regions inside the moved items and away from real changes are not counted
+  const q = { boxes: [{ x: 0, y: 0, w: 50, h: 50 }, { x: 50, y: 0, w: 20, h: 20 }], holes: [{ x: 30, y: 30, w: 5, h: 5 }] };
+  assert.equal(onlyMoved({ x: 5, y: 5, w: 10, h: 10 }, q), true);
+  assert.equal(onlyMoved({ x: 40, y: 5, w: 20, h: 10 }, q), true, 'spans two quiet boxes');
+  assert.equal(onlyMoved({ x: 28, y: 28, w: 4, h: 4 }, q), false, 'over a real change');
+  assert.equal(onlyMoved({ x: 45, y: 40, w: 20, h: 5 }, q), false, 'sticks out');
+  assert.equal(onlyMoved({ x: 5, y: 5, w: 1, h: 1 }, { boxes: [] }), false);
+});
+
 // --- view state kept across layer / sheet / tab changes (viewstate.js) ----------------------------
 
 test('viewstate: mergeParams keeps what a view does not name, null removes', () => {

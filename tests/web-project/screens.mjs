@@ -163,6 +163,7 @@ for (const theme of THEMES) {
       await page.screenshot({ path: path.join(a.shots, `pcb-measure.${theme}.${sizeName}.png`) });
     }
     await checkBoxes(page, tag, `${theme}.${sizeName}`);
+    await checkSmart(page, tag, `${theme}.${sizeName}`);
     if (a.mode !== 'file') await checkDocLayer(page, tag, `${theme}.${sizeName}`);
     await ctx.close();
   }
@@ -276,6 +277,51 @@ async function checkBoxes(page, tag, suffix) {
   await settle(p2);
   if (await p2.locator('svg.bd2-overlay .mark').count()) problems.push(`${tag} boxes: boxes=0 deep link shows boxes`);
   await ctx2.close();
+}
+
+/**
+ * The schematic's smart diff (default, key s / the move-arrows button): moved items with the same
+ * connections are a collapsed "moved" group with faint outlines and washed out of the ink diff; raw
+ * lists them as changes. Remembered (localStorage), smart=0 in the URL, and the counts follow.
+ */
+async function checkSmart(page, tag, suffix) {
+  const shot = (name) => page.screenshot({ path: path.join(a.shots, `${name}.${suffix}.png`) });
+  const listed = () => page.locator('ol.change-list > li > .change').count();
+  const sheetCount = (title) => page.locator('.side-item', { hasText: title }).locator('.count').textContent().catch(() => '');
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/schematic/root?mode=diff`);
+  await settle(page);
+  if (await page.locator('.smart-toggle[aria-pressed="true"]').count() !== 1) problems.push(`${tag} smart: toggle not on by default`);
+  if (await listed() !== 3) problems.push(`${tag} smart: ${await listed()} changes listed, expected 3 (moved ones grouped)`);
+  if (!(await page.locator('.minor-group summary', { hasText: '3 moved' }).count())) problems.push(`${tag} smart: no "3 moved" group`);
+  if (await page.locator('svg.bd2-overlay .mark.moved').count() !== 3) problems.push(`${tag} smart: expected 3 faint outlines`);
+  if (await page.locator('svg.bd2-overlay .quiet-wash').count() !== 1) problems.push(`${tag} smart: no wash over the moved items in the diff`);
+  if (!(await page.locator('.side-item', { hasText: 'Mounting' }).locator('.badge.quiet-moved').count())) problems.push(`${tag} smart: moved-only sheet not marked`);
+  if ((await page.locator('.tab[data-tab="schematic"] .tab-count').textContent()) !== '4') problems.push(`${tag} smart: schematic tab count is not 4`);
+  await shot('smart-sch-diff');
+  await page.keyboard.press('s');
+  await page.waitForTimeout(150);
+  if (await listed() !== 6) problems.push(`${tag} raw: ${await listed()} changes listed, expected 6`);
+  if (await page.locator('svg.bd2-overlay .mark.moved').count()) problems.push(`${tag} raw: faint outlines left`);
+  if (await page.locator('svg.bd2-overlay .quiet-wash').count()) problems.push(`${tag} raw: wash left`);
+  if (!page.url().includes('smart=0')) problems.push(`${tag} raw: smart=0 not in the URL (${page.url()})`);
+  if ((await page.locator('.tab[data-tab="schematic"] .tab-count').textContent()) !== '5') problems.push(`${tag} raw: schematic tab count is not 5`);
+  if ((await sheetCount('Mounting')) !== '2') problems.push(`${tag} raw: Mounting sheet count is not 2`);
+  await shot('raw-sch-diff');
+  // remembered across a reload without the URL param; a smart=1 link wins for that visit
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/schematic/root?mode=side`);
+  await settle(page);
+  if (await page.locator('.smart-toggle[aria-pressed="false"]').count() !== 1) problems.push(`${tag} raw: not remembered`);
+  await page.goto('about:blank');
+  await page.goto(base + `${P}/schematic/root?mode=side&smart=1`);
+  await settle(page);
+  if (await listed() !== 3) problems.push(`${tag} smart=1 link: ${await listed()} changes listed`);
+  await page.locator('.smart-toggle').click(); // the button: raw
+  await page.waitForTimeout(100);
+  await page.locator('.smart-toggle').click(); // and back to smart (remembered for the next checks)
+  await page.waitForTimeout(100);
+  if (await listed() !== 3 || page.url().includes('smart=')) problems.push(`${tag} smart: button did not switch back (${page.url()})`);
 }
 
 await browser.close();

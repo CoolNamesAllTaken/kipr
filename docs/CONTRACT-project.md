@@ -85,7 +85,8 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
   "kind": "project",                   // project (has a schematic) | panel | board (no schematic); see Panel
   "panel": Panel | null,               // kind "panel" only
   "reasons": ["projects/…/adsbee_1090u.kicad_pcb"],   // changed files that made it count
-  "summary": {"sheets_changed": 2, "layers_changed": 5,
+  "summary": {"sheets_changed": 2, "layers_changed": 5,   // sheets_changed leaves out sheets_moved
+              "sheets_moved": 1, "sch_moved": 14,   // sheets whose changes all only move things (moved_only); move_only changes
               "components": {"added": 1, "removed": 0, "moved": 3, "changed": 2,   // from the board (moved includes rotated); from the BOM if there is no board
                              "minor": 105},  // minor: true components (see PcbChange); not in "changed"
               "nets_changed": 4,
@@ -145,7 +146,9 @@ right), the reference itself in `designator`; copies pair up across revisions ne
     "status": "modified",
     "base": "p/<slug>/sch/base/root/power.svg", "head": "p/<slug>/sch/head/root/power.svg",
     "size_mm": [297, 210],
-    "changes": [SchChange]
+    "changes": [SchChange],
+    "counts": {"changed": 1, "minor": 0, "moved": 14},   // moved: move_only changes (not in changed / minor)
+    "moved_only": true                  // only when every change is move_only or minor (and one is move_only)
   }]
 }
 ```
@@ -163,18 +166,20 @@ is listed), or when the rendered SVGs differ.
  "whats": ["value", "fields"],          // every difference; "what" is the most important one
  "detail": "value 10k -> 4.7k; MPN 'A' -> 'B'",
  "bbox_mm": [x, y, w, h],               // union of base and head position
- "base_bbox_mm": […], "head_bbox_mm": […],   // only when the symbol moved
- "power": true}                          // power symbols (#PWR…) only
+ "base_bbox_mm": […], "head_bbox_mm": […],   // only when the symbol, label, text or sheet box moved
+ "power": true,                          // power symbols (#PWR…) only
+ "move_only": true,                      // only moved / rerouted, same connections (below); omitted otherwise
+ "parts_mm": [[x, y, w, h], …]}         // move_only: what moved (symbol body + field texts, base and head; each rerouted item)
 ```
 
 | kind | what | notes |
 |---|---|---|
 | `symbol` | `added`, `removed`, `symbol` (lib id), `reference`, `value`, `footprint`, `fields`, `dnp`, `in_bom`, `on_board`, `exclude_from_sim`, `moved`, `rotated`, `mirrored`, `unit`, `library` (the embedded library symbol's graphics/pins changed) | symbols are matched by uuid, then reference, then lib id + position (so a re-annotation is `reference`, not add+remove) |
-| `wire` | `added`, `removed`, `modified` | wires, buses, bus entries, junctions and no-connect flags, clustered spatially; `count: {added, removed}`, `detail: "+2 wire, -1 no_connect"` |
+| `wire` | `added`, `removed`, `modified`, `rerouted` | wires, buses, bus entries, junctions and no-connect flags, clustered spatially; `count: {added, removed}`, `detail: "+2 wire, -1 no_connect"`. Wiring that keeps every connection is clustered apart as `rerouted` (`move_only`; `parts_mm`: the box of each item, up to 400) |
 | `label` | `added`, `removed`, `renamed`, `moved`, `modified` | local/global/hierarchical labels, net-class/directive flags; `base`/`head` hold the texts |
 | `text` | `added`, `removed`, `edited`, `moved`, `modified` | text, text boxes, tables |
 | `graphic` | `added`, `removed`, `modified` | lines, rectangles, circles, arcs, images, clustered |
-| `sheet` | `added`, `removed`, `modified` | sub-sheet boxes on this sheet |
+| `sheet` | `added`, `removed`, `modified`, `moved` | sub-sheet boxes on this sheet (`moved`: same size, pins, fields and pin nets) |
 | `other` | `modified` | anything else; `bbox_mm: null` |
 
 ### Pcb
@@ -311,6 +316,15 @@ One classifier (`kipr/project/classify.py`) decides for schematic symbols, footp
   never highlighted. Fields that don't name the part (cost, description, datasheet URL, notes,
   generator tags, …: `fields_minor`), `exclude_from_sim`, the symbol's lib id (`lib_id`) or cached
   library graphics (`library`), `model_format`, `footprint_library`.
+- **moved** (schematics, `move_only: true`): a symbol, label, text or sheet box that was only moved,
+  rotated or mirrored (plus minor differences), or wiring that was only rerouted, with the same
+  connections: every pin of a symbol on a net of the same name, every sheet pin too; a wire,
+  junction, no-connect flag or label on a net whose pins, labels, power symbols and sheet pins keep
+  that net's name, with every one it touches present on both sides (a no-connect flag stays on the
+  same pins). Nets are each sheet's local connectivity named by kicad-cli's netlist (by labels and
+  power symbols without one). Counted apart (`counts.moved`, `summary.sch_moved`); the viewer's smart
+  diff (default) and the report outline them faintly, wash them out of the ink diff and collapse them;
+  the viewer's raw diff shows them as changes.
 - **significant**: value, footprint, DNP, in BOM / on board, reference, placement, pads,
   and the fields that name the part to buy (`fields`). Those fields are matched by
   `tool.significant_fields`: case-insensitive globs over the field name with spaces, `_`, `-`,

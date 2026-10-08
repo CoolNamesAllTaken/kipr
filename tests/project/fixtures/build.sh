@@ -93,7 +93,7 @@ mkdir scripts
 cp "$here"/scripts/sexpr.py "$here"/scripts/head_pic_programmer_*.py scripts/
 python3 scripts/head_pic_programmer_sch.py
 "$KICAD_PYTHON" scripts/head_pic_programmer_pcb.py
-commit "Head (pic_programmer): R7 value, C9 footprint, -P103, +C10, move D9, rotate D12, reroute D8-A, GND zone chamfer, J1 pin 9 to GND, REV B silk, restore U4 no-connect (ERC fix)"
+commit "Head (pic_programmer): R7 value, C9 footprint, P2/P3 socket block moved (P2 value ZIF28), -P103, +C10, move D9, rotate D12, reroute D8-A, GND zone chamfer, J1 pin 9 to GND, REV B silk, restore U4 no-connect (ERC fix)"
 cp "$here"/scripts/head_complex_hierarchy_sch.py scripts/
 python3 scripts/head_complex_hierarchy_sch.py "$KICAD_SHARE/symbols/Device.kicad_sym"
 commit "Head (complex_hierarchy): add status_led sheet (R401 + D401 LED, new net /status_led/LED_A); edit scripts"

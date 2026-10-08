@@ -6,17 +6,17 @@
 // stadium slots + barrel walls, kipr PR #18) and kipr/library/render/model3d.py (graphics layers as thin
 // sheets, board from the courtyard + 1 mm). Text is not drawn.
 //
-// Groups (userData.group): board, copper, barrels, silk, fab, courtyard.
+// Groups (userData.group): board, copper, barrels, paste, silk, fab, courtyard.
 
 import * as THREE from '../../../three/three.module.js';
 import {
-  BOARD_THICKNESS, COPPER_THICKNESS, kicadToBoard, kicadModelMatrix, counterClockwise, clockwise, loopBounds,
-  padBounds, rectLoop, clearance, strokeLoops, padCopperLoops, padDrillLoop, padCopperSides, padHasCopper,
+  BOARD_THICKNESS, COPPER_THICKNESS, PASTE_THICKNESS, kicadToBoard, kicadModelMatrix, counterClockwise, clockwise, loopBounds,
+  padBounds, rectLoop, clearance, strokeLoops, padCopperLoops, padDrillLoop, padCopperSides, padHasCopper, padDrill,
 } from '../geom/index.js';
 import { COLORS as BOARD_COLORS, faceMaterial, planarUVs, splitCaps, canvasTexture } from '../board/solid.js';
 
 export const FOOTPRINT_COLORS = {
-  mask: 0x1d5b34, fr4: BOARD_COLORS.fr4, copper: 0xe9b934, silk: 0xf4f4ee, fab: 0xa9adb5, courtyard: 0xff4fd8,
+  mask: 0x1d5b34, fr4: BOARD_COLORS.fr4, copper: 0xe9b934, paste: 0xa6a6b3, silk: 0xf4f4ee, fab: 0xa9adb5, courtyard: 0xff4fd8,
 };
 const GFX = { silk: { dz: 0.010, layers: /\.SilkS$/ }, fab: { dz: 0.020, layers: /\.Fab$/ }, courtyard: { dz: 0.030, layers: /\.CrtYd$/ } };
 const COPPER_OFFSET = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 };
@@ -99,6 +99,18 @@ function sheet(loops, z, depth) {
   return g;
 }
 
+/** Which paste faces the pad is on: {top, bottom} (`F.Paste`, `B.Paste`, `*.Paste`). */
+export function padPasteSides(pad) {
+  const L = pad.layers || [];
+  return { top: L.some((l) => /^(F|\*)\.Paste$/.test(l)), bottom: L.some((l) => /^(B|\*)\.Paste$/.test(l)) };
+}
+
+/** A plated round pad hole of drill diameter <= upTo mm (filled and capped; geom fillHoles for pads). */
+export function padFilled(pad, upTo) {
+  const d = padDrill(pad);
+  return Number(upTo) > 0 && pad.type === 'thru_hole' && !!d && !d.oval && d.w <= Number(upTo) + 1e-6;
+}
+
 /**
  * Build a footprint (from parseKicadFootprint, or kipr's geom.json + `graphics`) on a small board.
  * Options:
@@ -112,7 +124,11 @@ function sheet(loops, z, depth) {
  *               `uvBounds`, transparent where empty, e.g. kipr's per-layer SVG renders) drawn as sheets just
  *               above the copper, in that group; the way to show text, which the graphics sheets leave out
  *   colors      overrides of FOOTPRINT_COLORS
- * Returns {group, outline, thickness, meshes: {board, copper[], barrels[], silk[], fab[], courtyard[]},
+ *   fillUpTo    fill and cap plated round pad holes up to this drill diameter, mm: no hole, no barrel,
+ *               the copper whole on both faces (VIPPO; e.g. thermal vias in an exposed pad)
+ *   paste       true: each pad's shape on its paste layers (paste margins are not applied), PASTE_THICKNESS
+ *               high on the copper, in group 'paste' (default false: no paste meshes)
+ * Returns {group, outline, thickness, meshes: {board, copper[], barrels[], paste[], silk[], fab[], courtyard[]},
  *          modelMatrix(model), dispose()}.
  */
 export function buildFootprint(fp, options = {}) {
@@ -122,7 +138,7 @@ export function buildFootprint(fp, options = {}) {
   const group = new THREE.Group();
   group.name = `footprint-${fp.name || ''}`;
   const disposables = [];
-  const meshes = { board: null, copper: [], barrels: [], silk: [], fab: [], courtyard: [] };
+  const meshes = { board: null, copper: [], barrels: [], paste: [], silk: [], fab: [], courtyard: [] };
   const add = (geometry, material, kind, name) => {
     if (!geometry) return null;
     const m = new THREE.Mesh(geometry, material);
@@ -139,7 +155,7 @@ export function buildFootprint(fp, options = {}) {
   for (const c of outline.cutouts || []) shape.holes.push(new THREE.Path(v2(clockwise(c))));
   const drills = [];
   for (const pad of fp.pads) {
-    const loop = padDrillLoop(pad);
+    const loop = padFilled(pad, options.fillUpTo) ? null : padDrillLoop(pad);
     if (!loop) continue;
     const inside = loop.every(([x, y]) => { const c = clearance(outline.board, x, y); return c.inside && c.distance > 1e-3; });
     if (inside) { drills.push({ pad, loop }); shape.holes.push(new THREE.Path(v2(clockwise(loop)))); }
@@ -161,7 +177,7 @@ export function buildFootprint(fp, options = {}) {
     if (!padHasCopper(pad)) continue;
     const sides = padCopperSides(pad);
     const loops = padCopperLoops(pad, 8);
-    const hole = drills.find((d) => d.pad === pad)?.loop || padDrillLoop(pad);
+    const hole = drills.find((d) => d.pad === pad)?.loop || (padFilled(pad, options.fillUpTo) ? null : padDrillLoop(pad));
     const shapes = loops.map((l, i) => {
       const s = new THREE.Shape(v2(counterClockwise(l)));
       if (hole && i === 0) s.holes.push(new THREE.Path(v2(clockwise(hole))));
@@ -172,6 +188,23 @@ export function buildFootprint(fp, options = {}) {
     if (sides.top) add(plate.clone().translate(0, 0, thickness), padMat, 'copper', label);
     if (sides.bottom) add(plate.clone().translate(0, 0, -COPPER_THICKNESS), padMat, 'copper', label);
     plate.dispose();
+  }
+  // --- paste: the pad's shape on its paste layers, on top of the copper
+  const pasteMat = new THREE.MeshStandardMaterial({ color: colors.paste, metalness: 0.35, roughness: 0.75, ...COPPER_OFFSET });
+  for (const pad of options.paste ? fp.pads : []) {
+    const sides = padPasteSides(pad);
+    if (!sides.top && !sides.bottom) continue;
+    const hole = drills.find((d) => d.pad === pad)?.loop;
+    const shapes = padCopperLoops(pad, 8).map((l, i) => {
+      const s = new THREE.Shape(v2(counterClockwise(l)));
+      if (hole && i === 0) s.holes.push(new THREE.Path(v2(clockwise(hole))));
+      return s;
+    });
+    const deposit = new THREE.ExtrudeGeometry(shapes, { depth: PASTE_THICKNESS, bevelEnabled: false, curveSegments: 1 });
+    const label = `paste-${pad.number}`;
+    if (sides.top) add(deposit.clone().translate(0, 0, thickness + COPPER_THICKNESS), pasteMat, 'paste', label);
+    if (sides.bottom) add(deposit.clone().translate(0, 0, -COPPER_THICKNESS - PASTE_THICKNESS), pasteMat, 'paste', label);
+    deposit.dispose();
   }
   // --- plated barrels: the drill outline (a stadium for slots) as a wall through the board
   for (const { pad, loop } of drills) {
@@ -220,7 +253,7 @@ export function buildFootprint(fp, options = {}) {
     }
   }
 
-  const materials = [faceMats.top, faceMats.bottom, wallMat, padMat, barrelMat, ...Object.values(gfxMats)];
+  const materials = [faceMats.top, faceMats.bottom, wallMat, padMat, barrelMat, pasteMat, ...Object.values(gfxMats)];
   return {
     group, outline, thickness, meshes, uvBounds,
     /** Matrix4 array for one of fp.models, board frame (apply to the loaded model's root). */

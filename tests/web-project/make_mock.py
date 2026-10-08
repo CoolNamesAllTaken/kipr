@@ -305,6 +305,9 @@ def status_for(sides, changed):
     return "modified" if changed else "unchanged"
 
 
+sys.path.insert(0, str(ROOT))
+from kipr.project.diff_sch import sheet_counts  # noqa: E402
+
 # ─── schematic sheets ──────────────────────────────────────────────────────────────────────────
 
 def sheet_svg(title: str, symbols: list[tuple], wires: list[list[tuple]], texts: list[tuple] = ()) -> str:
@@ -327,13 +330,17 @@ def sheet_svg(title: str, symbols: list[tuple], wires: list[list[tuple]], texts:
 
 def sheets(side: str) -> dict:
     head = side == "head"
-    root = sheet_svg("Root", [("U1", "MCU", 120 + (15 if head else 0), 80), ("R1", "10k", 60, 60), ("R2", "4.7k" if head else "10k", 60, 90)],
-                     [[(70, 62), (120 + (15 if head else 0), 82)], [(70, 92), (100, 92), (100, 84)]])
+    mv = 20 if head else 0  # R3 / C3 block: moved, same connections (smart diff)
+    root = sheet_svg("Root", [("U1", "MCU", 120 + (15 if head else 0), 80), ("R1", "10k", 60, 60), ("R2", "4.7k" if head else "10k", 60, 90),
+                              ("R3", "1k", 160 + mv, 30), ("C3", "100n", 160 + mv, 50)],
+                     [[(70, 62), (120 + (15 if head else 0), 82)], [(70, 92), (100, 92), (100, 84)],
+                      [(165 + mv, 34), (165 + mv, 50)], [(170 + mv, 32), (215, 32), (215, 20)]])
     power = sheet_svg("Power", [("U2", "LDO", 100, 100), ("C1", "100n", 150, 100)],
                       [[(110, 102), (150, 102)]] + ([[(160, 102), (200, 102), (200, 130)]] if head else []),
                       [("+3V3", 200, 132)] if head else [])
     conn = sheet_svg("Connectors", [("J1", "Conn_01x02", 50, 50)], [[(60, 52), (90, 52)]])
-    out = {"root": root, "power": power, "connectors": conn}
+    mount = sheet_svg("Mounting", [("H1", "MountingHole", 50 + (10 if head else 0), 50)], [[(60 + (10 if head else 0), 52), (90, 52)]])
+    out = {"root": root, "power": power, "connectors": conn, "mounting": mount}
     if head:
         out["sensors"] = sheet_svg("Sensors", [("U5", "BME280", 80, 70), ("C2", "1u", 120, 70)], [[(90, 72), (120, 72)]])
     else:
@@ -348,7 +355,7 @@ def write_sheets(out, slug, sides, meta):
     content = {s: sheets(s) for s in sides}
     for sid, title, file, page, status, changes in meta:
         entry = {"id": sid, "title": title, "file": file, "page": page, "status": status, "base": None, "head": None,
-                 "size_mm": list(PAGE), "changes": changes}
+                 "size_mm": list(PAGE), "changes": changes, **sheet_counts(changes)}
         for s in sides:
             key = sid.split("/")[-1]
             if key in content[s]:
@@ -368,6 +375,12 @@ def demo_board(out: Path) -> dict:
             {"kind": "symbol", "ref": "R2", "what": "value", "base": "10k", "head": "4.7k", "bbox_mm": [58.5, 87.5, 13, 11]},
             {"kind": "symbol", "ref": "U1", "what": "moved", "base": [120, 80], "head": [135, 80], "bbox_mm": [118, 77.5, 29, 11]},
             {"kind": "wire", "what": "rerouted", "bbox_mm": [69, 61, 67, 22]},
+            {"kind": "symbol", "ref": "R3", "what": "moved", "whats": ["moved"], "move_only": True, "detail": "moved (165, 32) -> (185, 32)",
+             "bbox_mm": [159.5, 27.5, 31, 7], "base_bbox_mm": [159.5, 27.5, 11, 7], "head_bbox_mm": [179.5, 27.5, 11, 7]},
+            {"kind": "symbol", "ref": "C3", "what": "moved", "whats": ["moved"], "move_only": True, "detail": "moved (165, 52) -> (185, 52)",
+             "bbox_mm": [159.5, 47.5, 31, 10], "base_bbox_mm": [159.5, 47.5, 11, 10], "head_bbox_mm": [179.5, 47.5, 11, 10]},
+            {"kind": "wire", "what": "rerouted", "move_only": True, "count": {"added": 2, "removed": 2},
+             "detail": "+2 wire, -2 wire (same connections)", "bbox_mm": [164.5, 19.5, 51, 31]},
         ]),
         ("root/power", "Power", "power.kicad_sch", "2", "modified", [
             {"kind": "wire", "what": "added", "bbox_mm": [159, 101, 42, 30]},
@@ -380,6 +393,12 @@ def demo_board(out: Path) -> dict:
         ]),
         ("root/legacy", "Legacy", "legacy.kicad_sch", "4", "removed", [
             {"kind": "symbol", "ref": "U9", "what": "removed", "bbox_mm": [78, 67, 14, 12]},
+        ]),
+        ("root/mounting", "Mounting", "mounting.kicad_sch", "5", "modified", [  # moved items only (smart diff)
+            {"kind": "symbol", "ref": "H1", "what": "moved", "whats": ["moved"], "move_only": True, "detail": "moved (50, 50) -> (60, 50)",
+             "bbox_mm": [49.5, 47.5, 21, 10], "base_bbox_mm": [49.5, 47.5, 11, 10], "head_bbox_mm": [59.5, 47.5, 11, 10]},
+            {"kind": "wire", "what": "rerouted", "move_only": True, "count": {"added": 1, "removed": 1},
+             "detail": "+1 wire, -1 wire (same connections)", "bbox_mm": [59.5, 51.5, 31, 1]},
         ]),
     ])
     pcb = write_pcb(out, slug, ["base", "head"], {"F.Cu", "B.Cu", "F.Mask", "F.Paste", "F.SilkS", "PTH", "Dwgs.User"})
@@ -414,7 +433,7 @@ def demo_board(out: Path) -> dict:
         comps.append(c)
     return {
         "slug": slug, "name": "demo_board", "path": "boards/demo_board", "status": "modified",
-        "summary": {"sheets_changed": 4, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1, "minor": 2},
+        "summary": {"sheets_changed": 4, "sheets_moved": 1, "sch_moved": 5, "layers_changed": 6, "components": {"added": 1, "removed": 0, "moved": 1, "changed": 1, "minor": 2},
                     "nets_changed": 3, "erc": {"new": 1, "fixed": 1}, "drc": {"new": 2, "fixed": 1},
                     "grid": {"count": 2, "points": 5},
                     "impedance": {"rows": 3, "violations": 2, "length_out_mm": 44.0, "new_violations": 2, "stackup_shifts": 1, "width_changes": 1, "solver": "field"}},

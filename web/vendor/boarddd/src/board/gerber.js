@@ -7,11 +7,14 @@
 // viewer3d.js (paintBoard, renderFace, onSubstrate). All Gerber work is done by boarddd/gerber unless the caller
 // injects another implementation as `gerber` (an object with the same functions; null = boarddd/gerber).
 // Used: groupBoardLayers, boardOutline, parseExcellon, holesToGerber, renderFaceRaster, faceRasterSize,
-// renderLayerDiff, copyScaled, withoutEmptyTools. `renderer` is a GerberRenderer from createGerberRenderer;
+// renderLayerDiff, copyScaled, withoutEmptyTools, holesToExcellon, traceLayer, readRendererPixels. `renderer` is a GerberRenderer from createGerberRenderer;
 // null = one shared renderer made on first use (needs a DOM canvas).
 
 import * as builtin from '../gerber/index.js';
-import { loopBounds, padBounds, rectOutline, outlinesDiffer, BOARD_THICKNESS } from '../geom/index.js';
+import * as THREE from '../../../three/three.module.js';
+import {
+  loopBounds, padBounds, rectOutline, outlinesDiffer, fillHoles, counterClockwise, clockwise, BOARD_THICKNESS, PASTE_THICKNESS,
+} from '../geom/index.js';
 import { buildBoard, canvasTexture, outlineGhost } from './solid.js';
 
 export const FACE_PX_PER_MM = 24;      // ~0.04 mm per texel: 0.1 mm tracks and silk stay legible
@@ -66,6 +69,28 @@ export function readFabFiles(gerber, files, board = {}) {
   if (!outline && board.origin_mm && board.size_mm) outline = rectOutline(board);
   const holes = drills.flatMap((d) => d.holes.map((h) => ({ ...h, plated: d.plated })));
   return { grouped, outline, holes, drills, edge };
+}
+
+/**
+ * A readFabFiles() result with every plated round hole of drill diameter <= `upTo` mm filled and capped
+ * (geom fillHoles): left out of the solid (no opening, no barrel) and out of the drill files the faces are
+ * painted with, so the pad's copper (under the mask, or finished in a mask opening) covers the spot on
+ * both faces. `upTo` null or <= 0 returns `fab` itself.
+ */
+export function fillFab(gerber, fab, upTo) {
+  if (!(Number(upTo) > 0)) return fab;
+  gerber = gerber || builtin;
+  const toExcellon = gerber.holesToExcellon || builtin.holesToExcellon;
+  const drills = fab.drills.map((d) => ({ ...d, holes: fillHoles(d.holes, upTo) }));
+  const changed = new Map();
+  for (const d of drills) {
+    if (d.holes.some((h) => h.filled)) changed.set(d.name, toExcellon(d.holes.filter((h) => !h.filled)));
+  }
+  const grouped = {
+    ...fab.grouped,
+    drills: (fab.grouped.drills || []).map((d) => (changed.has(d.name) ? { ...d, source: changed.get(d.name) } : d)),
+  };
+  return { ...fab, grouped, drills, holes: fillHoles(fab.holes, upTo) };
 }
 
 /** One frame for the face pictures of several boards (e.g. base and head), so any texture fits any face. */
@@ -130,12 +155,13 @@ export async function paintCopperDiff(gerber, renderer, { base, head }, painted,
  * Everything at once: read the files, paint the faces, build the solid.
  *   files      [{name, text, plated?}]
  *   options    {thickness (default 1.6), board: {size_mm?, origin_mm?}, palette, bounds (shared frame),
- *               pxPerMm, maxTextureSize, budget (hole budget)}
+ *               pxPerMm, maxTextureSize, budget (hole budget), fillUpTo (mm: fill and cap plated holes up to
+ *               this drill diameter, see fillFab)}
  * Returns buildBoard()'s result plus {fab, painted, textures: {top, bottom}}; dispose() frees the textures.
  */
 export async function buildGerberBoard(gerber, renderer, files, options = {}) {
   gerber = check(gerber);
-  const fab = readFabFiles(gerber, files, options.board || {});
+  const fab = fillFab(gerber, readFabFiles(gerber, files, options.board || {}), options.fillUpTo);
   if (!fab.outline) throw new Error('buildGerberBoard: no board outline (no Edge.Cuts and no board box)');
   const painted = await paintFaces(gerber, renderer, fab, options);
   const textures = { top: canvasTexture(painted.top), bottom: canvasTexture(painted.bottom) };
@@ -147,6 +173,56 @@ export async function buildGerberBoard(gerber, renderer, files, options = {}) {
   return {
     ...solid, fab, painted, textures,
     dispose() { dispose(); textures.top.dispose(); textures.bottom.dispose(); },
+  };
+}
+
+/**
+ * The solder paste as solids: each face's paste Gerber rasterised in `painted`'s frame, traced back to
+ * outlines (boarddd/gerber traceLayer) and extruded `height` mm off that face (top: up from `thickness`,
+ * bottom: down from 0). `fab` from readFabFiles. Returns {group (userData.group 'paste' on each mesh),
+ * meshes: {top, bottom} (null where a face has no paste), material, dispose()}.
+ */
+export async function buildPaste(gerber, renderer, fab, painted, { thickness = BOARD_THICKNESS, height = PASTE_THICKNESS, color = 0xa6a6b3, name = 'paste' } = {}) {
+  gerber = gerber || builtin;
+  renderer = renderer || await defaultRenderer();
+  const trace = gerber.traceLayer || builtin.traceLayer;
+  const group = new THREE.Group();
+  group.name = name;
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.35 });
+  const meshes = { top: null, bottom: null };
+  const { bounds } = painted;
+  const { width, height: rows } = painted.size;
+  const toWorld = ([px, py]) => new THREE.Vector2(
+    bounds.minX + (px / width) * (bounds.maxX - bounds.minX), bounds.maxY - (py / rows) * (bounds.maxY - bounds.minY));
+  for (const face of ['top', 'bottom']) {
+    const paste = fab.grouped?.[face]?.paste;
+    if (!paste) continue;
+    const r = await gerber.renderFaceRaster(renderer, { [face]: { paste } }, {
+      bounds, side: face, width, height: rows, paste: true, substrate: false, finish: false, holes: false, flatten: false,
+    });
+    // gl.readPixels straight off the renderer: a 2D-canvas getImageData of the same frame took seconds
+    const read = gerber.readRendererPixels || builtin.readRendererPixels;
+    const { pixels, width: w, height: h } = renderer.getContext && r.canvas === renderer.canvas
+      ? read(renderer)
+      : (() => { const c = gerber.copyScaled(r.canvas, Math.max(width, rows)); return { pixels: c.getContext('2d').getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height }; })();
+    const shapes = trace(pixels, w, h).map((s) => {
+      // y flips between pixels and the board, so wind explicitly: outer CCW, holes CW
+      const shape = new THREE.Shape(counterClockwise(s.outer.map(toWorld).map((v) => [v.x, v.y])).map(([x, y]) => new THREE.Vector2(x, y)));
+      for (const hole of s.holes) shape.holes.push(new THREE.Path(clockwise(hole.map(toWorld).map((v) => [v.x, v.y])).map(([x, y]) => new THREE.Vector2(x, y))));
+      return shape;
+    });
+    if (!shapes.length) continue;
+    const geometry = new THREE.ExtrudeGeometry(shapes, { depth: height, bevelEnabled: false, curveSegments: 1 });
+    geometry.translate(0, 0, face === 'top' ? thickness + 0.001 : -height - 0.001);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `${name}-${face}`;
+    mesh.userData.group = 'paste';
+    group.add(mesh);
+    meshes[face] = mesh;
+  }
+  return {
+    group, meshes, material,
+    dispose() { for (const m of Object.values(meshes)) m?.geometry.dispose(); material.dispose(); },
   };
 }
 

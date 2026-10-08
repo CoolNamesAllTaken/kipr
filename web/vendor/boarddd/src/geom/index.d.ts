@@ -43,11 +43,17 @@ export function strokeLoops(pts: Vec2[], width: number, closed?: boolean): Loop[
 export const HOLE_BUDGET: number;
 export const PLATING_MM: number;
 /** A drill as wasm-gerber-renderer's parseExcellon gives it (board mm); `d` is accepted for `diameter`. */
-export interface Hole { x: number; y: number; diameter?: number; d?: number; plated?: boolean; x2?: number | null; y2?: number | null; filled?: boolean }
+export interface Hole { x: number; y: number; diameter?: number; d?: number; plated?: boolean; x2?: number | null; y2?: number | null; filled?: boolean; via?: boolean }
 export interface KeptHole { plated: boolean; radius: number; ends: Vec2[]; extent: number }
 export interface HoleReport { kept: KeptHole[]; leftOut: { count: number; total: number; largest_mm: number } | null; rejected: number }
 export function usableHoles(holes: Hole[], outline: Outline, budget?: number): HoleReport;
 export function holeLoop(hole: KeptHole, grow?: number): Loop;
+/** Paste deposit height, mm (0.12). */
+export const PASTE_THICKNESS: number;
+/** Plated round holes with drill diameter <= upTo mm marked filled (and capped); a new array. */
+export function fillHoles<H extends Hole>(holes: H[], upTo: number | null | undefined): (H & { filled?: boolean })[];
+/** Plated round drill sizes, smallest first, with counts (vias: marked ViaDrill). */
+export function drillSizes(holes: Hole[]): { diameter: number; count: number; vias: number }[];
 
 // pads (KiCad frame, y down; see src/geom/pads.js)
 export interface Pad {

@@ -17,7 +17,7 @@ After a boarddd or three.js change, rebuild the two committed file:// bundles:
 
 | | version | licence | what |
 |---|---|---|---|
-| `boarddd/` | the tag in `boarddd/COMMIT` (v0.2.1) | MIT | [CoolNamesAllTaken/boarddd](https://github.com/CoolNamesAllTaken/boarddd) `src/`: geom, board, footprint, models, scene, gerber; `third_party/wasm-gerber-renderer/core/`: the gerber renderer core and its wasm (wasm-gerber-viewer, MIT) |
+| `boarddd/` | the tag or commit in `boarddd/COMMIT` | MIT | [CoolNamesAllTaken/boarddd](https://github.com/CoolNamesAllTaken/boarddd) `src/`: geom, board, footprint, models, scene, gerber; `third_party/wasm-gerber-renderer/core/`: the gerber renderer core and its wasm (wasm-gerber-viewer, MIT) |
 | `three/` | 0.185.1 | MIT | `three.module.js`, `three.core.js` and the addons boarddd uses, in upstream's `examples/jsm` layout under `addons/` |
 | `occt-import-js/` | 0.0.23 | LGPL-2.1 (OpenCascade: LGPL-2.1 + exception) | `dist/occt-import-js.js` + `.wasm`, unmodified; the library viewer's STEP kernel |
 

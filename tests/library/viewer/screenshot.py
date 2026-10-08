@@ -138,6 +138,30 @@ def shoot(a, manifest, base):
                     page.click(f".view-box button[data-view='{v}']")
                     page.wait_for_timeout(500)
                     shot(f"{slug}--3d-view-{v}")
+                if page.locator("#g3-paste").count():
+                    # paste is on by default (fresh browser profile)
+                    shown = "() => { let n = 0; window.__cr3d.viewer.content.traverse((o) => { if (o.userData.group === 'paste' && o.visible) n++; }); return n; }"
+                    if not page.is_checked("#g3-paste") or not page.evaluate(shown):
+                        problems.append(f"{slug}: paste not shown by default")
+                    shot(f"{slug}--3d-paste")
+                    page.uncheck("#g3-paste")
+                    page.wait_for_timeout(300)
+                    if page.evaluate(shown):
+                        problems.append(f"{slug}: paste still shown after turning it off")
+                    shot(f"{slug}--3d-no-paste")
+                    page.check("#g3-paste")
+                if page.locator("#g3-fill").count():
+                    barrels = "() => { let n = 0; window.__cr3d.viewer.content.traverse((o) => { if (o.userData.group === 'barrels') n++; }); return n; }"
+                    before = page.evaluate(barrels)
+                    page.select_option("#g3-fill", index=page.locator("#g3-fill option").count() - 1)
+                    page.wait_for_timeout(400)
+                    if page.evaluate(barrels) >= before:
+                        problems.append(f"{slug}: filling every pad hole size left {page.evaluate(barrels)} of {before} barrels")
+                    shot(f"{slug}--3d-filled")
+                    page.select_option("#g3-fill", index=0)
+                    page.wait_for_timeout(300)
+                    if page.evaluate(barrels) != before:
+                        problems.append(f"{slug}: fill off did not restore the barrels")
                 for g in ("model", "board"):
                     if page.locator(f"#g3-{g}").count():
                         page.uncheck(f"#g3-{g}")

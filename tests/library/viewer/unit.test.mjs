@@ -148,3 +148,14 @@ test('pad diff matches duplicate numbers in order', () => {
   const st = rows.map((r) => r.status).sort();
   assert.deepEqual(st, ['added', 'changed', 'removed', 'same']);
 });
+
+test('3D fill choices: plated round pad drills only, counted per size', async () => {
+  const { padDrillSizes } = await import('../../../web/library/js/view3d.js');
+  assert.deepEqual(padDrillSizes([
+    { type: 'thru_hole', drill: 0.4 }, { type: 'thru_hole', drill: { shape: 'circle', size: [0.4, 0.4] } },
+    { type: 'thru_hole', drill: { shape: 'circle', size: [1.0, 1.0] } },
+    { type: 'thru_hole', drill: { shape: 'oval', size: [0.6, 1.2] } },   // slot: stays open
+    { type: 'np_thru_hole', drill: 0.3 },                                  // unplated: stays open
+    { type: 'smd' },
+  ]), [{ diameter: 0.4, count: 2 }, { diameter: 1, count: 1 }]);
+});

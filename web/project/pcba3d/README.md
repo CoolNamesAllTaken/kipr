@@ -85,6 +85,14 @@ failure, which is reported in the status line.
 - **Outline changes**: when the base outline differs from the head's, it is drawn as a red edge
   on both faces in the overlaid modes. The copper diff also shows the outline's removed and
   added strokes.
+- **Solder paste** (toolbar icon, on by default): each face's paste Gerber is rasterised in the
+  face frame, traced back to outlines and extruded 0.12 mm (boarddd `buildPaste`). Built on first use.
+- **Filled and capped holes** (toolbar select: off or a drill size, counts in the tooltips): every
+  plated round hole up to that drill, vias and pad holes alike, is left out of the solid and of the
+  painted drill files (boarddd `fillFab`), so the pad copper caps it on both faces, under the mask
+  or finished where the mask opens (VIPPO). Unplated holes and slots stay open. Changing it
+  repaints the boards. Both choices are remembered per browser (`kipr.3d.paste`, `kipr.3d.fill`);
+  `mountPcba3d(..., {paste, fillUpTo})` and demo.html's `paste=` / `fill=` override them.
 
 Empty KiCad layers (a header-only `B_SilkS.gbr`, or an `NPTH.drl` with no holes) are skipped by
 the renderer, and drill tools with no diameter (KiCad 10's `T1C0.000` for drill-less vias) are dropped

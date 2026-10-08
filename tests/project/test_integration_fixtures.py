@@ -94,6 +94,25 @@ def test_schematic_changes(doc):
     assert all(c["bbox_mm"] and c["bbox_mm"][2] > 0 for c in root["changes"] if c["kind"] == "symbol")
 
 
+def test_schematic_moved_block_is_quiet(doc):
+    """pic_sockets: the P2/P3 socket block moved 12.7 mm left (same connections), P2's value changed."""
+    p = proj(doc, "pic_programmer")
+    sh = {s["id"]: s for s in p["schematic"]["sheets"]}["root/pic_sockets"]
+    by_ref = {c.get("ref"): c for c in sh["changes"] if c["kind"] == "symbol"}
+    if "P3" not in by_ref:
+        pytest.skip("fixtures head predates the pic_sockets block move")
+    assert by_ref["P3"]["what"] == "moved" and by_ref["P3"]["move_only"] is True
+    assert by_ref["P2"]["what"] == "value" and not by_ref["P2"].get("move_only")
+    assert all(c.get("move_only") for c in sh["changes"] if c.get("ref") != "P2"), \
+        [c for c in sh["changes"] if not c.get("move_only")]
+    kinds = {c["kind"] for c in sh["changes"] if c.get("move_only")}
+    assert {"symbol", "wire", "label"} <= kinds
+    assert sh["counts"]["changed"] == 1 and sh["counts"]["moved"] >= 10 and not sh.get("moved_only")
+    root = {s["id"]: s for s in p["schematic"]["sheets"]}["root"]
+    assert not any(c.get("move_only") for c in root["changes"])  # real edits only there
+    assert p["summary"]["sch_moved"] == sh["counts"]["moved"]
+
+
 def test_pcb_changes_and_layers(doc):
     p = proj(doc, "pic_programmer")
     ch = p["pcb"]["changes"]

@@ -1,4 +1,5 @@
 """Apply the head schematic edits to pic_programmer (run from the repo root on the base tree)."""
+import re
 import sys
 sys.path.insert(0, 'scripts')
 from sexpr import *
@@ -50,4 +51,36 @@ nc_u4 = '''	(no_connect
 
 s = insert_before(s, '\t(sheet\n', nc_u4 + '\t' + '\n\t'.join([c10, vcc10, gnd10, gndj1]) + '\n')
 open(P, 'w').write(s)
-print('ok')
+
+# 7. pic_sockets: the P2/P3 socket block (symbols, power symbols, labels, no-connect flags, junctions,
+#    wires) moves 12.7 mm left without changing connectivity; the horizontal wires that feed it from
+#    the left keep their outer end (they get shorter). Real change nearby: P2 value SUPP28 -> ZIF28.
+S = 'pic_programmer/pic_sockets.kicad_sch'
+s = open(S).read()
+X0, DX = 175.0, -12.7
+
+
+def move_xy(b):
+    def rep(m):
+        x, y = float(m.group(1)), float(m.group(2))
+        return '(xy %s %s)' % (fmt(x + DX if x > X0 else x), m.group(2))
+    return re.sub(r'\(xy (-?[\d.]+) (-?[\d.]+)\)', rep, b)
+
+
+edits = []
+for head in ('symbol', 'label', 'no_connect', 'junction', 'wire'):
+    for st, b in top_blocks(s, head):
+        if head == 'wire':
+            pts = [float(x) for x in re.findall(r'\(xy (-?[\d.]+) -?[\d.]+\)', b)]
+            if any(x > X0 for x in pts):
+                ys = set(re.findall(r'\(xy -?[\d.]+ (-?[\d.]+)\)', b))
+                assert all(x > X0 for x in pts) or len(ys) == 1, 'only horizontal wires may cross the block edge'
+                edits.append((st, b, move_xy(b)))
+        elif float(re.search(r'\(at (-?[\d.]+) ', b).group(1)) > X0:
+            edits.append((st, b, shift_at(b, DX, 0)))
+for st, b, nb in sorted(edits, reverse=True):
+    s = s[:st] + nb + s[st + len(b):]
+st, b = find_symbol(s, 'P2')
+s = s[:st] + set_prop(b, 'Value', 'ZIF28') + s[st + len(b):]
+open(S, 'w').write(s)
+print('ok', len(edits), 'items moved')

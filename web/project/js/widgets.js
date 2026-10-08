@@ -1,6 +1,7 @@
-// Tiny shared UI bits: segmented mode bar, labelled slider, diff legend, Boxes toggle.
-import { el } from './util.js';
+// Tiny shared UI bits: segmented mode bar, labelled slider, diff legend, Boxes and smart diff toggles.
+import { el, svgEl } from './util.js';
 import { boxesShown, toggleBoxes, onBoxes } from './boxes.js';
+import { smartOn, toggleSmart, onSmart } from './smart.js';
 
 export function createModeBar(modes, current, onPick, label = 'Compare mode') {
   const bar = el('div', { class: 'seg', role: 'tablist', 'aria-label': label });
@@ -23,6 +24,18 @@ export function sliderLabel(left, right, value, onInput, aria, step = 0.01) {
 export function boxesToggle(onChange) {
   const btn = el('button', { class: 'btn boxes-toggle', title: 'Show / hide the boxes around changes (b)', 'aria-pressed': String(boxesShown()), onclick: () => toggleBoxes() }, 'Boxes');
   const stop = onBoxes((on) => { btn.setAttribute('aria-pressed', String(on)); onChange(on); });
+  return { el: btn, stop };
+}
+
+const SMART_TIP = 'Smart diff (s): items that only moved, with the same connections, stay quiet. Off: raw diff, moves show as changes.';
+
+/** The schematic's smart diff toggle (an icon, key s); onChange(on) on every change. Call stop() on destroy. */
+export function smartToggle(onChange) {
+  // four-way move arrows
+  const icon = svgEl('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true' },
+    svgEl('path', { d: 'M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2' }));
+  const btn = el('button', { class: 'btn smart-toggle', title: SMART_TIP, 'aria-label': 'Smart diff', 'aria-pressed': String(smartOn()), onclick: () => toggleSmart() }, icon);
+  const stop = onSmart((on) => { btn.setAttribute('aria-pressed', String(on)); onChange(on); });
   return { el: btn, stop };
 }
 

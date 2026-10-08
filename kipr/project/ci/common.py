@@ -255,7 +255,8 @@ def summary_table(doc: dict) -> str:
         rows.append("| " + " | ".join([
             f"{code(text(p.get('name')) or text(p.get('slug')), 60)}<br><sub>{md_inline(text(p.get('path')) or '.', 120)}</sub>",
             f"{STATUS_ICON[st]} {st}",
-            str(num(s.get("sheets_changed"))), str(num(s.get("layers_changed"))), " ".join(parts),
+            str(num(s.get("sheets_changed"))) + (f" (+{num(s.get('sheets_moved'))} moved)" if num(s.get("sheets_moved")) else ""),
+            str(num(s.get("layers_changed"))), " ".join(parts),
             str(num(s.get("nets_changed"))), checks[0], checks[1], grid_cell(p), impedance_cell(p),
             "<br>".join(x for x in (kind_note(p), f"⚠️ {errors} export/parse problem(s)" if errors else "") if x)]) + " |")
     return "\n".join(rows)
@@ -269,8 +270,11 @@ def change_lines(p: dict, limit: int = 40) -> list[str]:
             continue
         title = md_inline(text(sh.get("title")) or text(sh.get("id")), 60)
         for c in lst(sh.get("changes")):
-            if isinstance(c, dict) and not c.get("power") and not c.get("minor"):
+            if isinstance(c, dict) and not c.get("power") and not c.get("minor") and not c.get("move_only"):
                 out.append(f"- sch {title}: {_change(c)}")
+        moved = sum(1 for c in lst(sh.get("changes")) if isinstance(c, dict) and c.get("move_only"))
+        if moved:  # smart diff: moved with the same connections, counted only
+            out.append(f"- sch {title}: {moved} item(s) moved, same connections")
     minor: dict = {}
     bulk: dict = {}
     for c in lst(d(p.get("pcb")).get("changes")):

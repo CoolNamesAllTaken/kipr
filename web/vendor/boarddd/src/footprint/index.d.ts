@@ -24,7 +24,7 @@ export interface BuiltFootprint {
   outline: Outline;
   thickness: number;
   uvBounds: Bounds;
-  meshes: { board: THREE.Mesh; copper: THREE.Mesh[]; barrels: THREE.Mesh[]; silk: THREE.Mesh[]; fab: THREE.Mesh[]; courtyard: THREE.Mesh[] };
+  meshes: { board: THREE.Mesh; copper: THREE.Mesh[]; barrels: THREE.Mesh[]; paste: THREE.Mesh[]; silk: THREE.Mesh[]; fab: THREE.Mesh[]; courtyard: THREE.Mesh[] };
   /** Board-frame placement for one of fp.models (KiCad's model matrix on the top face). */
   modelMatrix(model: FootprintModel): Mat4;
   dispose(): void;
@@ -33,5 +33,13 @@ export function buildFootprint(fp: Footprint, options?: {
   thickness?: number; margin?: number; outline?: Outline; faces?: { top?: Face; bottom?: Face }; uvBounds?: Bounds;
   /** Layer pictures over uvBounds drawn as transparent sheets in the silk / fab / courtyard groups. */
   decals?: Partial<Record<'silk' | 'fab' | 'courtyard', { top?: Face; bottom?: Face }>>;
-  colors?: Partial<{ mask: number; fr4: number; copper: number; silk: number; fab: number; courtyard: number }>;
+  colors?: Partial<{ mask: number; fr4: number; copper: number; paste: number; silk: number; fab: number; courtyard: number }>;
+  /** Fill and cap plated round pad holes up to this drill diameter, mm (no hole, no barrel). */
+  fillUpTo?: number | null;
+  /** Build paste deposits on the pads' paste layers (group 'paste'); default false. */
+  paste?: boolean;
 }): BuiltFootprint;
+/** Which paste faces the pad is on (F.Paste, B.Paste, *.Paste). */
+export function padPasteSides(pad: import('../geom/index.js').Pad): { top: boolean; bottom: boolean };
+/** A plated round pad hole of drill diameter <= upTo mm. */
+export function padFilled(pad: import('../geom/index.js').Pad, upTo: number | null | undefined): boolean;
