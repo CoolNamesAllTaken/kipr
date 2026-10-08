@@ -15822,9 +15822,9 @@ var KIPR_PCBA3D_SCRIPT_URL = (document.currentScript && document.currentScript.s
     earcutLinked(outerNode, triangles, dim, minX, minY, invSize, 0);
     return triangles;
   }
-  function linkedList(data, start, end, dim, clockwise) {
+  function linkedList(data, start, end, dim, clockwise2) {
     let last;
-    if (clockwise === signedArea(data, start, end, dim) > 0) {
+    if (clockwise2 === signedArea(data, start, end, dim) > 0) {
       for (let i = start; i < end; i += dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
     } else {
       for (let i = end - dim; i >= start; i -= dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
@@ -36375,6 +36375,7 @@ void main() {
     hasInk: () => hasInk,
     holeMask: () => holeMask,
     holesPath: () => holesPath,
+    holesToExcellon: () => holesToExcellon,
     holesToGerber: () => holesToGerber,
     layerRole: () => layerRole,
     loadOdbJob: () => loadOdbJob2,
@@ -36488,7 +36489,9 @@ void main() {
     const defaultPlated = options.plated ?? true;
     const diameters = /* @__PURE__ */ new Map();
     const plating = /* @__PURE__ */ new Map();
+    const viaTools = /* @__PURE__ */ new Set();
     let pendingPlated = null;
+    let pendingVia = false;
     let current = null;
     let inBody = false;
     let routDown = false;
@@ -36518,21 +36521,26 @@ void main() {
         skipped += 1;
         return;
       }
-      holes.push({
+      const hole = {
         x,
         y,
         diameter,
         plated: plating.get(current) ?? defaultPlated,
         x2,
         y2
-      });
+      };
+      if (viaTools.has(current)) hole.via = true;
+      holes.push(hole);
     };
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
       if (line.startsWith(";")) {
         const found = APER_FUNCTION.exec(line);
-        if (found) pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
+        if (found) {
+          pendingPlated = found[1].trim().toLowerCase() !== "nonplated";
+          pendingVia = /ViaDrill/i.test(line);
+        }
         const format = KICAD_FORMAT.exec(line);
         if (format) {
           integerDigits = Number(format[1]);
@@ -36585,7 +36593,9 @@ void main() {
         const tool = Number(definition[1]);
         diameters.set(tool, Number(definition[2]) * scale());
         plating.set(tool, pendingPlated ?? defaultPlated);
+        if (pendingVia) viaTools.add(tool);
         pendingPlated = null;
+        pendingVia = false;
         continue;
       }
       if (definition && inBody) {
@@ -36779,6 +36789,35 @@ void main() {
       }
     }
     lines.push("M02*");
+    return lines.join("\n") + "\n";
+  }
+  function holesToExcellon(holes) {
+    const tools = /* @__PURE__ */ new Map();
+    for (const hole of holes || []) {
+      const diameter = Number(hole.diameter ?? hole.d);
+      if (!(diameter > 0)) continue;
+      const key = `${diameter.toFixed(3)}|${hole.plated === false ? "N" : "P"}`;
+      if (!tools.has(key)) tools.set(key, { diameter, plated: hole.plated !== false, holes: [] });
+      tools.get(key).holes.push(hole);
+    }
+    const n = (value) => Number(value).toFixed(4);
+    const lines = ["M48", "; FORMAT={-:-/ absolute / metric / decimal}", "FMAT,2", "METRIC"];
+    let t = 0;
+    for (const tool of tools.values()) {
+      t += 1;
+      tool.code = t;
+      lines.push(`; #@! TA.AperFunction,${tool.plated ? "Plated,PTH" : "NonPlated,NPTH"},ComponentDrill`, `T${t}C${tool.diameter.toFixed(3)}`);
+    }
+    lines.push("%", "G90", "G05");
+    for (const tool of tools.values()) {
+      lines.push(`T${tool.code}`);
+      for (const hole of tool.holes) {
+        const slot = hole.x2 != null && hole.y2 != null && (hole.x2 !== hole.x || hole.y2 !== hole.y);
+        if (slot) lines.push(`G00X${n(hole.x)}Y${n(hole.y)}`, "M15", `G01X${n(hole.x2)}Y${n(hole.y2)}`, "M16", "G05");
+        else lines.push(`X${n(hole.x)}Y${n(hole.y)}`);
+      }
+    }
+    lines.push("M30");
     return lines.join("\n") + "\n";
   }
 
@@ -40373,7 +40412,7 @@ void main() {
     const units = UNITS2.exec(text);
     return (units && units[1] === "IN" ? 25.4 : 1) / 10 ** decimals;
   }
-  function arcPoints(start, end, center, clockwise) {
+  function arcPoints(start, end, center, clockwise2) {
     const [sx, sy] = start;
     const [ex, ey] = end;
     const [cx, cy] = center;
@@ -40381,7 +40420,7 @@ void main() {
     if (radius <= 0) return [end];
     const startAngle = Math.atan2(sy - cy, sx - cx);
     let sweep = Math.atan2(ey - cy, ex - cx) - startAngle;
-    if (clockwise) {
+    if (clockwise2) {
       while (sweep > 0) sweep -= 2 * Math.PI;
       if (Math.abs(sweep) < 1e-9) sweep = -2 * Math.PI;
     } else {
@@ -40399,7 +40438,7 @@ void main() {
     }
     return points;
   }
-  function quadrantCenter(start, end, i, j, clockwise) {
+  function quadrantCenter(start, end, i, j, clockwise2) {
     const [sx, sy] = start;
     const [ex, ey] = end;
     let best = [sx + i, sy + j];
@@ -40412,7 +40451,7 @@ void main() {
         const error2 = Math.abs(rStart - Math.hypot(ex - cx, ey - cy));
         if (error2 > Math.max(rStart, 1) * 1e-3) continue;
         let sweep = Math.atan2(ey - cy, ex - cx) - Math.atan2(sy - cy, sx - cx);
-        if (clockwise) while (sweep > 0) sweep -= 2 * Math.PI;
+        if (clockwise2) while (sweep > 0) sweep -= 2 * Math.PI;
         else while (sweep < 0) sweep += 2 * Math.PI;
         if (Math.abs(sweep) > Math.PI / 2 + 1e-6) continue;
         if (error2 < bestError) {
@@ -44042,6 +44081,7 @@ ${content}
   }
   var isClockwise = (loop) => signedArea22(loop) < 0;
   var counterClockwise = (loop) => isClockwise(loop) ? loop.slice().reverse() : loop;
+  var clockwise = (loop) => isClockwise(loop) ? loop : loop.slice().reverse();
   function pointToSegment(px2, py2, ax, ay, bx, by) {
     const dx = bx - ax, dy = by - ay;
     const l2 = dx * dx + dy * dy;
@@ -44156,6 +44196,25 @@ ${content}
     return { kept: ordered.slice(0, budget), leftOut: { count: left.length, total: kept.length, largest_mm: left[0].extent }, rejected };
   }
   var holeLoop = (hole, grow2 = 0) => loopAt(hole.ends, hole.radius + grow2);
+  var PASTE_THICKNESS = 0.12;
+  var fillable = (hole) => hole.plated !== false && (hole.x2 == null || hole.y2 == null || hole.x2 === hole.x && hole.y2 === hole.y);
+  function fillHoles(holes, upTo) {
+    const limit = Number(upTo);
+    if (!(limit > 0)) return (holes || []).slice();
+    return (holes || []).map((hole) => fillable(hole) && Number(hole.diameter ?? hole.d) <= limit + 1e-6 ? { ...hole, filled: true } : hole);
+  }
+  function drillSizes(holes) {
+    const sizes = /* @__PURE__ */ new Map();
+    for (const hole of holes || []) {
+      const diameter = Math.round(Number(hole.diameter ?? hole.d) * 1e3) / 1e3;
+      if (!(diameter > 0) || !fillable(hole)) continue;
+      const s = sizes.get(diameter) || { diameter, count: 0, vias: 0 };
+      s.count += 1;
+      if (hole.via) s.vias += 1;
+      sizes.set(diameter, s);
+    }
+    return [...sizes.values()].sort((a, b) => a.diameter - b.diameter);
+  }
 
   // ../vendor/boarddd/src/board/solid.js
   var COLORS = {
@@ -44340,6 +44399,21 @@ ${content}
     const holes = drills.flatMap((d) => d.holes.map((h2) => ({ ...h2, plated: d.plated })));
     return { grouped, outline, holes, drills, edge };
   }
+  function fillFab(gerber, fab, upTo) {
+    if (!(Number(upTo) > 0)) return fab;
+    gerber = gerber || gerber_exports;
+    const toExcellon = gerber.holesToExcellon || holesToExcellon;
+    const drills = fab.drills.map((d) => ({ ...d, holes: fillHoles(d.holes, upTo) }));
+    const changed = /* @__PURE__ */ new Map();
+    for (const d of drills) {
+      if (d.holes.some((h2) => h2.filled)) changed.set(d.name, toExcellon(d.holes.filter((h2) => !h2.filled)));
+    }
+    const grouped = {
+      ...fab.grouped,
+      drills: (fab.grouped.drills || []).map((d) => changed.has(d.name) ? { ...d, source: changed.get(d.name) } : d)
+    };
+    return { ...fab, grouped, drills, holes: fillHoles(fab.holes, upTo) };
+  }
   function faceBounds(outlines, pad = 0.5) {
     return padBounds2(loopBounds(...outlines.filter(Boolean).map((o) => o.board)), pad);
   }
@@ -44388,7 +44462,7 @@ ${content}
   }
   async function buildGerberBoard(gerber, renderer, files, options = {}) {
     gerber = check(gerber);
-    const fab = readFabFiles(gerber, files, options.board || {});
+    const fab = fillFab(gerber, readFabFiles(gerber, files, options.board || {}), options.fillUpTo);
     if (!fab.outline) throw new Error("buildGerberBoard: no board outline (no Edge.Cuts and no board box)");
     const painted = await paintFaces(gerber, renderer, fab, options);
     const textures = { top: canvasTexture(painted.top), bottom: canvasTexture(painted.bottom) };
@@ -44414,11 +44488,68 @@ ${content}
       }
     };
   }
+  async function buildPaste(gerber, renderer, fab, painted, { thickness = BOARD_THICKNESS, height = PASTE_THICKNESS, color = 10921651, name = "paste" } = {}) {
+    gerber = gerber || gerber_exports;
+    renderer = renderer || await defaultRenderer();
+    const trace = gerber.traceLayer || traceLayer;
+    const group = new Group();
+    group.name = name;
+    const material = new MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.35 });
+    const meshes = { top: null, bottom: null };
+    const { bounds } = painted;
+    const { width, height: rows } = painted.size;
+    const toWorld2 = ([px2, py2]) => new Vector2(
+      bounds.minX + px2 / width * (bounds.maxX - bounds.minX),
+      bounds.maxY - py2 / rows * (bounds.maxY - bounds.minY)
+    );
+    for (const face2 of ["top", "bottom"]) {
+      const paste = fab.grouped?.[face2]?.paste;
+      if (!paste) continue;
+      const r = await gerber.renderFaceRaster(renderer, { [face2]: { paste } }, {
+        bounds,
+        side: face2,
+        width,
+        height: rows,
+        paste: true,
+        substrate: false,
+        finish: false,
+        holes: false,
+        flatten: false
+      });
+      const read = gerber.readRendererPixels || readRendererPixels;
+      const { pixels, width: w, height: h2 } = renderer.getContext && r.canvas === renderer.canvas ? read(renderer) : (() => {
+        const c = gerber.copyScaled(r.canvas, Math.max(width, rows));
+        return { pixels: c.getContext("2d").getImageData(0, 0, c.width, c.height).data, width: c.width, height: c.height };
+      })();
+      const shapes = trace(pixels, w, h2).map((s) => {
+        const shape = new Shape(counterClockwise(s.outer.map(toWorld2).map((v) => [v.x, v.y])).map(([x, y]) => new Vector2(x, y)));
+        for (const hole of s.holes) shape.holes.push(new Path(clockwise(hole.map(toWorld2).map((v) => [v.x, v.y])).map(([x, y]) => new Vector2(x, y))));
+        return shape;
+      });
+      if (!shapes.length) continue;
+      const geometry = new ExtrudeGeometry(shapes, { depth: height, bevelEnabled: false, curveSegments: 1 });
+      geometry.translate(0, 0, face2 === "top" ? thickness + 1e-3 : -height - 1e-3);
+      const mesh = new Mesh(geometry, material);
+      mesh.name = `${name}-${face2}`;
+      mesh.userData.group = "paste";
+      group.add(mesh);
+      meshes[face2] = mesh;
+    }
+    return {
+      group,
+      meshes,
+      material,
+      dispose() {
+        for (const m of Object.values(meshes)) m?.geometry.dispose();
+        material.dispose();
+      }
+    };
+  }
 
   // pcba3d/gerberboard.js
   var OFFLINE_WASM_KEY = "vendor/boarddd/third_party/wasm-gerber-renderer/core/wasm/wasm_gerber_processor_bg.wasm";
   var WASM_URL = new URL(`../${OFFLINE_WASM_KEY}`, KIPR_PCBA3D_SCRIPT_URL);
-  var FAB_KINDS = /* @__PURE__ */ new Set(["copper", "mask", "silk", "outline", "drill"]);
+  var FAB_KINDS = /* @__PURE__ */ new Set(["copper", "mask", "silk", "paste", "outline", "drill"]);
   var GERBER = gerber_exports;
   function basename(path) {
     return String(path).split("/").pop();
@@ -44453,7 +44584,7 @@ ${content}
     return p;
   }
   async function buildGerberBoards(project2, assets, { onStatus = () => {
-  }, maxTextureSize = MAX_FACE_PX } = {}) {
+  }, maxTextureSize = MAX_FACE_PX, fillUpTo = null } = {}) {
     if (!project2.pcb?.layers?.length) return null;
     const files = {};
     const fab = {};
@@ -44481,7 +44612,8 @@ ${content}
           palette: palette(info),
           bounds,
           maxTextureSize,
-          name: `gerber-${side}`
+          name: `gerber-${side}`,
+          fillUpTo
         });
         s.body.userData.boardKind = "substrate";
         s.approximate = !!s.outline.approximate;
@@ -44495,27 +44627,62 @@ ${content}
     const outlineChanged = !!(sides.base && sides.head && outlinesDiffer(sides.base.outline, sides.head.outline));
     const ghost2 = outlineChanged ? outlineGhost(sides.base.outline, [sides.base.thickness + 0.03, -0.03]) : null;
     if (ghost2) ghost2.name = "base-outline-ghost";
+    let queue = Promise.resolve();
+    const exclusive = (job) => {
+      const run = queue.then(job, job);
+      queue = run.catch(() => {
+      });
+      return run;
+    };
     const owned = [];
     let diffPromise = null;
     const diffTextures = () => {
-      diffPromise ?? (diffPromise = (async () => {
+      diffPromise ?? (diffPromise = exclusive(async () => {
         onStatus("Diffing the copper\u2026");
         const painted = (sides.head || sides.base).painted;
         const c = await paintCopperDiff(GERBER, renderer, { base: fab.base || null, head: fab.head || null }, painted, { maxTextureSize });
         const out = { top: canvasTexture(c.top), bottom: canvasTexture(c.bottom) };
         owned.push(out.top, out.bottom);
         return out;
-      })());
+      }));
       return diffPromise;
     };
+    let pastePromise = null;
+    const paste = () => {
+      pastePromise ?? (pastePromise = exclusive(async () => {
+        let any = false;
+        for (const s of Object.values(sides)) {
+          if (!s.fab.grouped.top?.paste && !s.fab.grouped.bottom?.paste) continue;
+          onStatus("Tracing the solder paste\u2026");
+          s.paste = await buildPaste(GERBER, renderer, s.fab, s.painted, { thickness: s.thickness, name: `${s.group.name}-paste` });
+          s.group.add(s.paste.group);
+          any = any || !!(s.paste.meshes.top || s.paste.meshes.bottom);
+        }
+        return any;
+      }));
+      return pastePromise;
+    };
+    const sizes = /* @__PURE__ */ new Map();
+    for (const s of Object.values(sides)) {
+      for (const d of drillSizes(s.fab.holes)) {
+        const had = sizes.get(d.diameter);
+        if (!had || had.count < d.count) sizes.set(d.diameter, d);
+      }
+    }
     return {
       bounds,
       sides,
       outlineChanged,
       ghost: ghost2,
       diffTextures,
+      paste,
+      fillUpTo: Number(fillUpTo) > 0 ? Number(fillUpTo) : null,
+      drillSizes: [...sizes.values()].sort((a, b) => a.diameter - b.diameter),
       dispose() {
-        for (const s of Object.values(sides)) s.dispose();
+        for (const s of Object.values(sides)) {
+          s.paste?.dispose();
+          s.dispose();
+        }
         ghost2?.traverse((o) => {
           o.geometry?.dispose();
           o.material?.dispose();
@@ -46757,7 +46924,7 @@ ${content}
       this.sides = { base: null, head: null };
       this.statusOf = /* @__PURE__ */ new Map();
       this.mode = "side";
-      this.show = { components: true, board: true, silk: true, markers: true };
+      this.show = { components: true, board: true, silk: true, markers: true, paste: false };
       this.emphasis = null;
       this.explode = 0;
       this.selected = null;
@@ -46962,6 +47129,7 @@ ${content}
         const s = g?.sides[k];
         this.fab[k].visible = !!s && this.usingFabBoard && this.show.board && !(overlaid && k === "base");
         if (!s) continue;
+        if (s.paste) s.paste.group.visible = this.show.paste;
         let faces = [s.materials.top, s.materials.bottom];
         if (overlaid && k === "head") {
           if (this.diffMaterials) faces = [this.diffMaterials.top, this.diffMaterials.bottom];
@@ -47199,6 +47367,44 @@ ${content}
 
   // pcba3d/index.js
   var MODE_LABELS = { side: "Side by side", overlay: "Overlay", highlight: "Changes" };
+  var PREFS = { paste: "kipr.3d.paste", fill: "kipr.3d.fill" };
+  function readPref(key) {
+    try {
+      return localStorage.getItem(PREFS[key]);
+    } catch {
+      return null;
+    }
+  }
+  function writePref(key, value) {
+    try {
+      if (value == null) localStorage.removeItem(PREFS[key]);
+      else localStorage.setItem(PREFS[key], value);
+    } catch {
+    }
+  }
+  var mm = (v) => Number(v) > 0 ? Number(v) : null;
+  var fmtMm = (d) => d.toFixed(d * 100 % 1 ? 3 : 2);
+  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  function icon(...parts) {
+    const svg = document.createElementNS(SVG_NS2, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("class", "kp3d-icon");
+    for (const [tag, attrs] of parts) {
+      const e = document.createElementNS(SVG_NS2, tag);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+      svg.append(e);
+    }
+    return svg;
+  }
+  var PASTE_ICON = () => icon(
+    ["rect", { x: 1.5, y: 11, width: 13, height: 3, rx: 0.5, fill: "currentColor", opacity: 0.45 }],
+    ["path", { d: "M3.5 11C3.5 7 12.5 7 12.5 11Z", fill: "currentColor" }]
+  );
+  var FILL_ICON = () => icon(
+    ["circle", { cx: 8, cy: 8, r: 5.5, fill: "none", stroke: "currentColor", "stroke-width": 2 }],
+    ["circle", { cx: 8, cy: 8, r: 2.6, fill: "currentColor" }]
+  );
   var STATUS_LABELS = { added: "Added", removed: "Removed", moved: "Moved", rotated: "Rotated", changed: "Changed", minor: "Minor", unchanged: "Unchanged" };
   var cssLoaded = null;
   function ensureCss() {
@@ -47283,6 +47489,29 @@ ${content}
       onclick: () => setBoardSource(src)
     }, label));
     const sourceSeg = h("div", { class: "kp3d-seg kp3d-board-source", role: "group", "aria-label": "Board source", hidden: true }, sourceButtons);
+    let pasteOn = options.paste ?? readPref("paste") === "1";
+    let fillUpTo = options.fillUpTo !== void 0 ? mm(options.fillUpTo) : mm(readPref("fill"));
+    const pasteButton = h("button", {
+      type: "button",
+      class: "kp3d-iconbtn",
+      "data-toggle": "paste",
+      "aria-pressed": String(pasteOn),
+      "aria-label": "Solder paste",
+      title: "Solder paste (board from the gerbers)",
+      disabled: true,
+      onclick: () => api.setPaste(!pasteOn)
+    }, PASTE_ICON());
+    const fillSelect = h("select", {
+      "aria-label": "Fill and cap plated holes up to drill",
+      disabled: true,
+      onchange: (e) => api.setFill(e.target.value)
+    }, h("option", { value: "" }, "off"));
+    const fillGroup = h(
+      "label",
+      { class: "kp3d-fill", title: "Filled and capped holes: plated holes up to this drill (board from the gerbers)" },
+      FILL_ICON(),
+      fillSelect
+    );
     const boardNote = h("div", { class: "kp3d-board-note", hidden: true });
     const toolbar = h(
       "div",
@@ -47293,6 +47522,8 @@ ${content}
       toggle("board", "Board"),
       sourceSeg,
       toggle("silk", "Silk"),
+      pasteButton,
+      fillGroup,
       toggle("markers", "Markers"),
       h("label", { title: "Lift components off the board" }, "Explode", explode)
     );
@@ -47496,6 +47727,8 @@ ${content}
         const h0 = fab.sides.head || fab.sides.base;
         let t = `board from gerbers: ${h0.holes.kept.length} holes drilled`;
         if (h0.holes.leftOut) t += `, ${h0.holes.leftOut.count} smallest painted only`;
+        const filled = h0.fab.holes.filter((x) => x.filled).length;
+        if (fab.fillUpTo) t += `, ${filled} filled and capped (\u2264 ${fmtMm(fab.fillUpTo)} mm)`;
         if (Object.values(fab.sides).some((x) => x?.approximate)) t += ", outline approximated by its bounding box";
         if (fab.outlineChanged) t += ", outline changed (base outline shown as a red edge)";
         parts.push(t);
@@ -47539,16 +47772,48 @@ ${content}
     function setBoardSource(src) {
       for (const b of sourceButtons) b.setAttribute("aria-pressed", String(b.dataset.board === src));
       view.setBoardSource(src);
+      fabControls();
     }
+    function fabControls() {
+      const off = !boardState.fab || view.boardSource !== "gerber" || boardState.loading;
+      pasteButton.disabled = off;
+      fillSelect.disabled = off;
+    }
+    function fillOptions(sizes) {
+      const opts = [h("option", { value: "" }, "off")];
+      const list2 = sizes.slice();
+      if (fillUpTo && !list2.some((d) => Math.abs(d.diameter - fillUpTo) < 1e-6)) list2.push({ diameter: fillUpTo, count: 0, vias: 0, custom: true });
+      list2.sort((a, b) => a.diameter - b.diameter);
+      let upTo = 0;
+      for (const d of list2) {
+        upTo += d.count;
+        const what = `${d.count} hole${d.count === 1 ? "" : "s"}${d.vias ? ` (${d.vias} via${d.vias === 1 ? "" : "s"})` : ""}`;
+        opts.push(h(
+          "option",
+          { value: String(d.diameter), title: d.custom ? "remembered size" : `${fmtMm(d.diameter)} mm: ${what}; ${upTo} up to here` },
+          `\u2264 ${fmtMm(d.diameter)}`
+        ));
+      }
+      fillSelect.replaceChildren(...opts);
+      fillSelect.value = fillUpTo ? String(list2.find((d) => Math.abs(d.diameter - fillUpTo) < 1e-6).diameter) : "";
+      fillGroup.title = [
+        "Filled and capped holes: plated holes (vias and pads) up to this drill, mm (board from the gerbers)",
+        ...sizes.map((d) => `${fmtMm(d.diameter)} mm: ${d.count}${d.vias ? ` (${d.vias} vias)` : ""}`)
+      ].join("\n");
+    }
+    let fabRun = 0;
     async function loadFabBoard() {
       if (!project2.pcb?.layers?.length) return;
+      const run = ++fabRun;
       boardNote.hidden = false;
       boardNote.textContent = "Painting the board from the gerbers\u2026";
+      boardState.loading = true;
+      fabControls();
       try {
-        const gb = await buildGerberBoards(project2, assets, { onStatus: (t) => {
+        const gb = await buildGerberBoards(project2, assets, { fillUpTo, onStatus: (t) => {
           boardNote.textContent = t;
         } });
-        if (disposed) {
+        if (disposed || run !== fabRun) {
           gb?.dispose();
           return;
         }
@@ -47560,12 +47825,29 @@ ${content}
         sourceSeg.hidden = false;
         for (const b of sourceButtons) b.disabled = false;
         boardState.fab = gb;
+        fillOptions(gb.drillSizes);
+        if (pasteOn) await showPaste(gb);
         statusLine();
       } catch (e) {
         errors.push(`board from gerbers: ${e.message || e} (showing the GLB's board)`);
         statusLine();
+      } finally {
+        if (run === fabRun) {
+          boardState.loading = false;
+          boardNote.hidden = true;
+          fabControls();
+        }
       }
-      boardNote.hidden = true;
+    }
+    async function showPaste(gb) {
+      boardNote.hidden = false;
+      try {
+        const any = await gb.paste();
+        if (!any) pasteButton.title = "Solder paste: no paste layer in the gerbers";
+      } catch (e) {
+        errors.push(`solder paste: ${e.message || e}`);
+      }
+      if (boardState.fab === gb) view.applyMode();
     }
     const api = {
       ready,
@@ -47593,6 +47875,29 @@ ${content}
       capture() {
         return view.capture();
       },
+      /** Show / hide the fab board's paste solids (remembered). Resolves once they are built. */
+      async setPaste(on) {
+        pasteOn = !!on;
+        writePref("paste", pasteOn ? "1" : "0");
+        pasteButton.setAttribute("aria-pressed", String(pasteOn));
+        view.setVisible("paste", pasteOn);
+        if (pasteOn && boardState.fab) {
+          boardState.loading = true;
+          fabControls();
+          await showPaste(boardState.fab);
+          boardState.loading = false;
+          boardNote.hidden = true;
+          fabControls();
+        }
+      },
+      /** Fill and cap plated round holes up to `upTo` mm drill (null / '' / 0: all open; remembered). Rebuilds the fab board. */
+      async setFill(upTo) {
+        const next = mm(upTo);
+        writePref("fill", next ? String(next) : null);
+        if (next === fillUpTo && boardState.fab?.fillUpTo === next) return;
+        fillUpTo = next;
+        if (boardState.fab) await loadFabBoard();
+      },
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -47607,6 +47912,7 @@ ${content}
     };
     api.destroy = api.dispose;
     api.setMode(root.dataset.mode);
+    view.setVisible("paste", pasteOn);
     return api;
   }
 
@@ -48247,7 +48553,7 @@ ${content}
   }
 
   // ../vendor/boarddd/src/view2d/stage.js
-  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  var SVG_NS3 = "http://www.w3.org/2000/svg";
   var CLICK_SLOP_PX3 = 4;
   var STAGE_CSS = `
 .bd2-stage{position:relative;display:flex;gap:2px;width:100%;height:100%;overflow:hidden}
@@ -48273,7 +48579,7 @@ ${content}
     return n;
   }
   function svgEl(tag, attrs = {}, parent = null) {
-    const n = document.createElementNS(SVG_NS2, tag);
+    const n = document.createElementNS(SVG_NS3, tag);
     for (const [k, v] of Object.entries(attrs)) if (v !== void 0 && v !== null) n.setAttribute(k, String(v));
     if (parent) parent.append(n);
     return n;

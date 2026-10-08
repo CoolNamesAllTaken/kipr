@@ -118,6 +118,12 @@ h1 { font-size: 20px; }
 .layer-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
 .layers.soloing .layer-toggle:not(.solo) { opacity: 0.45; }
 .layer-toggle.solo { background: var(--accent-soft); outline: 1px solid var(--accent); border-radius: 3px; padding: 0 3px; }
+/* 3D: a paste deposit on a pad; a via ring with its hole filled */
+.paste-icon, .fill-icon { display: inline-block; width: 14px; height: 14px; flex: none; }
+.paste-icon { background: radial-gradient(ellipse 45% 55% at 50% 78%, var(--muted) 98%, transparent 100%) top / 100% 80% no-repeat,
+  linear-gradient(var(--muted), var(--muted)) bottom / 100% 22% no-repeat; opacity: 0.85; }
+.fill-icon { border-radius: 50%; background: radial-gradient(circle, var(--muted) 33%, transparent 36%); box-shadow: inset 0 0 0 2px var(--muted); }
+.fill3d select { font: inherit; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; background: #888; display: inline-block; }
 .swatch[data-layer="F.Cu"] { background: #c83434; } .swatch[data-layer="B.Cu"] { background: #4d7fc4; }
 .swatch[data-layer="F.SilkS"] { background: #f2eda1; } .swatch[data-layer="B.SilkS"] { background: #e8b2a7; }

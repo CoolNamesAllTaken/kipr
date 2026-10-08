@@ -229,7 +229,7 @@ def export_glb(pcb, out, errors, label):
 # Fab outputs: what the backend exports for the layout diff and the 3D board (contract Pcb.layers).
 FAB_LAYERS = [("F.Cu", "copper", "top"), ("B.Cu", "copper", "bottom"), ("F.Mask", "mask", "top"),
               ("B.Mask", "mask", "bottom"), ("F.SilkS", "silk", "top"), ("B.SilkS", "silk", "bottom"),
-              ("Edge.Cuts", "outline", "none")]
+              ("F.Paste", "paste", "top"), ("B.Paste", "paste", "bottom"), ("Edge.Cuts", "outline", "none")]
 
 
 def export_fab(pcb, outdir, errors, label):

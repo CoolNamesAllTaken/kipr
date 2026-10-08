@@ -25,6 +25,18 @@ function load3d() {
 
 let preferredMode = null;
 const groupPref = new Map();
+// Paste and filled holes are remembered per browser (localStorage, best effort; the project viewer's keys).
+const PREFS = { paste: 'kipr.3d.paste', fill: 'kipr.3d.fill' };
+function readPref(key) {
+  try { return localStorage.getItem(PREFS[key]); } catch { return null; }
+}
+function writePref(key, value) {
+  try { if (value == null) localStorage.removeItem(PREFS[key]); else localStorage.setItem(PREFS[key], value); } catch { /* not remembered */ }
+}
+const fmtMm = (d) => d.toFixed(d * 100 % 1 ? 3 : 2);
+const TIPS = {
+  paste: 'Solder paste: each pad\'s paste layers as 0.12 mm deposits (paste margins not applied)',
+};
 
 function modelsFor(item, side) {
   let list = item.model3d_by_side?.[side];
@@ -132,9 +144,34 @@ export function createPanel3D(item, container) {
     groupsBar.append(el('span', { class: 'layers-title' }, 'Show'));
     for (const g of gs) {
       const cb = el('input', { type: 'checkbox', id: `g3-${g.name}`, checked: g.visible || null });
-      cb.addEventListener('change', () => { groupPref.set(g.name, cb.checked); viewer.setGroupVisible(g.name, cb.checked); });
-      groupsBar.append(el('label', { class: 'layer-toggle', for: `g3-${g.name}` }, cb, g.label));
+      cb.addEventListener('change', () => {
+        groupPref.set(g.name, cb.checked);
+        if (g.name === 'paste') writePref('paste', cb.checked ? '1' : '0');
+        viewer.setGroupVisible(g.name, cb.checked);
+      });
+      groupsBar.append(el('label', { class: 'layer-toggle', for: `g3-${g.name}`, title: TIPS[g.name] || null }, cb,
+        g.name === 'paste' ? el('span', { class: 'paste-icon', 'aria-hidden': 'true' }) : null, g.label));
     }
+    fillControl();
+  }
+
+  /** Filled and capped plated pad holes up to a drill size (e.g. thermal vias in an exposed pad). */
+  function fillControl() {
+    const sizes = viewer?.drillSizes() || [];
+    if (!sizes.length) return;
+    const now = Number(readPref('fill')) > 0 ? Number(readPref('fill')) : null;
+    const sel = el('select', { id: 'g3-fill' }, el('option', { value: '' }, 'off'),
+      ...sizes.map((d) => el('option', { value: String(d.diameter), title: `${fmtMm(d.diameter)} mm: ${d.count} pad${d.count === 1 ? '' : 's'}` }, `≤ ${fmtMm(d.diameter)}`)));
+    // a remembered size this footprint lacks: the largest size up to it
+    const fit = now ? sizes.filter((d) => d.diameter <= now + 1e-6).pop() : null;
+    sel.value = fit ? String(fit.diameter) : '';
+    sel.addEventListener('change', () => {
+      writePref('fill', sel.value || null);
+      viewer.setFill(sel.value || null);
+    });
+    const tip = ['Filled and capped holes: plated round pad holes up to this drill, mm',
+      ...sizes.map((d) => `${fmtMm(d.diameter)} mm: ${d.count}`)].join('\n');
+    groupsBar.append(el('label', { class: 'layer-toggle fill3d', for: 'g3-fill', title: tip }, el('span', { class: 'fill-icon', 'aria-hidden': 'true' }), sel));
   }
 
   Promise.all([load3d(), sideSpec(item, 'head'), sideSpec(item, 'base')])
@@ -142,13 +179,15 @@ export function createPanel3D(item, container) {
       for (const [side, spec] of [['head', head], ['base', base]]) {
         if (spec?.missing.length) onStatus({ side, text: '', errors: spec.missing });
       }
-      const v = await m.create3DViewer(stage, { dark: matchMedia('(prefers-color-scheme: dark)').matches, onStatus });
+      const fill = Number(readPref('fill')) > 0 ? Number(readPref('fill')) : null;
+      const v = await m.create3DViewer(stage, { dark: matchMedia('(prefers-color-scheme: dark)').matches, onStatus, fillUpTo: fill });
       if (destroyed) { v.destroy(); return; }
       viewer = v;
       window.__cr3d = v; // test hook (screenshots / placement checks)
       await v.load({ head, base });
       if (destroyed) return;
       stage.querySelector('.loading')?.remove();
+      if (!groupPref.has('paste') && readPref('paste') === '1') groupPref.set('paste', true);
       for (const [g, on] of groupPref) v.setGroupVisible(g, on);
       renderGroups();
       setMode(mode);

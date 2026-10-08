@@ -71,7 +71,10 @@ item has a STEP model, occt-import-js's WASM once (`offline/occt-import-js.js`, 
   - STEP models (`model3d_by_side[side][].file`) are tessellated by occt-import-js in a Web Worker and placed with KiCad's
     model transform: `T(offset) · Rz(-rz) · Ry(-ry) · Rx(-rx) · S(scale)` in KiCad's 3D frame. STEP colours as KiCad
     shows them, per face where the file has them.
-  - Toggles for board / pads / silk / fab / model. Modes: head, base, side by side, translucent overlay
+  - Toggles for board / pads / paste / silk / fab / model. Paste (off by default) is each pad's paste layers as 0.12 mm
+    deposits (paste margins not applied). A fill select (off or a pad drill size) fills and caps plated round pad holes
+    up to that drill: no hole, no barrel (VIPPO, e.g. thermal vias in an exposed pad). Paste and fill are remembered
+    per browser. Modes: head, base, side by side, translucent overlay
     (head cyan, base magenta); side by side is one camera over two panes. Top / bottom / side / iso / reset cameras,
     and a view cube.
 - **Details:**

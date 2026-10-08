@@ -127,6 +127,11 @@ diff and lists them in one collapsed "moved" group; the sheet list and counts le
 nothing else. A moved symbol whose value or connections changed stays a change. The report and PR
 comment use the smart diff (moved items collapsed and counted).
 
+The 3D view's board from the gerbers has two options in its toolbar, remembered per browser: solder
+paste as solids (on by default) and filled and capped holes (VIPPO): every plated hole, via or pad,
+up to a chosen drill size has no opening and the pad copper over both ends. Details in
+[web/project/pcba3d/README.md](../web/project/pcba3d/README.md).
+
 ### Schematic grid check
 
 Symbol pins should sit on a 100 mil grid in the libraries, and everything that connects in a

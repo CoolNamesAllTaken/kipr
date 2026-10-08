@@ -44,7 +44,8 @@ export class Pcba3dView {
     this.sides = { base: null, head: null };
     this.statusOf = new Map();
     this.mode = 'side';
-    this.show = { components: true, board: true, silk: true, markers: true };
+    // paste: the fab board's paste solids (built on demand, gerberboard.js paste())
+    this.show = { components: true, board: true, silk: true, markers: true, paste: false };
     // the change kinds the reviewer asked for (the list's active chips): only these get a marker and,
     // in the Changes view, a tint. null = every change (the module's API default).
     this.emphasis = null;
@@ -256,6 +257,7 @@ export class Pcba3dView {
       const s = g?.sides[k];
       this.fab[k].visible = !!s && this.usingFabBoard && this.show.board && !(overlaid && k === 'base');
       if (!s) continue;
+      if (s.paste) s.paste.group.visible = this.show.paste;
       let faces = [s.materials.top, s.materials.bottom];
       if (overlaid && k === 'head') {
         if (this.diffMaterials) faces = [this.diffMaterials.top, this.diffMaterials.bottom];

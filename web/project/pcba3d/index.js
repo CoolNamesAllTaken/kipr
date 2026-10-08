@@ -3,6 +3,7 @@
 //   import { mountPcba3d } from './pcba3d/index.js';
 //   const h = await mountPcba3d(el, project, baseUrl, { baseLabel, headLabel });
 //   h.setMode('side' | 'overlay' | 'highlight'); h.focus('U3'); await h.ready; h.dispose();
+//   h.setPaste(true); await h.setFill(0.3);   // fab board only: paste solids, filled + capped holes
 //
 // `project` is one Project of OUT/project-review.json (docs/CONTRACT-project.md); this reads
 // project.pcba3d, project.pcb.board (for units and a fallback origin) and project.errors.
@@ -20,6 +21,37 @@ import { buildGerberBoards } from './gerberboard.js';
 import { Pcba3dView, MODES } from './viewer.js';
 
 const MODE_LABELS = { side: 'Side by side', overlay: 'Overlay', highlight: 'Changes' };
+
+// Paste and filled holes are remembered per browser (localStorage, best effort), like the Boxes choice.
+const PREFS = { paste: 'kipr.3d.paste', fill: 'kipr.3d.fill' };
+function readPref(key) {
+  try { return localStorage.getItem(PREFS[key]); } catch { return null; }
+}
+function writePref(key, value) {
+  try { if (value == null) localStorage.removeItem(PREFS[key]); else localStorage.setItem(PREFS[key], value); } catch { /* not remembered */ }
+}
+const mm = (v) => (Number(v) > 0 ? Number(v) : null);
+const fmtMm = (d) => d.toFixed(d * 100 % 1 ? 3 : 2);
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** A 16 px icon from [tag, attrs] parts, drawn in currentColor. */
+function icon(...parts) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'kp3d-icon');
+  for (const [tag, attrs] of parts) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    svg.append(e);
+  }
+  return svg;
+}
+// a paste deposit on a pad; a via ring with its hole filled
+const PASTE_ICON = () => icon(['rect', { x: 1.5, y: 11, width: 13, height: 3, rx: 0.5, fill: 'currentColor', opacity: 0.45 }],
+  ['path', { d: 'M3.5 11C3.5 7 12.5 7 12.5 11Z', fill: 'currentColor' }]);
+const FILL_ICON = () => icon(['circle', { cx: 8, cy: 8, r: 5.5, fill: 'none', stroke: 'currentColor', 'stroke-width': 2 }],
+  ['circle', { cx: 8, cy: 8, r: 2.6, fill: 'currentColor' }]);
 const STATUS_LABELS = { added: 'Added', removed: 'Removed', moved: 'Moved', rotated: 'Rotated', changed: 'Changed', minor: 'Minor', unchanged: 'Unchanged' };
 
 let cssLoaded = null;
@@ -93,11 +125,22 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
     onclick: () => setBoardSource(src),
   }, label));
   const sourceSeg = h('div', { class: 'kp3d-seg kp3d-board-source', role: 'group', 'aria-label': 'Board source', hidden: true }, sourceButtons);
+  // Fab board options: paste solids, and plated holes up to a drill size filled and capped (VIPPO).
+  let pasteOn = options.paste ?? readPref('paste') === '1';
+  let fillUpTo = options.fillUpTo !== undefined ? mm(options.fillUpTo) : mm(readPref('fill'));
+  const pasteButton = h('button', {
+    type: 'button', class: 'kp3d-iconbtn', 'data-toggle': 'paste', 'aria-pressed': String(pasteOn), 'aria-label': 'Solder paste',
+    title: 'Solder paste (board from the gerbers)', disabled: true, onclick: () => api.setPaste(!pasteOn),
+  }, PASTE_ICON());
+  const fillSelect = h('select', { 'aria-label': 'Fill and cap plated holes up to drill', disabled: true,
+    onchange: (e) => api.setFill(e.target.value) }, h('option', { value: '' }, 'off'));
+  const fillGroup = h('label', { class: 'kp3d-fill', title: 'Filled and capped holes: plated holes up to this drill (board from the gerbers)' },
+    FILL_ICON(), fillSelect);
   const boardNote = h('div', { class: 'kp3d-board-note', hidden: true });
   const toolbar = h('div', { class: 'kp3d-toolbar' },
     h('div', { class: 'kp3d-seg', role: 'group', 'aria-label': 'Mode' }, modeButtons),
     h('div', { class: 'kp3d-seg', role: 'group', 'aria-label': 'View' }, viewButtons),
-    toggle('components', 'Components'), toggle('board', 'Board'), sourceSeg, toggle('silk', 'Silk'),
+    toggle('components', 'Components'), toggle('board', 'Board'), sourceSeg, toggle('silk', 'Silk'), pasteButton, fillGroup,
     toggle('markers', 'Markers'),
     h('label', { title: 'Lift components off the board' }, 'Explode', explode));
 
@@ -282,6 +325,8 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       const h0 = fab.sides.head || fab.sides.base;
       let t = `board from gerbers: ${h0.holes.kept.length} holes drilled`;
       if (h0.holes.leftOut) t += `, ${h0.holes.leftOut.count} smallest painted only`;
+      const filled = h0.fab.holes.filter((x) => x.filled).length;
+      if (fab.fillUpTo) t += `, ${filled} filled and capped (≤ ${fmtMm(fab.fillUpTo)} mm)`;
       if (Object.values(fab.sides).some((x) => x?.approximate)) t += ', outline approximated by its bounding box';
       if (fab.outlineChanged) t += ', outline changed (base outline shown as a red edge)';
       parts.push(t);
@@ -323,27 +368,77 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   function setBoardSource(src) {
     for (const b of sourceButtons) b.setAttribute('aria-pressed', String(b.dataset.board === src));
     view.setBoardSource(src);
+    fabControls();
+  }
+
+  /** Paste and fill apply to the fab board: enabled while it is shown. */
+  function fabControls() {
+    const off = !boardState.fab || view.boardSource !== 'gerber' || boardState.loading;
+    pasteButton.disabled = off;
+    fillSelect.disabled = off;
+  }
+
+  /** The fill choices: off and each plated round drill size on the board, with counts in the tooltips. */
+  function fillOptions(sizes) {
+    const opts = [h('option', { value: '' }, 'off')];
+    const list = sizes.slice();
+    if (fillUpTo && !list.some((d) => Math.abs(d.diameter - fillUpTo) < 1e-6)) list.push({ diameter: fillUpTo, count: 0, vias: 0, custom: true });
+    list.sort((a, b) => a.diameter - b.diameter);
+    let upTo = 0;
+    for (const d of list) {
+      upTo += d.count;
+      const what = `${d.count} hole${d.count === 1 ? '' : 's'}${d.vias ? ` (${d.vias} via${d.vias === 1 ? '' : 's'})` : ''}`;
+      opts.push(h('option', { value: String(d.diameter), title: d.custom ? 'remembered size' : `${fmtMm(d.diameter)} mm: ${what}; ${upTo} up to here` },
+        `≤ ${fmtMm(d.diameter)}`));
+    }
+    fillSelect.replaceChildren(...opts);
+    fillSelect.value = fillUpTo ? String(list.find((d) => Math.abs(d.diameter - fillUpTo) < 1e-6).diameter) : '';
+    fillGroup.title = ['Filled and capped holes: plated holes (vias and pads) up to this drill, mm (board from the gerbers)',
+      ...sizes.map((d) => `${fmtMm(d.diameter)} mm: ${d.count}${d.vias ? ` (${d.vias} vias)` : ''}`)].join('\n');
   }
 
   /** The board from the fab outputs, painted with the gerbers; the GLB's board until it is in. */
+  let fabRun = 0;
   async function loadFabBoard() {
     if (!project.pcb?.layers?.length) return;
+    const run = ++fabRun;
     boardNote.hidden = false;
     boardNote.textContent = 'Painting the board from the gerbers…';
+    boardState.loading = true;
+    fabControls();
     try {
-      const gb = await buildGerberBoards(project, assets, { onStatus: (t) => { boardNote.textContent = t; } });
-      if (disposed) { gb?.dispose(); return; }
+      const gb = await buildGerberBoards(project, assets, { fillUpTo, onStatus: (t) => { boardNote.textContent = t; } });
+      if (disposed || run !== fabRun) { gb?.dispose(); return; }
       if (!gb) { boardNote.hidden = true; return; }
       view.setGerberBoards(gb);
       sourceSeg.hidden = false;
       for (const b of sourceButtons) b.disabled = false;
       boardState.fab = gb;
+      fillOptions(gb.drillSizes);
+      if (pasteOn) await showPaste(gb);
       statusLine();
     } catch (e) {
       errors.push(`board from gerbers: ${e.message || e} (showing the GLB's board)`);
       statusLine();
+    } finally {
+      if (run === fabRun) {
+        boardState.loading = false;
+        boardNote.hidden = true;
+        fabControls();
+      }
     }
-    boardNote.hidden = true;
+  }
+
+  /** Build the paste solids of `gb` (once) and show them. */
+  async function showPaste(gb) {
+    boardNote.hidden = false;
+    try {
+      const any = await gb.paste();
+      if (!any) pasteButton.title = 'Solder paste: no paste layer in the gerbers';
+    } catch (e) {
+      errors.push(`solder paste: ${e.message || e}`);
+    }
+    if (boardState.fab === gb) view.applyMode();
   }
 
   /* ── API ── */
@@ -367,6 +462,29 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
       return true;
     },
     capture() { return view.capture(); },
+    /** Show / hide the fab board's paste solids (remembered). Resolves once they are built. */
+    async setPaste(on) {
+      pasteOn = !!on;
+      writePref('paste', pasteOn ? '1' : '0');
+      pasteButton.setAttribute('aria-pressed', String(pasteOn));
+      view.setVisible('paste', pasteOn);
+      if (pasteOn && boardState.fab) {
+        boardState.loading = true;
+        fabControls();
+        await showPaste(boardState.fab);
+        boardState.loading = false;
+        boardNote.hidden = true;
+        fabControls();
+      }
+    },
+    /** Fill and cap plated round holes up to `upTo` mm drill (null / '' / 0: all open; remembered). Rebuilds the fab board. */
+    async setFill(upTo) {
+      const next = mm(upTo);
+      writePref('fill', next ? String(next) : null);
+      if (next === fillUpTo && boardState.fab?.fillUpTo === next) return;
+      fillUpTo = next;
+      if (boardState.fab) await loadFabBoard();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -381,5 +499,6 @@ export async function mountPcba3d(el, project, baseUrl, options = {}) {
   };
   api.destroy = api.dispose;
   api.setMode(root.dataset.mode);
+  view.setVisible('paste', pasteOn);
   return api;
 }

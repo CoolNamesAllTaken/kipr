@@ -39,6 +39,16 @@
 .kp3d-seg button[aria-pressed="true"] { background: var(--kp3d-accent); color: #fff; }
 .kp3d-toolbar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
 .kp3d-toolbar input[type="range"] { width: 90px; }
+.kp3d-icon { width: 16px; height: 16px; display: block; }
+.kp3d-iconbtn {
+  display: inline-flex; align-items: center; padding: 3px 5px; cursor: pointer; color: var(--kp3d-muted);
+  background: transparent; border: 1px solid var(--kp3d-border); border-radius: 6px;
+}
+.kp3d-iconbtn:hover { background: color-mix(in srgb, var(--kp3d-accent) 10%, transparent); }
+.kp3d-iconbtn[aria-pressed="true"] { background: var(--kp3d-accent); border-color: var(--kp3d-accent); color: #fff; }
+.kp3d-iconbtn:disabled, .kp3d-fill:has(select:disabled) { opacity: 0.45; cursor: default; }
+.kp3d-fill { color: var(--kp3d-muted); }
+.kp3d-fill select { font: inherit; color: var(--kp3d-text); background: var(--kp3d-bg); border: 1px solid var(--kp3d-border); border-radius: 6px; padding: 1px 2px; }
 
 .kp3d-body { flex: 1; display: flex; min-height: 0; border: 1px solid var(--kp3d-border); }
 .kp3d-stage { position: relative; flex: 1; min-width: 0; overflow: hidden; background: var(--kp3d-stage); }
