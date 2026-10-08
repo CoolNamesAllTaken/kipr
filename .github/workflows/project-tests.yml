@@ -29,7 +29,8 @@ permissions:
 jobs:
   unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # ~20 min when apt is quick; Install alone has taken 12 min (PR #29's first run hit 30 with every test passed)
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
