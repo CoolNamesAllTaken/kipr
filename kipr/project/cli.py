@@ -29,7 +29,7 @@ def add_review_arguments(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--head", default="HEAD", help="head commit/ref (default: HEAD)")
     ap.add_argument("--out", required=True, type=Path, help="output directory (project-review.json + exports)")
     ap.add_argument("--projects", action="append", metavar="GLOB",
-                    help="only projects whose directory (or its name) matches; repeatable")
+                    help="only projects whose directory (or its name), file stem or dir/stem matches; repeatable")
     ap.add_argument("--kicad-cli", help="kicad-cli executable (default: $KIPR_KICAD_CLI, then PATH)")
     ap.add_argument("--no-export", action="store_true", help="semantic diffs only, don't run kicad-cli")
     ap.add_argument("--step", action="store_true", help="also export STEP models of the boards")

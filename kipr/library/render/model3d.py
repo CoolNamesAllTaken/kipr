@@ -264,7 +264,8 @@ def _build_scene(fp, model_files, lin, ang, include_models):
         from boarddd.render.footprint import footprint_bbox
         bb = footprint_bbox(fp)
         crt = bb.as_list() or [-5, -5, 5, 5]
-        warnings.append("no courtyard; PCB sized from footprint extents")
+        if "allow_missing_courtyard" not in (fp.attr or []):
+            warnings.append("no courtyard; PCB sized from footprint extents")
     m = 1.0
     board = box(crt[0] - m, crt[1] - m, crt[2] + m, crt[3] + m)
     if drill_union is not None:

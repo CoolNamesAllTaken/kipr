@@ -8,8 +8,9 @@
 # KIPR_FIXTURES=DEST. The expected base -> head changes are listed in CHANGES.md next to this file.
 # It reproduces the local kipr-fixtures repo (same history and commit messages): the demos
 # pic_programmer and complex_hierarchy, upgraded to the KiCad 10 format, a base commit with one
-# seeded ERC issue, a silkscreen text and a controlled-impedance net class, then scripts/head_*.py and
-# scripts/impedance_classes.py.
+# seeded ERC issue, a silkscreen text and a controlled-impedance net class, a KiKit-style panel of
+# pic_programmer (scripts/panelize.py, no KiKit needed), then scripts/head_*.py,
+# scripts/impedance_classes.py and the panel regenerated with one more fiducial and a moved tab.
 #
 # Runs as is inside kicad/kicad:10.0.6-amd64-full (kicad-cli, python3 with pcbnew, demos in
 # /usr/share/kicad/demos). Elsewhere set:
@@ -78,6 +79,13 @@ open(sch, "w").write(t)
 EOF
 python3 "$here/scripts/impedance_classes.py" base
 commit "Base: seed an ERC issue (U4 pin 4 missing no-connect flag) and a 'REV A' silkscreen text in pic_programmer; net class SE_50_MS (50 ohm microstrip target) on Net-(D8-A)"
+
+# 4b. base: a KiKit-style 2x2 panel of pic_programmer (board + .kicad_pro + kikit.json, no schematic)
+mkdir pic_programmer_panel
+cp "$here/scripts/panel_kikit.json" pic_programmer_panel/kikit.json
+"$KICAD_PYTHON" "$here/scripts/panelize.py" pic_programmer_panel/kikit.json pic_programmer/pic_programmer.kicad_pcb \
+    pic_programmer_panel/pic_programmer_panel.kicad_pcb
+commit "Base (panel): pic_programmer_panel, a KiKit-style 2x2 panel of pic_programmer (frame, tabs, mousebites, 4 tooling holes, 3 fiducials)"
 git tag base
 
 # 5. head: the scripted edits (they run from the repo root and import scripts/sexpr.py)
@@ -95,5 +103,14 @@ commit "Head (complex_hierarchy): extend board outline +10.16 mm, place R401/D40
 cp "$here"/scripts/impedance_classes.py scripts/
 python3 scripts/impedance_classes.py head
 commit "Head (impedance): pic_programmer D8-A tracks 0.5 -> 0.4 mm and core 1.51 -> 1.2 mm; complex_hierarchy net class SE_50_MS on /status_led/LED_A"
+# the panel, regenerated from the base board (new uuids, as every KiKit run): 4 fiducials, tab 1 moved
+cp "$here/scripts/panelize.py" scripts/
+sed -i 's/"3fid"/"4fid"/' pic_programmer_panel/kikit.json
+git show base:pic_programmer/pic_programmer.kicad_pcb > ".panel-src.kicad_pcb"
+git show base:pic_programmer/pic_programmer.kicad_pro > ".panel-src.kicad_pro"
+"$KICAD_PYTHON" scripts/panelize.py pic_programmer_panel/kikit.json ".panel-src.kicad_pcb" \
+    pic_programmer_panel/pic_programmer_panel.kicad_pcb --shift-tab 0:20
+rm -f .panel-src.*
+commit "Head (panel): 4fid (fiducials KiKit_FID_T_4/B_4 added), tab 1 (board 0 top) moved +20 mm in x with its mousebites"
 git tag head
 echo "build.sh: fixtures in $dest (base $(git rev-parse --short base), head $(git rev-parse --short head))"

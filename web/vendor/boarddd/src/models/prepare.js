@@ -153,7 +153,7 @@ export function prepareModel(model, components = [], opts = {}) {
   const orientation = orientModel(inner, { up, units, boardSizeMm: boardSize });
   root.updateMatrixWorld(true);
 
-  const refs = new Set(components.map((c) => c.ref));
+  const refs = new Set(components.flatMap((c) => (c.name ? [c.ref, c.name] : [c.ref])));
   const allSize = worldBox(inner).getSize(new THREE.Vector3());
   const boardArea = boardSize?.[0] && boardSize?.[1] ? boardSize[0] * boardSize[1] : Math.max(allSize.x * allSize.y, 1e-6);
   const take = (o) => (merge ? mergeObject(o) : o);

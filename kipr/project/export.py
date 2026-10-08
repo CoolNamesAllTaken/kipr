@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -255,11 +256,113 @@ _VOLATILE = re.compile(rb"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\
 
 
 def same_content(a: str | None, b: str | None) -> bool | None:
-    """Compare two plot files ignoring creation dates/tool banners. None if either is missing."""
+    """Compare two plot files ignoring creation dates/tool banners. None if either is missing.
+    Gerbers and drill files that differ only in the order of their objects (a regenerated board,
+    e.g. a KiKit panel, gets new uuids and KiCad plots in uuid order) count as the same."""
     if not a or not b or not os.path.isfile(a) or not os.path.isfile(b):
         return None
     with open(a, "rb") as fa, open(b, "rb") as fb:
-        return _VOLATILE.sub(b"", fa.read()) == _VOLATILE.sub(b"", fb.read())
+        da, db = _VOLATILE.sub(b"", fa.read()), _VOLATILE.sub(b"", fb.read())
+    if da == db:
+        return True
+    norm = gerber_objects if a.endswith(".gbr") else drill_objects if a.endswith(".drl") else None
+    if norm is None:
+        return False
+    try:
+        return norm(da.decode("ascii", "replace")) == norm(db.decode("ascii", "replace"))
+    except ValueError:
+        return False
+
+
+_STMT = re.compile(r"%[^%]*%|[^*%]*\*")
+_COORD = re.compile(r"([XYIJ])([+-]?\d+)")
+
+
+def gerber_objects(text: str) -> Counter:
+    """The drawing of a gerber as a multiset of objects, each with the state it is drawn in
+    (aperture definition, polarity, interpolation): independent of object order, aperture numbers
+    and attributes. A region (G36..G37) is one object."""
+    macros, apertures, objs = {}, {}, Counter()
+    ap = pol = None
+    interp, pt, region = "G01", (0, 0), None
+    for st in _STMT.findall(text):
+        st = st.strip()
+        if st.startswith("%"):
+            body = st[1:-1]
+            if body.startswith("AM"):
+                name, _, rest = body[2:].partition("*")
+                macros[name] = rest
+            elif body.startswith("AD"):
+                m = re.match(r"ADD(\d+)([^,*]+)(.*)", body)
+                if m:
+                    apertures[m.group(1)] = (macros.get(m.group(2), m.group(2)), m.group(3).rstrip("*"))
+            elif body.startswith("LP"):
+                pol = body[2:3]
+            continue
+        st = st[:-1]
+        if not st or st.startswith("G04") or st == "M02":
+            continue
+        if st in ("G01", "G02", "G03", "G75", "G74"):
+            interp = st if st != "G75" and st != "G74" else interp
+            continue
+        if st == "G36":
+            region = []
+            continue
+        if st == "G37":
+            if region:
+                objs[("region", pol, tuple(region))] += 1
+            region = None
+            continue
+        m = re.match(r"^(G0[123])?(.*?)(D0?[123]|D\d{2,})?$", st)
+        if not m:
+            continue
+        if m.group(1):
+            interp = m.group(1)
+        d = m.group(3)
+        if d and len(d) > 2 and d.lstrip("D").lstrip("0") not in ("1", "2", "3"):
+            ap = apertures.get(d[1:], d)
+            continue
+        vals = dict((k, int(v)) for k, v in _COORD.findall(m.group(2)))
+        new = (vals.get("X", pt[0]), vals.get("Y", pt[1]))
+        op = d[-1] if d else "1"
+        if op == "1":
+            seg = (interp, pt, new, vals.get("I"), vals.get("J"))
+            if region is not None:
+                region.append(seg)
+            else:
+                objs[("draw", ap, pol, seg)] += 1
+        elif op == "3":
+            objs[("flash", ap, pol, new)] += 1
+        elif region is not None:
+            region.append(("move", new))
+        pt = new
+    return objs
+
+
+def drill_objects(text: str) -> Counter:
+    """An Excellon file as a multiset of (tool diameter, command) lines, independent of order and
+    tool numbers."""
+    tools, objs, cur, body = {}, Counter(), None, False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";"):
+            continue
+        m = re.match(r"^T(\d+)C([\d.]+)", line)
+        if m:
+            tools[m.group(1)] = m.group(2)
+            continue
+        if line in ("%", "M95"):
+            body = True
+            continue
+        if not body:
+            continue
+        m = re.match(r"^T(\d+)$", line)
+        if m:
+            cur = tools.get(m.group(1).lstrip("0") or "0", tools.get(m.group(1)))
+            continue
+        if line != "M30":
+            objs[(cur, line)] += 1
+    return objs
 
 
 _FS = re.compile(r"%FS[LT]?[AI]?X(\d)(\d)Y(\d)(\d)\*%")

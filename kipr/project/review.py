@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from boarddd.io.kicad import pcb
 
 from .. import __version__
-from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, impedance, models, sch
+from . import classify, diff_net, diff_pcb, diff_sch, discover, export, grid, impedance, models, panel, sch
 from ..common import fonts as fonts_mod
 from ..common import kicad_cli as kicad_cli_mod
 from ..common.git import Git
@@ -104,8 +104,8 @@ class ProjectReview:
                 self.err(f"cannot check out {s.name}: {e}")
                 s.root = None
                 continue
-            s.pro = pro
-            stem = pro[: -len(".kicad_pro")]
+            stem = posixpath.splitext(pro)[0]
+            s.pro = stem + ".kicad_pro" if os.path.isfile(os.path.join(s.root, stem + ".kicad_pro")) else None
             if os.path.isfile(os.path.join(s.root, stem + ".kicad_sch")):
                 s.sch = stem + ".kicad_sch"
             if os.path.isfile(os.path.join(s.root, stem + ".kicad_pcb")):
@@ -476,6 +476,8 @@ class ProjectReview:
 
     def netlist(self):
         b, h = self.sides["base"], self.sides["head"]
+        if not (b.sch or h.sch):
+            return None  # a board without a schematic (a panel): its nets are the copies' nets
         nets, files = (dict(x) for x in self.sch_netlists())
         exists = {s.name: s.root is not None for s in (b, h)}
         source = "schematic"
@@ -571,6 +573,23 @@ class ProjectReview:
         finally:
             self.timings["impedance"] = time.monotonic() - t0
 
+    def kind(self) -> tuple[str, dict | None]:
+        """("project" | "panel" | "board", the panel object or None): see kipr.project.panel."""
+        if any(s.sch for s in self.sides.values()):
+            return "project", None
+        s = self.sides["head"] if self.sides["head"].board is not None else self.sides["base"]
+        det = panel.detect(s.board, self.proj.name, self.pdir)
+        if det is None:
+            return ("board" if s.board is not None else "project"), None
+        srcs, config = [], None
+        try:
+            srcs = panel.sources(self.git, s.sha, s.pcb, s.board)
+            config = panel.config_file(self.git.ls_tree(s.sha, [self.pdir] if self.pdir else None), self.pdir,
+                                       self.proj.name)
+        except Exception as e:  # noqa: BLE001  a review aid: never fail the project
+            self.err(f"panel source lookup failed: {e}")
+        return "panel", panel.info(det, s.board, srcs, config)
+
     # -- main ------------------------------------------------------------------------------
     def run(self) -> dict:
         t0 = time.monotonic()
@@ -580,15 +599,19 @@ class ProjectReview:
         self.parse()
         b, h = self.sides["base"], self.sides["head"]
         t1 = time.monotonic()
+        kind, pinfo = self.kind()
         pcb_changes, components = [], []
         if b.board is not None or h.board is not None:
             empty = pcb.PcbFile([], [], {}, [], [], [], {}, None, {}, None, {})
             pcb_changes, components = diff_pcb.diff_boards(b.board or empty, h.board or empty)
+            if kind == "panel":
+                pcb_changes, components = panel.annotate(pcb_changes, components, b.board or empty, h.board or empty)
+                pcb_changes = diff_pcb.sort_changes(pcb_changes)
         self.timings["diff"] = time.monotonic() - t1
         self.wait_exports()
         t2 = time.monotonic()
         doc = {"slug": self.slug, "name": self.proj.name, "path": self.proj.path, "status": self.proj.status,
-               "reasons": self.proj.reasons}
+               "kind": kind, "panel": pinfo, "reasons": self.proj.reasons}
         schematic = self.schematic()
         pcbs = self.pcb_section(pcb_changes)
         p3d = self.pcba3d(components)
@@ -627,6 +650,7 @@ class ProjectReview:
             "impedance": {**checks["impedance"]["count"], "solver": checks["impedance"].get("solver")}
             if checks.get("impedance") else None,
             "fonts_missing": len((fonts or {}).get("missing") or []),
+            "panel": panel.summary(pcb_changes) if kind == "panel" else None,
         }
         doc.update({"schematic": schematic, "pcb": pcbs, "pcba3d": p3d, "bom": bom, "netlist": net,
                     "checks": checks, "fonts": fonts, "info": self.info(), "errors": self.errors,
@@ -753,7 +777,7 @@ def _run(repo, base, head, out, patterns, kicad_cli, jobs, cache_dir, step, glb,
             except Exception as e:  # noqa: BLE001  never crash the whole review for one project
                 traceback.print_exc()
                 doc["projects"].append({"slug": slug, "name": proj.name, "path": proj.path, "status": proj.status,
-                                        "summary": None, "schematic": None, "pcb": None, "pcba3d": None,
+                                        "kind": None, "panel": None, "summary": None, "schematic": None, "pcb": None, "pcba3d": None,
                                         "bom": None, "netlist": None, "checks": {"erc": None, "drc": None, "grid": None, "impedance": None}, "fonts": None,
                                         "errors": pr.errors + [f"internal error: {e!r}"]})
     finally:

@@ -77,6 +77,25 @@ The classes exist to exercise the check (`scripts/impedance_classes.py`):
 
 The pic_programmer core change also shows in the gbrjob; the D8-A width change is a routing change.
 
+## Panel (`pic_programmer_panel/`, no schematic)
+
+A KiKit-style 2x2 panel of the base pic_programmer board made by `scripts/panelize.py` from
+`scripts/panel_kikit.json` (KiKit isn't needed): nets renamed `Board_<n>-…`, references unchanged
+(4 copies of each), 5 mm frame with 2 mm gaps, one 5 mm tab per board edge (12) with mousebites
+(`kikit:NPTH`, `KiKit_MB_<tab>_<i>`, 112 holes), 4 tooling holes (`KiKit_TO_*`), fiducials
+`KiKit_FID_T_*`/`KiKit_FID_B_*`, and pic_programmer's `.kicad_pro` copied next to it (as KiKit does).
+Head regenerates it from the same base board (every footprint gets a new uuid, the file's item order
+changes) with:
+
+| # | Category | Item | base | head |
+|---|---|---|---|---|
+| 20 | added fiducials | `kikit.json` fiducials `3fid` → `4fid`: **KiKit_FID_T_4** / **KiKit_FID_B_4** at (346.04, 231.62) | 3 per side | 4 per side |
+| 21 | moved tab | tab 1 (board 0, top edge, to the frame) +20 mm in x: Edge.Cuts around it and its 7 mousebites `KiKit_MB_1_1…7` | x 107.01 ± 2.5 | x 127.01 ± 2.5 |
+| 22 | DRC | the moved mousebites land in connector P3's courtyard (`npth_inside_courtyard`, `silk_over_copper`), the new fiducials' library `kikit` is unknown (`lib_footprint_issues`); one `npth_inside_courtyard` with P105 is fixed | | 11 new / 1 fixed |
+
+Changed layers: F.Cu, B.Cu, F.Mask, B.Mask, F.CrtYd, B.CrtYd, Edge.Cuts, NPTH; the rest differ only
+in object order.
+
 ## Things that deliberately do NOT change
 
 - pic_programmer: board outline (only complex_hierarchy changes its outline), everything in

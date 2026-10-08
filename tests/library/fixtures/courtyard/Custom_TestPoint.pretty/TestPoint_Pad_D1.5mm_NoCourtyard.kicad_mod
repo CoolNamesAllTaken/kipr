@@ -1,0 +1,85 @@
+(footprint "TestPoint_Pad_D1.5mm_NoCourtyard"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "Test point, 1.5 mm round SMD pad, excluded from courtyard requirements, https://example.com/testpoint.pdf")
+	(tags "test point")
+	(property "Reference" "REF**"
+		(at 0 -1.65 0)
+		(layer "F.SilkS")
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a01")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "TestPoint_Pad_D1.5mm_NoCourtyard"
+		(at 0 1.75 0)
+		(layer "F.Fab")
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a02")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a03")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a04")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd allow_missing_courtyard)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_circle
+		(center 0 0)
+		(end 0.75 0)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a05")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0 0)
+		(layer "F.Fab")
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a06")
+		(effects
+			(font
+				(size 0.5 0.5)
+				(thickness 0.08)
+			)
+		)
+	)
+	(pad "1" smd circle
+		(at 0 0)
+		(size 1.5 1.5)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "6f0b2c0e-3c1a-4d0e-9a51-1f2d0c0b0a07")
+	)
+	(embedded_fonts no)
+)

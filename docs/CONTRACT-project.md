@@ -79,9 +79,11 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
 ```jsonc
 {
   "slug": "adsbee_1090u",              // unique, [a-z0-9_-], names the OUT/p/<slug>/ dir
-  "name": "adsbee_1090u",              // .kicad_pro stem
+  "name": "adsbee_1090u",              // .kicad_pro stem (a board without one: its .kicad_pcb stem)
   "path": "projects/adsbee/kicad/adsbee_1090u",   // dir of the .kicad_pro, repo-relative ("" = repo root)
   "status": "modified",                // added | removed | modified
+  "kind": "project",                   // project (has a schematic) | panel | board (no schematic); see Panel
+  "panel": Panel | null,               // kind "panel" only
   "reasons": ["projects/…/adsbee_1090u.kicad_pcb"],   // changed files that made it count
   "summary": {"sheets_changed": 2, "layers_changed": 5,   // sheets_changed leaves out sheets_moved
               "sheets_moved": 1, "sch_moved": 14,   // sheets whose changes all only move things (moved_only); move_only changes
@@ -92,7 +94,8 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
               "grid": {"count": 1, "points": 23},    // checks.grid count/points; null when off or no schematic
               "impedance": {"rows": 3, "violations": 1, "length_out_mm": 2.8,   // checks.impedance.count + solver; null without a board
                             "new_violations": 1, "stackup_shifts": 0, "width_changes": 1, "solver": "field"},
-              "fonts_missing": 1},                   // len(fonts.missing)
+              "fonts_missing": 1,                    // len(fonts.missing)
+              "panel": {"fiducial": 2, "tooling": 0, "mousebites": 1, "tabs": 1, "frame": 0}},   // panel changes by kind (non-zero only); null unless kind "panel"
   "schematic": Schematic | null,
   "pcb": Pcb | null,
   "pcba3d": Pcba3d | null,
@@ -107,6 +110,30 @@ Like the old kiri workflow, paths under `.history/`, `*-backups/` and `panelized
   "exports": {"gerbers": {"base": {"ok": true, "cached": false, "seconds": 4.3}, "head": {…}}, …}
 }
 ```
+
+### Panel
+
+A board without a schematic is a `panel` when it has KiKit markers (`kikit:` footprints, `KiKit_*`
+references, `Board_<n>-` nets for two or more `n`), repeated references (half of its footprints or
+more), or "panel" in its file or directory name; else a `board`. Panels and boards have no
+`schematic`, `bom` or `netlist` and `checks.erc` / `checks.grid` are null; the viewer hides those tabs.
+
+```jsonc
+{
+  "signals": ["kikit", "copies", "name"],   // why it counts as a panel
+  "copies": 4,                               // board copies (KiKit's Board_<n> nets, else the most repeated reference)
+  "sources": [{"path": "boards/x/x.kicad_pcb", "copies": 4}],   // boards of the repo it holds k times (by footprint libraries, ≥ 90 %)
+  "config": "panels/x/kikit.json",           // a KiKit preset next to it, or null
+  "fiducials": 8, "tooling": 4, "mousebites": 112   // its own features (footprints)
+}
+```
+
+In a panel's `pcb.changes`, fiducial and tooling-hole footprints get kinds `fiducial` and `tooling`,
+mousebite holes are clustered into one `mousebites` change per tab (`refs`, detail "7 holes moved
+20.000 mm"), and `outline` changes carry `feature`: `frame` (on the panel's outer edge) or `tabs`.
+Panel features are not in `pcba3d.components`. Repeated references get a copy label in `ref`
+(`R7·2`: KiKit's board number from its `Board_<n>-` nets, else the copy's rank top to bottom, left to
+right), the reference itself in `designator`; copies pair up across revisions nearest first.
 
 ### Schematic
 
@@ -187,7 +214,8 @@ Layers are every layer enabled in the board (copper first in stack order F.Cu, I
 the rest in head order, then base-only layers), followed by
 `PTH` and `NPTH` when the board has such holes. A layer's `status` compares the exported gerber
 (or drill) files ignoring creation dates and the revision in `%TF.ProjectId`; without exports it
-falls back to "some semantic change touches this layer".
+falls back to "some semantic change touches this layer". Files that differ only in the order of
+their objects, aperture numbers or attributes count as unchanged (a regenerated panel).
 
 `PcbChange`:
 
@@ -234,6 +262,8 @@ to a real change (a moved part whose model also went `.wrl -> .step`) is just li
 | `graphic` | `added`, `removed`, `modified` | board graphics and dimensions, per layer, clustered |
 | `outline` | `added`, `removed`, `modified` | Edge.Cuts graphics |
 | `board` | `stackup`, `setup`, `thickness`, `layers` | board-wide settings; `bbox_mm: null`, `layers: []` |
+| `fiducial`, `tooling` | as `footprint` | panels only (see Panel) |
+| `mousebites` | `added`, `removed`, `moved`, `modified` | panels only: the mousebite holes of one tab; `refs`, `holes: ["NPTH"]` |
 
 ### Pcba3d
 
@@ -244,6 +274,7 @@ to a real change (a moved part whose model also went `.wrl -> .step`) is just li
   "frame": {"units": "m", "up": "+y", "x": "kicad_x / 1000", "z": "kicad_y / 1000", "origin_mm": [0, 0]},
   "components": [{                      // every footprint of both boards, natural ref order
     "ref": "U3", "status": "moved",     // added | removed | moved | rotated | changed | unchanged
+    "designator": "U3",                 // only when ref is a copy label ("U3·1", panels)
     "base": {"x": 1.0, "y": 2.0, "rot": 90, "side": "top", "footprint": "Lib:Fp", "value": "…",
              "model": "${KICAD10_3DMODEL_DIR}/….step",   // first model; all of them in "models"
              "models": [{"path": "…", "offset": [0, 0, 0], "scale": [1, 1, 1], "rotate": [0, 0, 0], "hide": true}],

@@ -73,7 +73,7 @@ export function createChangeList(container, { title = 'Changes', empty = 'No cha
 
 /** Human text for a contract change entry: {kind, ref, what, base, head, layer, detail}. */
 export function describeChange(c) {
-  const ref = typeof c.ref === 'string' ? c.ref : '';
+  const ref = typeof c.ref === 'string' ? c.ref : typeof c.feature === 'string' ? c.feature : ''; // feature: a panel outline's tabs | frame
   const what = typeof c.what === 'string' ? c.what : '';
   let title = [ref, what].filter(Boolean).join(' ');
   if (!title) title = typeof c.kind === 'string' ? c.kind : 'change';

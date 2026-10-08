@@ -219,3 +219,36 @@ def test_impedance_check(doc):
         assert r["head"]["validity"]  # outside the mask fit
     else:
         assert not r["head"]["validity"] and 0 < r["head"]["error_pct"] < 2 and r["head"]["Z_closedform"] > 100
+
+
+def test_panel(doc):
+    """CHANGES.md "Panel": a KiKit-style 2x2 panel of pic_programmer, regenerated on head (new uuids) with
+    a fourth fiducial pair and tab 1 moved +20 mm; no schematic."""
+    p = next((x for x in doc["projects"] if x["slug"] == "pic_programmer_panel"), None)
+    if p is None:
+        pytest.skip("fixtures repo predates the panel (rebuild it with build.sh)")
+    assert (p["kind"], p["status"], p["errors"]) == ("panel", "modified", [])
+    pn = p["panel"]
+    assert pn["sources"] == [{"path": "pic_programmer/pic_programmer.kicad_pcb", "copies": 4}] and pn["copies"] == 4
+    assert (pn["config"], pn["fiducials"], pn["tooling"], pn["mousebites"]) == ("pic_programmer_panel/kikit.json", 8, 4, 112)
+    assert set(pn["signals"]) == {"kikit", "copies", "name"}
+    assert p["schematic"] is None and p["bom"] is None and p["netlist"] is None
+    assert p["checks"]["erc"] is None and p["checks"]["grid"] is None and p["summary"]["erc"] is None
+    # only what really changed: regenerated item order and uuids are no change
+    changed = {ly["id"] for ly in p["pcb"]["layers"] if ly["status"] != "unchanged"}
+    assert changed == {"F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.CrtYd", "B.CrtYd", "Edge.Cuts", "NPTH"}
+    got = sorted((c["kind"], c["what"], c.get("ref") or c.get("feature")) for c in p["pcb"]["changes"])
+    assert got == [("fiducial", "added", "KiKit_FID_B_4"), ("fiducial", "added", "KiKit_FID_T_4"),
+                   ("mousebites", "moved", None), ("outline", "modified", "tabs")]
+    mb = next(c for c in p["pcb"]["changes"] if c["kind"] == "mousebites")
+    assert mb["detail"] == "7 holes moved 20.000 mm" and len(mb["refs"]) == 7
+    comps = p["pcba3d"]["components"]
+    assert len(comps) == 4 * 63 and all(c["status"] == "unchanged" for c in comps)
+    assert {c["ref"] for c in comps if c["ref"].startswith("R7·")} == {"R7·0", "R7·1", "R7·2", "R7·3"}
+    assert p["pcba3d"]["head"]["glb"]
+    assert p["summary"]["panel"] == {"fiducial": 2, "mousebites": 1, "tabs": 1}
+    drc = p["checks"]["drc"]
+    assert any(v["type"] == "npth_inside_courtyard" and any("KiKit_MB_1_" in i for i in v["items"]) for v in drc["new"])
+    assert len(drc["fixed"]) == 1
+    # the panel's files are not a change of pic_programmer
+    assert not [r for r in proj(doc, "pic_programmer")["reasons"] if "panel" in r]

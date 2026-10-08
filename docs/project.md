@@ -40,7 +40,7 @@ fits the data into its size budget, then runs `site` and `report`.
 | `--repo R` | `.` | git repository |
 | `--base B` / `--head H` | – / `HEAD` | commits to compare (CI uses the merge base as `B`) |
 | `--out OUT` | – | output directory (`project-review.json`, `p/<slug>/…`) |
-| `--projects GLOB` | all | only projects whose directory or directory name matches; repeatable |
+| `--projects GLOB` | all | only projects whose directory, directory name, file stem or `dir/stem` matches; repeatable |
 | `--kicad-cli PATH` | `$KIPR_KICAD_CLI`, then `PATH` | kicad-cli to use |
 | `--fast-checks` | off | ERC/DRC without the global KiCad libraries: several times faster, library-mismatch checks dropped |
 | `--step` | off | also export STEP models |
@@ -56,8 +56,33 @@ fits the data into its size budget, then runs `site` and `report`.
 What counts as a changed project: a directory with a `.kicad_pro` in which a `.kicad_sch`,
 `.kicad_pcb`, `.kicad_pro`, `.kicad_dru`, lib table, project library or 3D model changed, or that
 references (through relative or `${KIPRJMOD}` paths in its lib tables / board) a library or 3D
-model elsewhere in the repo that changed. Like the old workflow, `.history/`, `*-backups/` and
-`panelized/` paths are ignored.
+model elsewhere in the repo that changed. A `.kicad_pcb` without a `.kicad_pro` of the same name
+(a panel next to its board, a KiKit output) is reviewed on its own, and is not a change of the
+project in its directory. `.history/`, `*-backups/` and `_autosave-*` paths are ignored.
+
+### Panels
+
+A board without a schematic is reviewed like any board (layers, 3D, semantic diff, DRC) with no
+schematic, BOM, netlist or ERC. It is a **panel** (▦ in the viewer, report and PR comment) when any
+of these hold, else a plain board (▭):
+
+- KiKit markers: footprints from the `kikit` library or named `KiKit_*` (mousebites, tooling holes,
+  fiducials), or nets renamed `Board_<n>-…` for two or more `n`;
+- repeated references: half of its footprints or more share their reference with another one (a board
+  placed several times; a board drawn from a schematic has unique references);
+- "panel" in the file or a directory name.
+
+The first two hold for KiKit output and for most hand-made panels; the name catches a panel with a
+single copy. A schematic always makes it a project.
+
+For a panel, kipr also names the boards it holds: a board of the repository whose footprints it
+contains k times over (by footprint library, 90 % of them, so a panel of an older revision still
+counts) and a KiKit preset next to it (`<name>.json`, `kikit.json`, `panel*.json`); KiKit itself is
+not needed. Its changes read as panel changes: fiducials and tooling holes, one `mousebites` entry
+per tab ("7 holes moved 20 mm"), outline changes at the `frame` or at `tabs`; the copies of a part
+are told apart as `R7·0` … `R7·3` (KiKit's board number, else top to bottom, left to right) and pair
+up nearest first, so a regenerated panel (new uuids, new item order) shows only what moved. Layer
+status ignores the order of objects in the gerbers and drill files for the same reason.
 
 How it works: each side is extracted with `git archive` (only the paths the project needs);
 kicad-cli exports for base and head run in parallel and are cached by the git blob ids each export

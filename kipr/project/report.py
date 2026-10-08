@@ -322,7 +322,8 @@ def change_rows(changes) -> list:
         bb = c.get("bbox_mm")
         where = ", ".join(f"{x:g}" for x in bb[:2]) if isinstance(bb, list) and len(bb) == 4 and all(num(x) is not None for x in bb) else ""
         delta = f"{esc(fmt(c.get('base')))} → {esc(fmt(c.get('head')))}" if ("base" in c or "head" in c) else ""
-        rows.append([esc(c.get("kind")), esc(c.get("ref") or c.get("net") or ""), esc(c.get("what")),
+        kind = " ".join(str(x) for x in (c.get("kind"), c.get("feature")) if x)  # outline feature (panels): tabs | frame
+        rows.append([esc(kind), esc(c.get("ref") or c.get("net") or ""), esc(c.get("what")),
                      esc(c.get("layer") or ""), delta, esc(fmt(c.get("detail")) if c.get("detail") else ""), esc(where)])
     return rows
 
@@ -656,11 +657,30 @@ def grid_section(g) -> str:
     return "\n".join(out)
 
 
+def kind_mark(p) -> str:
+    """▦ before a panel's name, ▭ before a board without a schematic (with a tooltip)."""
+    if p.get("kind") == "panel":
+        return f'<span title="{esc(panel_text(p))}">▦</span> '
+    if p.get("kind") == "board":
+        return '<span title="board without a schematic">▭</span> '
+    return ""
+
+
+def panel_text(p) -> str:
+    """"panel: 4 × pic_programmer/pic_programmer.kicad_pcb · kikit.json · 8 fiducials, 4 tooling holes, 112 mousebites"."""
+    pn = d(p.get("panel"))
+    srcs = ", ".join(f"{fmt(num(s.get('copies')))} × {s.get('path')}" for s in (d(x) for x in lst(pn.get("sources"))) if s.get("path"))
+    feats = ", ".join(f"{num(pn.get(k))} {w}{'s' if num(pn.get(k)) != 1 else ''}"
+                      for k, w in (("fiducials", "fiducial"), ("tooling", "tooling hole"), ("mousebites", "mousebite")) if num(pn.get(k)))
+    cfg = str(pn.get("config") or "").rsplit("/", 1)[-1]
+    return " · ".join(x for x in ("panel" + (f": {srcs}" if srcs else ""), cfg, feats) if x)
+
+
 def summary_row(p) -> list:
     s = d(p.get("summary"))
     c = d(s.get("components"))
     n = lambda v: esc(fmt(num(v))) if num(v) is not None else ""  # noqa: E731
-    return [f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
+    return [kind_mark(p) + f'<a href="#p-{esc(p["slug"])}">{esc(p.get("name") or p["slug"])}</a>', status_badge(p.get("status")),
             n(s.get("sheets_changed")) + (f' <span class="muted" title="sheets with moved items only (same connections)">+{esc(fmt(num(s.get("sheets_moved"))))} moved</span>'
                                           if num(s.get("sheets_moved")) else ""), n(s.get("layers_changed")), n(c.get("added")), n(c.get("removed")), n(c.get("moved")),
             n(c.get("changed")) + (f' <span class="muted">+{esc(fmt(num(c.get("minor"))))} minor</span>' if num(c.get("minor")) else ""),
@@ -741,8 +761,9 @@ def build(out: Path, width_sheet: int, width_layer: int, note: str | None) -> tu
     for p in projects:
         slug = p["slug"]
         errs = "".join(f"<li>{esc(e)}</li>" for e in lst(p.get("errors")) if isinstance(e, str))
-        parts.append(f'<section class="card" id="p-{esc(slug)}"><h2>{esc(p.get("name") or slug)} {status_badge(p.get("status"))} '
+        parts.append(f'<section class="card" id="p-{esc(slug)}"><h2>{kind_mark(p)}{esc(p.get("name") or slug)} {status_badge(p.get("status"))} '
                      f'<span class="muted">{esc(p.get("path") or "")}</span></h2>'
+                     + (f'<p class="muted">{esc(panel_text(p))}</p>' if p.get("kind") == "panel" else "")
                      + (f'<details class="note"><summary>Export problems</summary><ul>{errs}</ul></details>' if errs else ""))
         parts.append(schematic_section(imgs, slug, p.get("schematic"), width_sheet))
         parts.append(pcb_section(imgs, slug, p.get("pcb"), width_layer))

@@ -3,11 +3,12 @@
 
     python3 tests/web-project/make_mock.py --out /tmp/kipr-mock [--site]
 
-Three projects (docs/CONTRACT-project.md):
+Four projects (docs/CONTRACT-project.md):
   demo_board      modified: 5 sheets (modified/added/removed/unchanged), 2-layer PCB with real
                   RS-274X gerbers + Excellon drills + per-layer SVGs, BOM, netlist, ERC/DRC deltas
   sensor_breakout added: head only (1 sheet, PCB)
   old_adapter     removed: base only (schematic only)
+  demo_panel      modified panel of demo_board: no schematic, fiducial / mousebite / tab changes, DRC
 Everything is generated here from a small board model; nothing is copied from any real design.
 --site also copies the viewer in (kipr.project.site) so the OUT can be opened directly.
 """
@@ -624,6 +625,33 @@ def old_adapter(out: Path) -> dict:
             "schematic": sch, "pcb": None, "pcba3d": None, "bom": None, "netlist": None, "checks": {"erc": None, "drc": None}, "errors": []}
 
 
+def demo_panel(out: Path) -> dict:
+    """A KiKit panel of demo_board (no schematic): fiducial added, a tab and its mousebites moved."""
+    slug = "demo_panel"
+    pcb = write_pcb(out, slug, ["base", "head"], {"F.Cu", "F.Mask", "Edge.Cuts", "NPTH"})
+    pcb["changes"] = [
+        {"kind": "fiducial", "ref": "KiKit_FID_T_4", "what": "added", "layer": "F.Cu", "layers": ["F.Cu", "F.Mask"],
+         "bbox_mm": [148.4, 104.4, 1.2, 1.2], "detail": "kikit:Fiducial Fiducial"},
+        {"kind": "mousebites", "what": "moved", "layer": None, "layers": ["F.Mask"], "holes": ["NPTH"],
+         "bbox_mm": [110.0, 70.25, 10.3, 0.5], "detail": "7 holes moved 5.000 mm", "refs": [f"KiKit_MB_1_{i}" for i in range(1, 8)]},
+        {"kind": "outline", "what": "modified", "feature": "tabs", "layer": "Edge.Cuts", "layers": ["Edge.Cuts"],
+         "bbox_mm": [105.0, 68.0, 20.0, 3.0], "detail": "+6/-6 shapes"},
+    ]
+    return {"slug": slug, "name": "demo_panel", "path": "panels/demo_panel", "status": "modified", "kind": "panel",
+            "panel": {"signals": ["kikit", "copies", "name"], "copies": 4,
+                      "sources": [{"path": "boards/demo_board/demo_board.kicad_pcb", "copies": 4}],
+                      "config": "panels/demo_panel/kikit.json", "fiducials": 8, "tooling": 4, "mousebites": 112},
+            "summary": {"sheets_changed": 0, "layers_changed": 4, "components": {"added": 0, "removed": 0, "moved": 0, "changed": 0, "minor": 0},
+                        "nets_changed": 0, "erc": None, "drc": {"new": 1, "fixed": 0}, "grid": None, "impedance": None,
+                        "panel": {"fiducial": 1, "mousebites": 1, "tabs": 1}},
+            "schematic": None, "pcb": pcb, "pcba3d": None, "bom": None, "netlist": None,
+            "checks": {"erc": None, "grid": None, "impedance": None,
+                       "drc": {"base_count": 3, "head_count": 4, "report": {"base": None, "head": None}, "fixed": [],
+                               "new": [{"severity": "warning", "type": "npth_inside_courtyard", "description": "NPTH inside courtyard",
+                                        "items": ["NPTH pad of KiKit_MB_1_1", "Footprint J1"], "pos_mm": [111.0, 70.5]}]}},
+            "errors": []}
+
+
 def make(out: Path) -> dict:
     if (out / "p").exists():
         shutil.rmtree(out / "p")
@@ -634,7 +662,7 @@ def make(out: Path) -> dict:
         "base": {"sha": "1111111aaaaaaa2222222bbbbbbb3333333ccccc", "ref": "main", "short": "1111111"},
         "head": {"sha": "4444444ddddddd5555555eeeeeee6666666fffff", "ref": "feature/sensors", "short": "4444444"},
         "repo": {"url": "https://github.com/example/boards", "blob": "https://github.com/example/boards/blob/{sha}/{path}"},
-        "projects": [demo_board(out), sensor_breakout(out), old_adapter(out)],
+        "projects": [demo_board(out), sensor_breakout(out), old_adapter(out), demo_panel(out)],
         "fonts": {"faces": [{"face": "Poppins", "status": "missing", "files": ["head:boards/demo_board/demo_board.kicad_pcb"],
                              "substitute": "DejaVu Sans Bold"}],
                   "missing": ["Poppins"], "warning": "Font 'Poppins' is not available in CI; …", "errors": [], "checked": True,

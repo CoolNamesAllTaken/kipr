@@ -62,11 +62,13 @@ export type LayersOptions = {
   substrate?: string | null;
   /** Cut out of the drawing: what is under the stage shows through. */
   holes?: Hole[] | null;
+  /** World area to rasterise over (default: the stage bounds), e.g. a drawing sheet past the board. */
+  rect?: Bounds | null;
 };
 /** Where a repeat places its content: turned `rotation` degrees CCW about the world origin, then moved by (x, y). */
 export type Placement = { x?: number; y?: number; rotation?: number };
 export type FaceContent = { type: 'face'; board: BoardDescription; side: 'top' | 'bottom'; palette: BoardPalette | BoardPaletteOptions; options: BoardLayerOptions };
-export type LayersContent = { type: 'layers'; layers: StackLayer[]; options: Omit<LayersOptions, 'outline'> & { outline: Ring[] | null } };
+export type LayersContent = { type: 'layers'; layers: StackLayer[]; options: Omit<LayersOptions, 'outline' | 'rect'> & { outline: Ring[] | null }; rect?: Bounds | null };
 export type RepeatContent = { type: 'repeat'; content: Content; placements: Placement[]; rect: Bounds | null };
 export type DiffContent = {
   type: 'diff'; base: DiffSide; head: DiffSide; regions: boolean;

@@ -3,7 +3,7 @@ import type { Object3D, Group, Box3, Mesh, MeshStandardMaterial } from 'three';
 export type Vec2 = [number, number];
 
 /** A component in KiCad mm (y down). `assembly` + `box` [x0, y0, x1, y1]: a module that claims the solids inside its box. */
-export interface Component { ref: string; x: number; y: number; side?: 'top' | 'bottom'; assembly?: boolean; box?: [number, number, number, number] | [number, number, number, number, number, number] }
+export interface Component { ref: string; /** the designator node names carry when it isn't ref (panel copies) */ name?: string; x: number; y: number; side?: 'top' | 'bottom'; assembly?: boolean; box?: [number, number, number, number] | [number, number, number, number, number, number] }
 /** A candidate node in the board frame (mm, y up): origin and bounding-box middle. */
 export interface MatchNode { name?: string; x: number; y: number; cx: number; cy: number; cz?: number }
 export interface MatchResult {
